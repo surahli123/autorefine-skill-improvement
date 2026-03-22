@@ -41,7 +41,7 @@ If `autoresearch-<skill>/` doesn't exist in the target directory:
 ```
 7. Copy `dashboard.html` from this skill's directory, replace `{{SKILL_NAME}}` in title
 
-If workspace exists **with** `state.json`: read it and print pipeline status. If `session-log.json` exists, rename to `session-log-<session_start from existing file, colons replaced with dashes>.json` and create a fresh one.
+If workspace exists **with** `state.json`: read it and print pipeline status. If `session-log.json` exists, rename to `session-log-<session_start from existing file, colons replaced with dashes>.json` and create a fresh one. If `session-log.json` does not exist (pre-v2 workspace), create it now.
 
 If workspace exists **without** `state.json` (created by a different tool): back up to `autoresearch-<skill>-prev/` and create a fresh workspace. The backup preserves prior artifacts as ground truth for Phase 2 comparison.
 
@@ -171,7 +171,7 @@ Record in `error-analysis-traces.md`:
 
 **Consistency check (after >=5 reviews):** After each judgment, scan prior traces with the same cluster ID. If any share a cluster but received different Pass/Fail verdicts, flag it: "T03 and T07 both match C2 but you marked T03 Pass and T07 Fail — want to revisit?" Append flags to `session-log.json` entries: `{"phase": "3", "type": "consistency_flag", "detail": "T03 and T07 match C2, judged differently"}`
 
-**Mid-phase resume:** Track `traces_reviewed` in state.json. Next session says: "You reviewed N of M traces. Continue with T-XX?"
+**Mid-phase resume:** Track `traces_reviewed` and `sampled_trace_ids` (e.g., `["T03","T07","T12",...]`) in state.json. Next session re-uses the same sample set and says: "You reviewed N of M sampled traces. Continue with T-XX?"
 
 ### Step 6: Build failure taxonomy
 After all traces reviewed, cluster failure notes into categories. Let categories EMERGE — do NOT use existing eval categories as starting taxonomy. Present to user for approval.
