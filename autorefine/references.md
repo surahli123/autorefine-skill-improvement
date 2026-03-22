@@ -1,4 +1,4 @@
-# Skill Improver References
+# AutoRefine References
 
 Read when: user asks "why this order", "why can't I skip to autoresearch", or needs the v2.0 audit rubric.
 

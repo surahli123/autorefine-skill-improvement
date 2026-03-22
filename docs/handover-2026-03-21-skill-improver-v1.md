@@ -1,4 +1,6 @@
-# Handover: Skill-Improver v1.0
+> **Note:** This skill was renamed to **autorefine** on 2026-03-21. See `docs/autorefine-naming-distribution-design.md`. Source moved from `skill-improver/` to `autorefine/`.
+
+# Handover: Skill-Improver v1.0 (now AutoRefine)
 
 ## Project
 - **Name:** Skill Improvement

@@ -1,9 +1,9 @@
 ---
-name: skill-improver
+name: autorefine
 description: Iterate and improve any skill using eval-grounded autoresearch. Combines v2.0 design audit, Hamel's Three Gulfs eval methodology, and Karpathy-style mutation optimization. Use when you want to assess skill quality, build evals from scratch, run error analysis, or optimize a skill through experiments.
 ---
 
-# Skill Improver
+# AutoRefine
 
 Guided pipeline for improving any skill — from zero evals to optimized and validated.
 
@@ -11,7 +11,7 @@ Three gulfs to cross, in order: **Comprehension** (what does this skill actually
 
 ## Quick Start
 
-Point at a skill directory: `/skill-improver path/to/my-skill/`
+Point at a skill directory: `/autorefine path/to/my-skill/`
 The agent detects your progress and picks up where you left off.
 
 ## Preflight
@@ -37,13 +37,15 @@ If `autoresearch-<skill>/` doesn't exist in the target directory:
 5. Generate empty `changelog.md` and `eval-suite.md` from formats shown in Phase 7
 6. Copy `dashboard.html` from this skill's directory, replace `{{SKILL_NAME}}` in title
 
-If workspace exists: read `state.json` and print pipeline status.
+If workspace exists **with** `state.json`: read it and print pipeline status.
+
+If workspace exists **without** `state.json` (created by a different tool): back up to `autoresearch-<skill>-prev/` and create a fresh workspace. The backup preserves prior artifacts as ground truth for Phase 2 comparison.
 
 ## Pipeline Status
 
 Print at every session start:
 ```
-Skill Improver: <name>
+AutoRefine: <name>
 ================================================================
 Gulf 1: Comprehension
   Phase 1: Design Audit          [STATUS]
@@ -114,6 +116,12 @@ Check existing test inputs in the skill directory. If fewer than 15 diverse inpu
 
 ### Step 2: Run the skill
 Invoke the target skill on each fixture (15-25 inputs). Save each output to `traces/trace-T01.md` through `traces/trace-T25.md`.
+
+**Session-spanning skills:** Some skills run *during* an entire session (e.g., tracing, monitoring, coaching) rather than producing output on a single input. For these:
+- Don't try to invoke the skill 15+ times — it's not a one-shot tool.
+- Instead, create **synthetic output fixtures** that simulate what the skill would produce across different scenarios (clean session, error-heavy, short session, edge cases).
+- Also include any **real outputs** from prior runs if they exist (e.g., from a previous autoresearch).
+- The goal is the same: give the human diverse outputs to review. The generation method adapts to the skill type.
 
 ### Step 3: Human reviews outputs
 Present traces in batches of 5. User can stop after any batch.
@@ -275,7 +283,25 @@ python3 -m http.server 8080
 
 6. **Keep rate matters more than final score.** 60% → 85% through 4 keeps out of 10 teaches more than 95% → 100% in 1.
 
-7. **Dashboard needs HTTP serving.** `python3 -m http.server 8080` from the autoresearch directory. Direct `file://` won't work (CORS).
+7. **High Phase 3 fail rates are expected.** A 60-100% fail rate in error analysis means your fixtures are diverse and your reviewer is rigorous — this is healthy. It produces a rich failure taxonomy that drives meaningful evals. A low fail rate (<30%) usually means the fixtures are too easy or the reviewer is too generous.
+
+8. **Dashboard needs HTTP serving.** `python3 -m http.server 8080` from the autoresearch directory. Direct `file://` won't work (CORS). Dashboard also requires internet for Chart.js CDN — if blocked, download `chart.umd.min.js` locally and update the script src.
+
+9. **Never run two sessions on the same skill.** state.json has no locking. Parallel sessions will overwrite each other's results, producing corrupted state and lost experiments.
+
+10. **"Invoke" means "read and follow."** When this skill says "invoke eval-audit" or "dispatch the grader subagent," it means: read that skill's SKILL.md and follow its instructions inline. Not all agents support direct skill invocation — reading the instructions works everywhere.
+
+## When AutoRefine Doesn't Help
+
+These are failure modes of autorefine itself. Know when to step back.
+
+1. **Everything scores "At Standard" but the skill is still bad.** The design audit checks structural patterns (Gotchas, voice, disclosure). A well-structured skill can still produce wrong outputs. If Phase 1 passes but users complain, skip to Phase 3 (error analysis) — the problem is in the logic, not the structure.
+
+2. **Phase 3 fail rate is very low (<20%).** This usually means your fixtures aren't diverse enough, or you're being too generous in review. Add harder fixtures — edge cases, adversarial inputs, inputs from different domains. If fail rate is still low, the skill may actually be good and autorefine isn't needed.
+
+3. **AutoResearch loop plateaus — no improvement after 3+ experiments.** Your evals may not be discriminating enough (too easy or too binary to capture nuance). Or the skill's failure mode requires architectural change, not prompt mutation. Consider: rewriting the skill from scratch vs. mutating it, or adding new eval dimensions you haven't measured.
+
+4. **Fixtures don't represent real usage.** If all your test inputs are clean, well-formatted examples but real users send messy, ambiguous inputs, the autoresearch loop optimizes for the wrong surface. Include at least 3-5 "ugly" real-world inputs in your fixture set.
 
 ## References
 
