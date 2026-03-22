@@ -11,6 +11,9 @@ MARKER="AUTOREFINE_RW_PROBE_c4f9e2"
 TEST_DIR=$(mktemp -d)
 TEST_SKILL="$TEST_DIR/SKILL.md"
 
+# Clean up temp directory on error (normal exit keeps it for user to inspect)
+trap 'echo ""; echo "Cleaned up: $TEST_DIR"; rm -rf "$TEST_DIR"' ERR
+
 # --- Create test skill with a Read when: gated section ---
 cat > "$TEST_SKILL" << 'SKILL_EOF'
 ---
