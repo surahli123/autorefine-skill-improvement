@@ -23,7 +23,7 @@ Built the **skill-improver meta-skill** — a standalone, portable tool for iter
 
 ## Next Steps (Priority Order)
 
-1. **Full end-to-end test** — Run Phases 1-3 on a real skill (e.g., notebooklm) with actual trace generation and human review. This is the real validation — the quick test only did Phase 1.
+1. **Full end-to-end test on ds-trace** — Run Phases 1-3 on `ds-productivity-agents/skills/ds-trace/` (user's own skill). ds-trace is more deterministic than ds-review (structured output, binary evals) — better for validating skill-improver itself. Existing `autoresearch-ds-trace/` artifacts provide ground truth. Phase 2 should match the existing eval findings. Phase 3 is the real test: run ds-trace on 20+ inputs and have user review outputs.
 
 2. **Add Phases 4-6 to SKILL.md (v1.1)** — ~90 lines covering Gulf 2 (Expand Inputs, Write Judges, Validate Judges). Stubs already exist with Hamel skill integration notes. Estimated: ~410 lines total, still under 500.
 
