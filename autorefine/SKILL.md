@@ -138,7 +138,7 @@ Select 8-10 traces for human review using stratified sampling instead of reviewi
 | Fixture source | generated / real / synthetic | Step 1 origin |
 | Planted flaw | yes / no | Step 1 fixture spec |
 
-Sample one trace per dimension value, plus 2-3 from underrepresented combinations. If no metadata is available, fall back to random selection of 8 traces.
+Ensure every dimension value is represented at least once in the sample, plus 2-3 traces from underrepresented combinations. If no metadata is available, fall back to random selection of 8 traces.
 
 Tell the user: "Selected 8/22 traces: 3 short, 3 long, 2 planted-flaw. Strategy: stratified by input length + flaw presence."
 
@@ -147,7 +147,7 @@ Append to `session-log.json` entries: `{"phase": "3", "type": "sampling", "detai
 For methodology rationale, see `references.md > Smart Sampling Methodology`.
 
 ### Step 4: Preliminary clustering
-Before human review begins, assign each sampled trace a lightweight category ID (C1, C2, C3...) based on surface patterns — output length, section structure, tool usage, error presence. Target 3-5 clusters. If fewer than 3 emerge, the traces may be too homogeneous — note this and skip consistency checks. These are rough groupings to enable consistency checks, not the final taxonomy.
+Before human review begins, assign each sampled trace a lightweight category ID (C1, C2, C3...) based on surface patterns — e.g., output length, section structure, score range, error presence (adapt to the skill type). Target 3-5 clusters. If fewer than 3 emerge, the traces may be too homogeneous — note this and skip consistency checks. These are rough groupings to enable consistency checks, not the final taxonomy.
 
 Write cluster assignments to `error-analysis-traces.md` header:
 ```
@@ -169,12 +169,12 @@ Record in `error-analysis-traces.md`:
 | T01 | fixture-name.md | C2 | FAIL | Location references too vague |
 ```
 
-**Consistency check (after >=5 reviews):** After each judgment, scan prior traces with the same cluster ID. If any share a cluster but received different Pass/Fail verdicts, flag it: "T03 and T07 both match C2 but you marked T03 Pass and T07 Fail — want to revisit?" Append flags to `session-log.json` entries: `{"phase": "3", "type": "consistency_flag", "detail": "T03 and T07 match C2, judged differently"}`
+**Consistency check (after >=5 reviews):** After each judgment, scan prior traces with the same cluster ID. If any share a cluster but received different Pass/Fail verdicts, flag it: "T03 and T07 both match C2 but you marked T03 Pass and T07 Fail — want to revisit?" Append flags to `session-log.json` entries: `{"phase": "3", "type": "consistency_flag", "detail": "T03 and T07 match C2, judged differently"}`. If the user confirms both verdicts, log the resolution too.
 
 **Mid-phase resume:** Track `traces_reviewed` and `sampled_trace_ids` (e.g., `["T03","T07","T12",...]`) in state.json. Next session re-uses the same sample set and says: "You reviewed N of M sampled traces. Continue with T-XX?"
 
 ### Step 6: Build failure taxonomy
-After all traces reviewed, cluster failure notes into categories. Let categories EMERGE — do NOT use existing eval categories as starting taxonomy. Present to user for approval.
+After all traces reviewed, cluster failure notes into categories. Let categories EMERGE — do NOT use existing eval categories as starting taxonomy. If fewer than 3 failures emerged from the sampled set, consider reviewing additional un-sampled traces before building the taxonomy. Present to user for approval.
 
 Write `failure-taxonomy.md`:
 ```
