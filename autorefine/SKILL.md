@@ -52,8 +52,11 @@ Gulf 1: Comprehension
   Phase 2: Eval Audit             [STATUS]
   Phase 3: Error Analysis         [STATUS]  [N/M traces]
   >>> Gate: Approve taxonomy      [STATUS] <<<
-Gulf 2: Specification  (v1.1)
-  Phase 4-6: Judges               [NOT AVAILABLE YET]
+Gulf 2: Specification
+  Phase 4: Expand Inputs           [STATUS]  [N fixtures]
+  Phase 5: Write Judges            [STATUS]  [N code / N judge]
+  Phase 6: Validate Judges         [STATUS]  [TPR/TNR]
+  >>> Gate: Approve judges         [STATUS] <<<
 Gulf 3: Generalization
   Phase 7: AutoResearch Loop      [STATUS]  [best score]
 ================================================================
@@ -187,15 +190,199 @@ This produces more systematically diverse fixtures than ad hoc generation.
 
 ---
 
-## Phases 4-6: Specification (v1.1)
+## Phase 4: Expand Inputs
 
-These phases close the Gulf of Specification. They will be added in v1.1 after validating Gulf 1 on a real skill. Summary of what they do:
+Build a diverse, labeled fixture set and split it for judge training and validation.
 
-- **Phase 4: Expand Inputs** — Use `generate-synthetic-data` (Hamel) or manual generation to build 30+ diverse fixtures with dimension-based tuples. Split into train/dev/test sets.
-- **Phase 5: Write Judges** — Use `write-judge-prompt` (Hamel) to create binary LLM-as-judge evaluators grounded in the failure taxonomy from Phase 3. Each judge needs: task/criterion definition, Pass/Fail definitions, 3+ few-shot examples from train split, structured JSON output. Do NOT use dev/test examples as few-shots (data leakage).
-- **Phase 6: Validate Judges** — Use `validate-evaluator` (Hamel) to calibrate each judge against a golden dataset. Run judge on dev split → measure TPR/TNR → inspect disagreements → refine prompt → repeat until TPR >90% AND TNR >90%. Final measurement on held-out test split. Apply Rogan-Gladen correction for production estimates.
+### Step 1: Inventory existing fixtures
+Count labeled fixtures from Phase 3 (`traces/` directory). Record Pass/Fail counts.
 
-**Gulf 2 Gate:** After Phase 6, user must approve judges before autoresearch begins.
+### Step 2: Define dimensions
+Choose 3 failure-prone dimensions based on the Phase 3 failure taxonomy. Each dimension is an axis of variation that targets where the skill fails.
+
+```
+Dimension 1: [Name] — [What it captures]
+  Values: [value_a, value_b, value_c, ...]
+```
+
+Example for ds-trace: Session Length × Domain Type × Error Density.
+
+### Step 3: Generate fixtures via tuples
+1. Draft 15-20 tuples (dimension combinations) with user feedback. The user knows which combinations are realistic.
+2. Use an LLM to generate 10 more tuples, varying across dimensions.
+3. Convert each tuple to a concrete test input (the fixture content).
+4. Combine with Phase 3's existing fixtures.
+
+**Target: 30-40 total labeled fixtures.** This is pragmatic for skill improvement — users have limited attention and token budgets. TPR/TNR will be directional, not statistically rigorous.
+
+### Step 4: Split into train / dev / test
+Split following Hamel's methodology — train is small because it's ONLY for few-shot examples in judge prompts:
+
+| Split | Size | Purpose | Rules |
+|-------|------|---------|-------|
+| **Train** | ~15% (5-6 fixtures) | Few-shot examples for judge prompts | Only clear-cut Pass and Fail cases |
+| **Dev** | ~42% (13-17 fixtures) | Iterative judge refinement | Never include in judge prompts |
+| **Test** | ~43% (13-17 fixtures) | Final unbiased measurement | Do NOT look at during development |
+
+Write `fixtures-manifest.md` documenting: fixture ID, which split, Pass/Fail label, source (Phase 3 or Phase 4).
+
+### Enhancement: generate-synthetic-data (Hamel)
+If available, use `generate-synthetic-data` for systematic tuple generation. Adaptations for skills:
+- Hamel targets ~100 traces → use 30-40 for skills (attention + token pragmatism)
+- Hamel's Step 6 says "run through full pipeline" → for session-spanning skills, generate synthetic output fixtures instead (same adaptation as Phase 3)
+
+**Output:** `fixtures-manifest.md` in workspace with labeled, split fixture inventory.
+**State:** Mark phase 4 complete, advance to phase 5.
+
+---
+
+## Phase 5: Write Judges
+
+Build evaluators for each eval in the suite. Code-based for deterministic checks, LLM judges only for subjective criteria.
+
+### Step 1: Classify evals as code-based or judge-based
+Review each eval in `eval-suite.md`. Exhaust code-based options before reaching for an LLM judge:
+
+| Check type | Use when | Implementation |
+|-----------|----------|----------------|
+| **Code-based** | Eval can be verified by counting, regex, or field presence | Bash/grep/python one-liner |
+| **LLM judge** | Eval requires semantic judgment (quality, depth, reasoning) | Judge prompt with 4 components |
+
+Examples of code-based: "Does the trace mention ≥4 distinct tool types?" → count tool names. "Does 'What went wrong' say 'nothing'?" → regex check.
+
+Examples requiring LLM judge: "Is the artifact an actual code snippet vs tool metadata?" → requires semantic understanding. "Does the decision include genuine reasoning?" → requires judgment.
+
+Write the classification to `eval-classification.md`:
+```
+| Eval | Type | Implementation |
+|------|------|----------------|
+| E1: Tool breadth | CODE | grep -c distinct tool names in Execution blocks, check ≥4 |
+| E6: Artifact capture | JUDGE | LLM judge: is the artifact real code or just a tool name? |
+```
+
+### Step 2: Build code-based evaluators
+For each code-based eval, write the check as a one-liner or short script. Test on 3 fixtures (1 known Pass, 1 known Fail, 1 borderline) to verify.
+
+### Step 3: Build LLM judge prompts
+For each judge-based eval, write a prompt with **all 4 components**:
+
+**Component 1 — Task and criterion:**
+```
+You are an evaluator assessing whether [specific criterion from failure taxonomy].
+```
+One failure mode per judge. Never bundle multiple criteria.
+
+**Component 2 — Pass/Fail definitions:**
+```
+PASS: [what success looks like — concrete, observable]
+FAIL: [what failure looks like — concrete, with examples from Phase 3 traces]
+```
+These definitions come directly from the eval-suite.md entries.
+
+**Component 3 — Few-shot examples (from TRAIN split only):**
+Include at least 3 examples: one clear Pass, one clear Fail, one borderline. Borderline examples teach nuance and are the most valuable.
+
+Each example must include a **critique** (detailed assessment) BEFORE the verdict. This forces the judge to articulate reasoning.
+
+```
+### Example 1: PASS
+Input: [fixture excerpt]
+Critique: [why this passes — reference specific evidence]
+Result: Pass
+
+### Example 2: FAIL
+Input: [fixture excerpt]
+Critique: [why this fails — reference what's missing or wrong]
+Result: Fail
+
+### Example 3: PASS (borderline)
+Input: [fixture excerpt]
+Critique: [why this narrowly passes despite appearing weak]
+Result: Pass
+```
+
+**NEVER use dev or test examples as few-shots.** This is data leakage.
+
+**Component 4 — Structured output:**
+```json
+{
+  "critique": "string — detailed assessment before verdict",
+  "result": "Pass or Fail"
+}
+```
+Critique before verdict — forces reasoning before commitment.
+
+### Step 4: Write judges to workspace
+Save each judge prompt to `judges/judge-E{N}-{name}.md`. Save code-based checks to `judges/code-E{N}-{name}.sh` or inline in the classification doc.
+
+### Enhancement: write-judge-prompt (Hamel)
+If available, invoke `write-judge-prompt` for each judge-based eval. It enforces the 4-component structure and provides guidance on model selection and what to feed the judge.
+
+**Output:** `eval-classification.md` + `judges/` directory with all evaluators.
+**State:** Mark phase 5 complete, advance to phase 6.
+
+---
+
+## Phase 6: Validate Judges
+
+Calibrate LLM judges against human labels. Code-based evals skip this phase (they're deterministic).
+
+### Step 1: Run judges on dev split
+For each LLM judge, run it on every fixture in the dev split. Compare judge verdicts to human labels.
+
+### Step 2: Compute TPR and TNR per judge
+
+```
+TPR = (judge says Pass AND human says Pass) / (human says Pass)
+TNR = (judge says Fail AND human says Fail) / (human says Fail)
+```
+
+**Target: TPR >90% AND TNR >90%.** With 30-40 total fixtures (~15 dev), these are directional — treat them as signal, not proof.
+
+### Step 3: Inspect disagreements
+For each case where judge disagrees with human:
+
+| Type | Judge | Human | Action |
+|------|-------|-------|--------|
+| False Pass | Pass | Fail | Judge too lenient → strengthen Fail definitions or add edge-case examples |
+| False Fail | Fail | Pass | Judge too strict → clarify Pass definitions or adjust examples |
+
+### Step 4: Iterate
+Refine judge prompts and re-run on dev set. Repeat until TPR and TNR stabilize.
+
+**If alignment stalls:**
+- Both low → use a more capable model for the judge
+- One metric low → inspect disagreements for that metric specifically
+- Both plateau below 80% → decompose the criterion into smaller, more atomic checks
+
+### Step 5: Final measurement on test split
+Run each judge **exactly once** on the held-out test set. Record final TPR and TNR. Do NOT iterate after seeing test results.
+
+Write `judge-validation-report.md`:
+```
+| Judge | Dev TPR | Dev TNR | Test TPR | Test TNR | Status |
+|-------|---------|---------|----------|----------|--------|
+| E6: Artifact | 92% | 88% | 89% | 85% | APPROVED |
+```
+
+### Gate: Gulf 2 Exit
+Generate `gate-report-gulf-2.md`:
+- Judge classification (code vs LLM)
+- Validation results (TPR/TNR per judge)
+- Code-based eval test results
+- Decision: "Approve these judges for autoresearch?"
+
+**STOP. Wait for user approval before Phase 7.**
+
+### Enhancement: validate-evaluator (Hamel)
+If available, invoke `validate-evaluator` for deeper calibration. Adaptations for skills:
+- Hamel targets ~100 labeled examples → use 30-40 for skills
+- Hamel recommends Rogan-Gladen correction → skip for skills (not enough data for meaningful correction)
+- Hamel recommends bootstrap CI → skip for skills (same reason)
+- The core protocol applies: dev iteration → test once → report TPR/TNR
+
+**Output:** `judge-validation-report.md` + `gate-report-gulf-2.md` in workspace.
+**State:** Mark phase 6 complete. Record validation results.
 
 ---
 
