@@ -60,7 +60,7 @@ assert_contains() {
     local haystack="$1"
     local needle="$2"
     local desc="$3"
-    if echo "$haystack" | grep -q "$needle"; then
+    if echo "$haystack" | grep -qF "$needle"; then
         pass_test "$desc"
     else
         fail_test "$desc (could not find '$needle')"
@@ -72,7 +72,7 @@ assert_not_contains() {
     local haystack="$1"
     local needle="$2"
     local desc="$3"
-    if echo "$haystack" | grep -q "$needle"; then
+    if echo "$haystack" | grep -qF "$needle"; then
         fail_test "$desc (unexpectedly found '$needle')"
     else
         pass_test "$desc"
@@ -275,7 +275,29 @@ else
     fail_test "Some session-log.json appends missing 'detail' key"
 fi
 
-# 2j. Phase step cross-references are internally consistent
+# 2j. Override entries have 'reason' key
+OVERRIDE_APPENDS=$(grep 'type.*override' "$SKILL_MD" | grep 'session-log')
+ALL_HAVE_REASON=true
+while IFS= read -r line; do
+    echo "$line" | grep -qF '"reason"' || ALL_HAVE_REASON=false
+done <<< "$OVERRIDE_APPENDS"
+if $ALL_HAVE_REASON; then
+    pass_test "All override session-log entries have 'reason' key"
+else
+    fail_test "Some override session-log entries missing 'reason' key"
+fi
+
+# 2k. Gotcha numbering is sequential with no gaps
+GOTCHA_NUMBERS=$(grep -oE '^[0-9]+\.' "$SKILL_MD" | sed -n '/^[0-9]/p' | sed 's/\.//' | sort -n | uniq)
+GOTCHAS_SECTION=$(sed -n '/^## Gotchas/,/^## /p' "$SKILL_MD")
+GOTCHA_NUMS_IN_SECTION=$(echo "$GOTCHAS_SECTION" | grep -oE '^[0-9]+\.' | sed 's/\.//' | sort -n)
+EXPECTED_GOTCHAS=$(seq 1 $(echo "$GOTCHA_NUMS_IN_SECTION" | tail -1))
+assert_eq "$GOTCHA_NUMS_IN_SECTION" "$EXPECTED_GOTCHAS" "Gotcha numbering is sequential (no gaps)"
+
+# 2l. state.json has schema_version field
+assert_contains "$SKILL_CONTENT" '"schema_version"' "state.json schema has schema_version"
+
+# 2m. Phase step cross-references are internally consistent
 # Phase 3 Step 3 references "Phase 4 dimensions" — Phase 4 must define dimensions
 PHASE4_SECTION=$(sed -n '/^## Phase 4:/,/^## Phase 5:/p' "$SKILL_MD")
 assert_contains "$PHASE4_SECTION" "Define dimensions" "Phase 4 has 'Define dimensions' step (referenced by Phase 3 Step 3)"

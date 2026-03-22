@@ -25,23 +25,23 @@ The agent detects your progress and picks up where you left off.
 If `autoresearch-<skill>/` doesn't exist in the target directory:
 
 1. Create `autoresearch-<skill>/` and `autoresearch-<skill>/traces/`
-2. Generate `state.json` (note: `loop_iteration` and `locked_judges` are used by Feature 5 Loop-Back — initialize them now, they activate when Phase 7 loops back to Phase 5):
+2. Generate `state.json` (v2 scaffolding — `loop_iteration` and `locked_judges` are used by later features):
 ```json
-{"skill_name":"<name>","skill_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[]}
+{"schema_version":2,"skill_name":"<name>","skill_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[]}
 ```
 3. Generate empty `results.json`:
 ```json
 {"skill_name":"<name>","status":"running","current_experiment":0,"baseline_score":null,"best_score":null,"experiments":[],"eval_breakdown":[]}
 ```
 4. Generate `results.tsv` with header: `experiment\tscore\tmax_score\tpass_rate\tstatus\tdescription`
-5. Generate empty `changelog.md` (format in Phase 7) and `eval-suite.md` (format in Phase 3 Step 7)
-6. Generate `session-log.json`:
+5. Generate empty `changelog.md` (format in Phase 7), `eval-suite.md` (format in Phase 3 Step 7), and `error-analysis-traces.md` (format in Phase 3 Step 4)
+6. Generate `session-log.json`. Each entry has `{phase, type, detail}`. Override entries add a `reason` key:
 ```json
 {"skill":"<name>","session_start":"<ISO-timestamp>","entries":[]}
 ```
 7. Copy `dashboard.html` from this skill's directory, replace `{{SKILL_NAME}}` in title
 
-If workspace exists **with** `state.json`: read it and print pipeline status. If `session-log.json` exists, rename to `session-log-<session_start value from existing file>.json` and create a fresh one.
+If workspace exists **with** `state.json`: read it and print pipeline status. If `session-log.json` exists, rename to `session-log-<session_start from existing file, colons replaced with dashes>.json` and create a fresh one.
 
 If workspace exists **without** `state.json` (created by a different tool): back up to `autoresearch-<skill>-prev/` and create a fresh workspace. The backup preserves prior artifacts as ground truth for Phase 2 comparison.
 
