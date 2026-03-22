@@ -1,0 +1,3 @@
+# Session artifacts — keep locally, never push
+docs/
+handover-*.md
