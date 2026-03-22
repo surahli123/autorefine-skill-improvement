@@ -38,6 +38,15 @@ autorefine/          <- Install this folder to ~/.claude/skills/autorefine/
 
 See [`autorefine/README.md`](autorefine/README.md) for full documentation: pipeline details, dashboard features, requirements, and limitations.
 
+## Credits & Inspiration
+
+AutoRefine was inspired by and built upon:
+
+- **[Ole Nurijanian's autoresearch-as-skill](https://x.com/nurijanian/status/2035257434365976671)** — The original repo that applied Karpathy's autoresearch to Claude Code skills. AutoRefine extends this with Hamel's Three Gulfs methodology, a design audit pipeline, and a Karpathy-style dashboard.
+- **[Karpathy's autoresearch](https://github.com/karpathy/autoresearch)** — The mutation-test-keep/discard loop
+- **[Hamel Husain's eval methodology](https://hamel.dev)** — The Three Gulfs framework (Comprehension → Specification → Generalization)
+- **[Thariq Shubair's skill design patterns](https://www.anthropic.com)** — The v2.0 audit dimensions (Gotchas, instructional voice, progressive disclosure)
+
 ## Development
 
 The `dev/` directory contains development artifacts (not needed for installation):

@@ -81,7 +81,7 @@ Serve it: `cd autoresearch-<skill>/ && python3 -m http.server 8080`
 | `dashboard.html` | Chart.js dashboard with Karpathy step graph, auto-refreshes every 10s |
 | `references.md` | Three Gulfs framework + v2.0 audit rubric, loaded on demand |
 
-Inspired by [Karpathy's autoresearch](https://github.com/karpathy/autoresearch) (the mutation loop), [Hamel Husain's eval methodology](https://hamel.dev) (the Three Gulfs), and [Thariq's skill design patterns](https://www.anthropic.com) (the v2.0 audit).
+Inspired by [Ole Nurijanian's autoresearch-as-skill](https://x.com/nurijanian/status/2035257434365976671) (the original repo applying Karpathy's autoresearch to Claude Code skills), [Karpathy's autoresearch](https://github.com/karpathy/autoresearch) (the mutation loop), [Hamel Husain's eval methodology](https://hamel.dev) (the Three Gulfs), and [Thariq's skill design patterns](https://www.anthropic.com) (the v2.0 audit).
 
 ## Limitations
 
