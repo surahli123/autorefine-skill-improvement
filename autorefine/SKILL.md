@@ -27,7 +27,7 @@ If `autoresearch-<skill>/` doesn't exist in the target directory:
 1. Create `autoresearch-<skill>/` and `autoresearch-<skill>/traces/`
 2. Generate `state.json`:
 ```json
-{"skill_name":"<name>","skill_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false}
+{"skill_name":"<name>","skill_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[]}
 ```
 3. Generate empty `results.json`:
 ```json
@@ -35,9 +35,13 @@ If `autoresearch-<skill>/` doesn't exist in the target directory:
 ```
 4. Generate `results.tsv` with header: `experiment\tscore\tmax_score\tpass_rate\tstatus\tdescription`
 5. Generate empty `changelog.md` (format in Phase 7) and `eval-suite.md` (format in Phase 3 Step 5)
-6. Copy `dashboard.html` from this skill's directory, replace `{{SKILL_NAME}}` in title
+6. Generate `session-log.json`:
+```json
+{"skill":"<name>","session_start":"<ISO-timestamp>","entries":[]}
+```
+7. Copy `dashboard.html` from this skill's directory, replace `{{SKILL_NAME}}` in title
 
-If workspace exists **with** `state.json`: read it and print pipeline status.
+If workspace exists **with** `state.json`: read it and print pipeline status. If `session-log.json` exists, rename to `session-log-<previous-timestamp>.json` and create a fresh one.
 
 If workspace exists **without** `state.json` (created by a different tool): back up to `autoresearch-<skill>-prev/` and create a fresh workspace. The backup preserves prior artifacts as ground truth for Phase 2 comparison.
 
@@ -122,8 +126,36 @@ Invoke the target skill on each fixture (15-25 inputs). Save each output to `tra
 - Also include any **real outputs** from prior runs if they exist (e.g., from a previous autoresearch).
 - The goal is the same: give the human diverse outputs to review. The generation method adapts to the skill type.
 
-### Step 3: Human reviews outputs
-Present traces in batches of 5. User can stop after any batch.
+### Step 3: Smart sampling
+Select 8-10 traces for human review using stratified sampling instead of reviewing all 20+. Show the user which traces were selected and why.
+
+**If Phase 4 dimensions exist (re-run):** sample by those richer dimensions.
+**Otherwise (first run):** infer lightweight dimensions from trace properties:
+
+| Dimension | Values | Source |
+|-----------|--------|--------|
+| Input length | short / medium / long | Character count of fixture |
+| Fixture source | generated / real / synthetic | Step 1 origin |
+| Planted flaw | yes / no | Step 1 fixture spec |
+
+Sample one trace per dimension value, plus 2-3 from underrepresented combinations. If no metadata is available, fall back to random selection of 8 traces.
+
+Tell the user: "Selected 8/22 traces: 3 short, 3 long, 2 planted-flaw. Strategy: stratified by input length + flaw presence."
+
+Append to `session-log.json` entries: `{"phase": 3, "type": "sampling", "detail": "Selected N/M traces covering K dimensions"}`
+
+For methodology rationale, see `references.md > Smart Sampling Methodology`.
+
+### Step 4: Preliminary clustering
+Before human review begins, assign each sampled trace a lightweight category ID (C1, C2, C3...) based on surface patterns — output length, section structure, tool usage, error presence. These are rough groupings to enable consistency checks, not the final taxonomy.
+
+Write cluster assignments to `error-analysis-traces.md` header:
+```
+Preliminary clusters: C1=short outputs, C2=tool-heavy, C3=error-present
+```
+
+### Step 5: Human reviews outputs
+Present sampled traces one at a time (not batches — this enables consistency checks between judgments).
 
 For each trace, ask:
 - **Pass or Fail?** (overall quality judgment)
@@ -132,14 +164,16 @@ For each trace, ask:
 
 Record in `error-analysis-traces.md`:
 ```
-| # | Fixture | Pass/Fail | Notes |
-|---|---------|-----------|-------|
-| T01 | fixture-name.md | FAIL | Location references too vague, used "throughout" |
+| # | Fixture | Cluster | Pass/Fail | Notes |
+|---|---------|---------|-----------|-------|
+| T01 | fixture-name.md | C2 | FAIL | Location references too vague |
 ```
+
+**Consistency check (after >=5 reviews):** After each judgment, scan prior traces with the same cluster ID. If any share a cluster but received different Pass/Fail verdicts, flag it: "T03 and T07 both match C2 but you marked T03 Pass and T07 Fail — want to revisit?" Append flags to `session-log.json` entries: `{"phase": 3, "type": "consistency_flag", "detail": "T03 and T07 match C2, judged differently"}`
 
 **Mid-phase resume:** Track `traces_reviewed` in state.json. Next session says: "You reviewed N of M traces. Continue with T-XX?"
 
-### Step 4: Build failure taxonomy
+### Step 6: Build failure taxonomy
 After all traces reviewed, cluster failure notes into categories. Let categories EMERGE — do NOT use existing eval categories as starting taxonomy. Present to user for approval.
 
 Write `failure-taxonomy.md`:
@@ -149,7 +183,7 @@ Write `failure-taxonomy.md`:
 2. ...
 ```
 
-### Step 5: Generate initial eval suite
+### Step 7: Generate initial eval suite
 Convert top failure categories into binary evals in `eval-suite.md`:
 ```
 EVAL 1: [Name]
@@ -161,14 +195,17 @@ Why: [which observed failure mode this catches]
 
 ### Gate: Gulf 1 Exit
 Generate `gate-report-gulf-1.md`:
-- Traces reviewed, fail rate, top failure categories
-- Proposed eval suite (from Step 5)
+- Traces sampled (N of M total), sampling strategy, fail rate, top failure categories
+- Any consistency flags raised during review
+- Proposed eval suite (from Step 7)
 - Decision: "Approve this taxonomy and eval suite to proceed?"
+
+**Override logging:** The user may remove eval categories or reject taxonomy entries here. Each override requires a one-line reason. Append to `session-log.json` entries: `{"phase": "gate_1", "type": "override", "detail": "Removed E4", "reason": "Skill delegates verification downstream"}`
 
 **STOP. Wait for user approval before Phase 4.**
 
 
-**State:** Mark phase 3 complete. Record traces_reviewed and taxonomy summary.
+**State:** Mark phase 3 complete. Record traces_reviewed, sampling_strategy, and taxonomy summary.
 
 ---
 
@@ -353,6 +390,8 @@ Generate `gate-report-gulf-2.md`:
 - Code-based eval test results
 - Decision: "Approve these judges for autoresearch?"
 
+**Override logging:** The user may reject judges or modify criteria here. Each override requires a one-line reason. Append to `session-log.json` entries: `{"phase": "gate_2", "type": "override", "detail": "<what was changed>", "reason": "<why>"}`
+
 **STOP. Wait for user approval before Phase 7.**
 
 
@@ -444,6 +483,8 @@ python3 -m http.server 8080
 9. **Never run two sessions on the same skill.** state.json has no locking. Parallel sessions will overwrite each other's results, producing corrupted state and lost experiments.
 
 10. **"Invoke" means "read and follow."** When this skill says "invoke eval-audit" or "dispatch the grader subagent," it means: read that skill's SKILL.md and follow its instructions inline. Not all agents support direct skill invocation — reading the instructions works everywhere.
+
+11. **session-log.json is best-effort.** If the log is corrupted or missing, recreate it and continue. If writes fail, warn and proceed without logging. The session log enhances — it never blocks.
 
 ## When AutoRefine Doesn't Help
 
