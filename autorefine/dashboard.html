@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Autorefine {{SKILL_NAME}}: Improving your skills via Auto Research</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; color: #2d3436; padding: 24px; }
+  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+  h1 { font-size: 24px; font-weight: 600; }
+  .subtitle { font-size: 13px; color: #636e72; margin-top: 4px; }
+  .status { padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; }
+  .status-running { background: #dfe6e9; color: #636e72; }
+  .status-complete { background: #00b894; color: white; }
+  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .card-label { font-size: 12px; color: #b2bec3; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .card-value { font-size: 28px; font-weight: 700; }
+  .card-value.green { color: #00b894; }
+  .card-value.blue { color: #0984e3; }
+  .card-value.orange { color: #fdcb6e; }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .chart-container { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+  .chart-container.full { grid-column: 1 / -1; }
+  .chart-container h2 { font-size: 16px; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; padding: 10px 12px; border-bottom: 2px solid #dfe6e9; color: #636e72; font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  td { padding: 10px 12px; border-bottom: 1px solid #f1f2f6; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+  .badge-baseline { background: #74b9ff; color: white; }
+  .badge-keep { background: #00b894; color: white; }
+  .badge-discard { background: #fd79a8; color: white; }
+  .eval-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .eval-name { width: 200px; font-size: 13px; }
+  .eval-bar { flex: 1; height: 8px; border-radius: 4px; background: #dfe6e9; overflow: hidden; }
+  .eval-fill { height: 100%; border-radius: 4px; background: #00b894; transition: width 0.3s; }
+  .eval-pct { width: 50px; text-align: right; font-size: 13px; font-weight: 600; }
+  .refresh-note { text-align: center; color: #b2bec3; font-size: 12px; margin-top: 16px; }
+  canvas { max-height: 300px; }
+  .exp-row { cursor: pointer; }
+  .exp-row:hover { background: #f8f9fa; }
+  .exp-row td:first-child::before { content: '\25B6'; font-size: 10px; margin-right: 6px; color: #b2bec3; transition: transform 0.2s; display: inline-block; }
+  .exp-row.open td:first-child::before { transform: rotate(90deg); }
+  .changes-row { display: none; }
+  .changes-row.open { display: table-row; }
+  .changes-row td { padding: 0 12px 12px 32px; border-bottom: 1px solid #f1f2f6; }
+  .change-item { margin-bottom: 8px; }
+  .change-type { display: inline-block; padding: 1px 8px; border-radius: 8px; font-size: 11px; font-weight: 500; margin-right: 8px; }
+  .change-type.added { background: #d4edda; color: #155724; }
+  .change-type.modified { background: #fff3cd; color: #856404; }
+  .change-type.removed { background: #f8d7da; color: #721c24; }
+  .change-location { font-size: 12px; color: #636e72; margin-bottom: 2px; }
+  .change-snippet { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; background: #f1f2f6; padding: 6px 10px; border-radius: 6px; border-left: 3px solid #00b894; white-space: pre-wrap; word-break: break-word; }
+  @media (max-width: 768px) {
+    .cards { grid-template-columns: repeat(2, 1fr); }
+    .charts { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>Autorefine {{SKILL_NAME}}: Improving your skills via Auto Research</h1>
+    <div class="subtitle">Karpathy-style mutation optimization &middot; Auto-refreshes every 10s</div>
+  </div>
+  <span class="status status-running" id="statusBadge">Initializing...</span>
+</div>
+
+<!-- Metric Cards -->
+<div class="cards">
+  <div class="card">
+    <div class="card-label">Baseline</div>
+    <div class="card-value" id="baseline">--</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Best Score</div>
+    <div class="card-value green" id="best">--</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Experiments</div>
+    <div class="card-value blue" id="expCount">--</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Keep Rate</div>
+    <div class="card-value orange" id="keepRate">--</div>
+  </div>
+</div>
+
+<!-- Charts -->
+<div class="charts">
+  <!-- Chart 1: Bar chart (score per experiment) -->
+  <div class="chart-container">
+    <h2>Score Progression</h2>
+    <canvas id="barChart"></canvas>
+  </div>
+  <!-- Chart 2: Karpathy step graph (scatter + running best line) -->
+  <div class="chart-container">
+    <h2>Improvement Staircase</h2>
+    <canvas id="stepChart"></canvas>
+  </div>
+</div>
+
+<!-- Experiments Table -->
+<div class="chart-container full" style="margin-bottom: 24px;">
+  <h2>Experiments</h2>
+  <table>
+    <thead><tr><th>#</th><th>Score</th><th>Pass Rate</th><th>Status</th><th>Description</th></tr></thead>
+    <tbody id="expTable"></tbody>
+  </table>
+</div>
+
+<!-- Per-Eval Breakdown -->
+<div class="chart-container full">
+  <h2>Per-Eval Breakdown</h2>
+  <div id="evalBreakdown"></div>
+</div>
+
+<div class="refresh-note">Auto-refreshes every 10 seconds &middot; Serve with: python3 -m http.server 8080</div>
+
+<script>
+let barChart, stepChart;
+
+async function fetchData() {
+  try {
+    const res = await fetch('results.json?' + Date.now());
+    return await res.json();
+  } catch { return null; }
+}
+
+function statusColor(s) {
+  return s === 'keep' ? '#00b894' : s === 'discard' ? '#fd79a8' : '#74b9ff';
+}
+
+function badgeClass(s) {
+  return 'badge badge-' + s;
+}
+
+function truncate(str, n) {
+  return str.length > n ? str.slice(0, n) + '...' : str;
+}
+
+function updateCards(data) {
+  document.getElementById('baseline').textContent = data.baseline_score != null ? data.baseline_score + '%' : '--';
+  document.getElementById('best').textContent = data.best_score != null ? data.best_score + '%' : '--';
+  document.getElementById('expCount').textContent = data.experiments.length;
+
+  const kept = data.experiments.filter(e => e.status === 'keep').length;
+  const total = data.experiments.filter(e => e.status !== 'baseline').length;
+  document.getElementById('keepRate').textContent = total > 0 ? Math.round(kept / total * 100) + '%' : '--';
+
+  const badge = document.getElementById('statusBadge');
+  if (data.status === 'complete') {
+    badge.textContent = 'Complete';
+    badge.className = 'status status-complete';
+  } else {
+    badge.textContent = 'Running experiment ' + data.current_experiment + '...';
+    badge.className = 'status status-running';
+  }
+}
+
+function updateBarChart(data) {
+  const labels = data.experiments.map(e => 'Exp ' + e.id);
+  const scores = data.experiments.map(e => e.pass_rate);
+  const colors = data.experiments.map(e => statusColor(e.status));
+
+  if (barChart) barChart.destroy();
+  barChart = new Chart(document.getElementById('barChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ data: scores, backgroundColor: colors, borderRadius: 4 }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } }
+      }
+    }
+  });
+}
+
+function updateStepChart(data) {
+  const exps = data.experiments;
+  if (exps.length === 0) return;
+
+  // All experiments as scatter points
+  const discarded = exps.filter(e => e.status === 'discard').map(e => ({ x: e.id, y: e.pass_rate }));
+  const kept = exps.filter(e => e.status !== 'discard').map(e => ({ x: e.id, y: e.pass_rate }));
+
+  // Running maximum line (staircase) — only from kept/baseline experiments
+  const keptSorted = [...kept].sort((a, b) => a.x - b.x);
+  let runningMax = -Infinity;
+  const stepLine = [];
+  for (const pt of keptSorted) {
+    if (pt.y > runningMax) runningMax = pt.y;
+    stepLine.push({ x: pt.x, y: runningMax });
+  }
+
+  if (stepChart) stepChart.destroy();
+  stepChart = new Chart(document.getElementById('stepChart'), {
+    type: 'scatter',
+    data: {
+      datasets: [
+        {
+          label: 'Running Best',
+          data: stepLine,
+          showLine: true,
+          stepped: 'before',
+          borderColor: '#00695c',
+          borderWidth: 2,
+          pointRadius: 0,
+          fill: false,
+          order: 2
+        },
+        {
+          label: 'Discarded',
+          data: discarded,
+          backgroundColor: 'rgba(178,190,195,0.4)',
+          borderColor: 'rgba(178,190,195,0.6)',
+          pointRadius: 6,
+          pointStyle: 'circle',
+          order: 1
+        },
+        {
+          label: 'Kept',
+          data: kept,
+          backgroundColor: '#00b894',
+          borderColor: '#2d3436',
+          borderWidth: 1.5,
+          pointRadius: 7,
+          pointStyle: 'circle',
+          order: 0
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'bottom', labels: { usePointStyle: true, padding: 16 } },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) {
+              const exp = exps.find(e => e.id === ctx.parsed.x);
+              return exp ? truncate(exp.description, 60) + ' (' + exp.pass_rate + '%)' : '';
+            }
+          }
+        }
+      },
+      scales: {
+        x: { title: { display: true, text: 'Experiment #' }, ticks: { stepSize: 1 } },
+        y: { title: { display: true, text: 'Pass Rate %' }, ticks: { callback: v => v + '%' } }
+      }
+    }
+  });
+}
+
+function renderChanges(changes) {
+  if (!changes || changes.length === 0) return '<div style="color:#b2bec3;font-size:12px;">No change details recorded</div>';
+  return changes.map(c =>
+    `<div class="change-item">
+      <span class="change-type ${c.type}">${c.type}</span>
+      <span class="change-location">${c.location || ''}</span>
+      <div class="change-snippet">${escapeHtml(c.snippet || '')}</div>
+    </div>`
+  ).join('');
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function updateTable(data) {
+  const tbody = document.getElementById('expTable');
+  tbody.innerHTML = data.experiments.map(e => {
+    const hasChanges = e.changes && e.changes.length > 0;
+    return `<tr class="exp-row${hasChanges ? '' : ' no-changes'}" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+      <td>${e.id}</td>
+      <td>${e.score}/${e.max_score}</td>
+      <td>${e.pass_rate}%</td>
+      <td><span class="${badgeClass(e.status)}">${e.status}</span></td>
+      <td>${truncate(e.description, 80)}</td>
+    </tr>
+    <tr class="changes-row">
+      <td colspan="5">${renderChanges(e.changes)}</td>
+    </tr>`;
+  }).join('');
+}
+
+function updateEvals(data) {
+  const container = document.getElementById('evalBreakdown');
+  if (!data.eval_breakdown || data.eval_breakdown.length === 0) {
+    container.innerHTML = '<div style="color:#b2bec3;font-size:13px;">No eval data yet</div>';
+    return;
+  }
+  container.innerHTML = data.eval_breakdown.map(ev => {
+    const pct = Math.round(ev.pass_count / ev.total * 100);
+    return `<div class="eval-row">
+      <div class="eval-name">${ev.name}</div>
+      <div class="eval-bar"><div class="eval-fill" style="width:${pct}%"></div></div>
+      <div class="eval-pct">${pct}%</div>
+    </div>`;
+  }).join('');
+}
+
+async function refresh() {
+  const data = await fetchData();
+  if (!data) return;
+  updateCards(data);
+  updateBarChart(data);
+  updateStepChart(data);
+  updateTable(data);
+  updateEvals(data);
+}
+
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>
