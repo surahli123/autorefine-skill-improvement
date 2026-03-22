@@ -69,3 +69,53 @@ Only score if the skill has Python/JS scripts. Skip if none.
 - **Type hints on public signatures** — agents can reason about inputs/outputs
 - **`Use when:` docstrings** — agents know when to call each function
 - **`if __name__ == "__main__":` blocks** — runnable demos, not just importable code
+
+---
+
+## Hamel Integration Details
+
+Read when: `hamel_available` is true in state.json, or user asks about Hamel's eval skills integration.
+
+### Phase 2: eval-audit
+If `hamel_available` is true in state.json, invoke the `eval-audit` skill for deeper analysis. It runs the same 6 diagnostics above but with richer heuristics: flags class imbalance in metrics, detects stale analyses, and recommends specific next skills.
+
+**How to invoke:** Provide the eval artifacts (eval-suite.md, results files, fixture paths) as context. The skill produces a structured findings report with problem title, status, explanation, and recommended fix for each diagnostic.
+
+### Phase 3: error-analysis
+If `hamel_available` is true, invoke the `error-analysis` skill to structure the review process. Adaptations for skills vs. LLM pipelines:
+- Hamel's skill expects ~100 production traces → use 20-25 fixture outputs instead
+- Hamel's skill uses LLM-assisted clustering after ~30 traces → use manual clustering (our trace count is smaller)
+- Hamel's skill recommends random/stratified/outlier sampling → use fixture diversity instead (we control inputs)
+- The core protocol is the same: read every output → judge Pass/Fail → capture root cause (not explanation) → cluster into 5-10 categories → compute failure rates
+
+### Phase 3: generate-synthetic-data
+If `hamel_available` is true, use the `generate-synthetic-data` skill to prepare diverse fixtures in Step 1. It generates inputs via dimension-based tuples:
+1. Define 3 failure-prone dimensions (e.g., Document Type × Quality Level × Domain)
+2. Draft 20 tuples with user feedback
+3. LLM generates more tuples, user validates
+4. Convert tuples to natural language test inputs
+This produces more systematically diverse fixtures than ad hoc generation.
+
+### Phase 4: generate-synthetic-data
+If available, use `generate-synthetic-data` for systematic tuple generation. Adaptations for skills:
+- Hamel targets ~100 traces → use 30-40 for skills (attention + token pragmatism)
+- Hamel's Step 6 says "run through full pipeline" → for session-spanning skills, generate synthetic output fixtures instead (same adaptation as Phase 3)
+
+### Phase 5: write-judge-prompt
+If available, invoke `write-judge-prompt` for richer judge prompt engineering. Adaptations: Hamel assumes external API calls → use agent-as-judge instead (the coding agent evaluates inline).
+
+### Phase 6: validate-evaluator
+If available, invoke `validate-evaluator` for deeper calibration. Adaptations for skills:
+- Hamel targets ~100 labeled examples → use 30-40 for skills
+- Hamel recommends Rogan-Gladen correction → skip for skills (not enough data for meaningful correction)
+- Hamel recommends bootstrap CI → skip for skills (same reason)
+- The core protocol applies: dev iteration → test once → report TPR/TNR
+
+### Phase 7: skill-creator subagents
+If skill-creator is available, use its specialized subagents to strengthen the loop:
+
+**Grader** — After each experiment run, dispatch the grader subagent with the eval expectations and skill output. It returns structured pass/fail verdicts with evidence, verifies claims from the output, AND critiques the evals themselves (flags assertions that would pass bad outputs). Provide: expectations list, output files, transcript.
+
+**Comparator** — For rigorous A/B testing between the baseline and mutated skill, dispatch the comparator with both outputs (blinded — it doesn't know which is which). It scores on content + structure rubrics and picks a winner. Use when score deltas are small and you need confidence the mutation actually helped.
+
+**Analyzer** — After the comparator picks a winner, dispatch the analyzer with both skills + transcripts. It explains WHY the winner won and produces prioritized improvement suggestions. Use to inform your next mutation hypothesis.

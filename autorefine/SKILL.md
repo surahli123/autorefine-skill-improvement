@@ -100,10 +100,7 @@ Assess existing eval infrastructure, or document its absence.
 
 **If no evals exist:** Document: "No eval infrastructure. Phase 3 builds the foundation."
 
-### Enhancement: eval-audit (Hamel)
-If `hamel_available` is true in state.json, invoke the `eval-audit` skill for deeper analysis. It runs the same 6 diagnostics above but with richer heuristics: flags class imbalance in metrics, detects stale analyses, and recommends specific next skills.
-
-**How to invoke:** Provide the eval artifacts (eval-suite.md, results files, fixture paths) as context. The skill produces a structured findings report with problem title, status, explanation, and recommended fix for each diagnostic.
+**Enhancement:** If Hamel's evals-skills are available, see `references.md > Hamel Integration Details` for deeper methodology.
 
 **Output:** Write `eval-audit-report.md` with findings and remediation priorities.
 **State:** Mark phase 2 complete, advance to phase 3.
@@ -171,20 +168,7 @@ Generate `gate-report-gulf-1.md`:
 
 **STOP. Wait for user approval before Phase 4.**
 
-### Enhancement: error-analysis (Hamel)
-If `hamel_available` is true, invoke the `error-analysis` skill to structure the review process. Adaptations for skills vs. LLM pipelines:
-- Hamel's skill expects ~100 production traces → use 20-25 fixture outputs instead
-- Hamel's skill uses LLM-assisted clustering after ~30 traces → use manual clustering (our trace count is smaller)
-- Hamel's skill recommends random/stratified/outlier sampling → use fixture diversity instead (we control inputs)
-- The core protocol is the same: read every output → judge Pass/Fail → capture root cause (not explanation) → cluster into 5-10 categories → compute failure rates
-
-### Enhancement: generate-synthetic-data (Hamel)
-If `hamel_available` is true, use the `generate-synthetic-data` skill to prepare diverse fixtures in Step 1. It generates inputs via dimension-based tuples:
-1. Define 3 failure-prone dimensions (e.g., Document Type × Quality Level × Domain)
-2. Draft 20 tuples with user feedback
-3. LLM generates more tuples, user validates
-4. Convert tuples to natural language test inputs
-This produces more systematically diverse fixtures than ad hoc generation.
+**Enhancement:** If Hamel's evals-skills are available, see `references.md > Hamel Integration Details` for deeper methodology.
 
 **State:** Mark phase 3 complete. Record traces_reviewed and taxonomy summary.
 
@@ -226,10 +210,7 @@ Split following Hamel's methodology — train is small because it's ONLY for few
 
 Write `fixtures-manifest.md` documenting: fixture ID, which split, Pass/Fail label, source (Phase 3 or Phase 4).
 
-### Enhancement: generate-synthetic-data (Hamel)
-If available, use `generate-synthetic-data` for systematic tuple generation. Adaptations for skills:
-- Hamel targets ~100 traces → use 30-40 for skills (attention + token pragmatism)
-- Hamel's Step 6 says "run through full pipeline" → for session-spanning skills, generate synthetic output fixtures instead (same adaptation as Phase 3)
+**Enhancement:** If Hamel's evals-skills are available, see `references.md > Hamel Integration Details` for deeper methodology.
 
 **Output:** `fixtures-manifest.md` in workspace with labeled, split fixture inventory.
 **State:** Mark phase 4 complete. Record fixture_count, pass_count, fail_count, and split sizes in state.json. Advance to phase 5.
@@ -320,8 +301,7 @@ Result: Pass or Fail
 ### Step 4: Write judges to workspace
 Save each judge prompt to `judges/judge-E{N}-{name}.md`. Save code-based checks to `judges/code-E{N}-{name}.sh` or inline in the classification doc.
 
-### Enhancement: write-judge-prompt (Hamel)
-If available, invoke `write-judge-prompt` for richer judge prompt engineering. Adaptations: Hamel assumes external API calls → use agent-as-judge instead (the coding agent evaluates inline).
+**Enhancement:** If Hamel's evals-skills are available, see `references.md > Hamel Integration Details` for deeper methodology.
 
 **Output:** `eval-classification.md` + `judges/` directory with all evaluators.
 **State:** Mark phase 5 complete. Record code_eval_count, judge_eval_count in state.json. Advance to phase 6.
@@ -379,12 +359,7 @@ Generate `gate-report-gulf-2.md`:
 
 **STOP. Wait for user approval before Phase 7.**
 
-### Enhancement: validate-evaluator (Hamel)
-If available, invoke `validate-evaluator` for deeper calibration. Adaptations for skills:
-- Hamel targets ~100 labeled examples → use 30-40 for skills
-- Hamel recommends Rogan-Gladen correction → skip for skills (not enough data for meaningful correction)
-- Hamel recommends bootstrap CI → skip for skills (same reason)
-- The core protocol applies: dev iteration → test once → report TPR/TNR
+**Enhancement:** If Hamel's evals-skills are available, see `references.md > Hamel Integration Details` for deeper methodology.
 
 **Output:** `judge-validation-report.md` + `gate-report-gulf-2.md` in workspace.
 **State:** Mark phase 6 complete. Record validation results.
@@ -446,14 +421,7 @@ N\tX\tY\tZ%\tkeep\tdescription
   Say: "How many experiments do you want to run? Quick (3), Standard (5), or Deep (8-10)? Quick is best for low-priority skills, Deep for skills you use daily."
 - **Target baseline 60-80%.** If baseline >90%, evals are too easy — harden them first.
 
-### Enhancement: skill-creator subagents
-If skill-creator is available, use its specialized subagents to strengthen the loop:
-
-**Grader** — After each experiment run, dispatch the grader subagent with the eval expectations and skill output. It returns structured pass/fail verdicts with evidence, verifies claims from the output, AND critiques the evals themselves (flags assertions that would pass bad outputs). Provide: expectations list, output files, transcript.
-
-**Comparator** — For rigorous A/B testing between the baseline and mutated skill, dispatch the comparator with both outputs (blinded — it doesn't know which is which). It scores on content + structure rubrics and picks a winner. Use when score deltas are small and you need confidence the mutation actually helped.
-
-**Analyzer** — After the comparator picks a winner, dispatch the analyzer with both skills + transcripts. It explains WHY the winner won and produces prioritized improvement suggestions. Use to inform your next mutation hypothesis.
+**Enhancement:** If Hamel's evals-skills are available, see `references.md > Hamel Integration Details` for deeper methodology.
 
 ### Serving the Dashboard
 ```bash
