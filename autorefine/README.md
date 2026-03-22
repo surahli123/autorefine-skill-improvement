@@ -43,8 +43,11 @@ Gulf 1: Comprehension — What does this skill actually do?
   Phase 3: Error Analysis       YOU read 20+ outputs and build a failure taxonomy
   >>> Human Gate <<<             Approve taxonomy before proceeding
 
-Gulf 2: Specification — Do our judges measure what matters? (v1.1)
-  Phase 4-6: Write + validate automated judges
+Gulf 2: Specification — Do our judges measure what matters?
+  Phase 4: Expand Inputs           Dimension-based fixture generation + train/dev/test split
+  Phase 5: Write Judges            Code-based evals first, LLM judges for subjective criteria
+  Phase 6: Validate Judges         TPR/TNR calibration on dev split, final measurement on test
+  >>> Human Gate <<<             Approve judges before autoresearch
 
 Gulf 3: Generalization — Does it work on unseen inputs?
   Phase 7: AutoResearch Loop    Mutate → test → keep/discard (Karpathy-style)
@@ -83,7 +86,7 @@ Inspired by [Karpathy's autoresearch](https://github.com/karpathy/autoresearch) 
 
 ## Limitations
 
-- **Gulf 2 (Phases 4-6) not yet implemented.** v1.0 covers Gulf 1 + Gulf 3. Judge writing and validation coming in v1.1.
+- **Small fixture counts yield directional TPR/TNR.** With 30-40 fixtures (~15 dev), judge validation is signal, not proof. For rigorous validation, generate 100+ fixtures per Hamel's methodology.
 - **Dashboard requires internet** for Chart.js CDN. If your network blocks CDN access, download `chart.umd.min.js` locally.
 - **No concurrent sessions.** Don't run two autorefine sessions on the same skill — state.json has no locking.
 

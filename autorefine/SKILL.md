@@ -232,7 +232,7 @@ If available, use `generate-synthetic-data` for systematic tuple generation. Ada
 - Hamel's Step 6 says "run through full pipeline" → for session-spanning skills, generate synthetic output fixtures instead (same adaptation as Phase 3)
 
 **Output:** `fixtures-manifest.md` in workspace with labeled, split fixture inventory.
-**State:** Mark phase 4 complete, advance to phase 5.
+**State:** Mark phase 4 complete. Record fixture_count, pass_count, fail_count, and split sizes in state.json. Advance to phase 5.
 
 ---
 
@@ -261,7 +261,7 @@ Write the classification to `eval-classification.md`:
 ```
 
 ### Step 2: Build code-based evaluators
-For each code-based eval, write the check as a one-liner or short script. Test on 3 fixtures (1 known Pass, 1 known Fail, 1 borderline) to verify.
+For each code-based eval, write the check as a one-liner or short script. Test on 3 fixtures from the dev split (1 known Pass, 1 known Fail, 1 borderline) to verify.
 
 ### Step 3: Build LLM judge prompts
 For each judge-based eval, write a prompt with **all 4 components**:
@@ -319,7 +319,7 @@ Save each judge prompt to `judges/judge-E{N}-{name}.md`. Save code-based checks 
 If available, invoke `write-judge-prompt` for each judge-based eval. It enforces the 4-component structure and provides guidance on model selection and what to feed the judge.
 
 **Output:** `eval-classification.md` + `judges/` directory with all evaluators.
-**State:** Mark phase 5 complete, advance to phase 6.
+**State:** Mark phase 5 complete. Record code_eval_count, judge_eval_count in state.json. Advance to phase 6.
 
 ---
 
