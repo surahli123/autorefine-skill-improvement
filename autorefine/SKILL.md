@@ -246,7 +246,12 @@ N\tX\tY\tZ%\tkeep\tdescription
 - **One mutation per experiment.** Multi-variable changes make attribution impossible.
 - **Score the MUTATED copy, not the original.** Keep original SKILL.md untouched as the baseline.
 - **If score improves, the mutated copy becomes the new baseline** for next experiment.
-- **Budget cap:** Default 5 experiments. User can extend.
+- **Budget cap: ask the user before starting.** Present three options:
+  - **Quick (3 experiments)** — for low-priority skills or token-conscious users. Targets the 2-3 worst evals only.
+  - **Standard (5 experiments)** — default. Covers the major failure categories.
+  - **Deep (8-10 experiments)** — for critical skills the user wants to fully optimize. Extends into edge cases and sparse-trace handling.
+
+  Say: "How many experiments do you want to run? Quick (3), Standard (5), or Deep (8-10)? Quick is best for low-priority skills, Deep for skills you use daily."
 - **Target baseline 60-80%.** If baseline >90%, evals are too easy — harden them first.
 
 ### Enhancement: skill-creator subagents
