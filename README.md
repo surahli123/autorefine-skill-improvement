@@ -17,7 +17,31 @@ cp -r autorefine-skill-improvement/autorefine/ ~/.claude/skills/autorefine/
 /autorefine path/to/your-skill/
 ```
 
-Works on **Claude Code** or any compatible coding agent with Read/Write/Bash tools. No advanced tools required.
+Works on **Claude Code** or any compatible coding agent with Read/Write/Bash tools.
+
+**Strongly recommended:** Install [Hamel's evals-skills](https://github.com/hamelsmu/evals-skills) for the full pipeline (eval-audit, error-analysis, judge writing, judge validation).
+
+## Why AutoRefine? (vs. Skill-Creator or Raw AutoResearch)
+
+There are simpler tools. Here's why we built this one.
+
+**Skill-Creator (Anthropic's default)** tests whether a skill triggers correctly and compares outputs via blind A/B. It's great for building skills from scratch and optimizing descriptions. But it doesn't tell you *why* your skill fails or *what* your evals should measure. If your evals are wrong, skill-creator optimizes against the wrong target — and you won't know until users complain.
+
+**Raw AutoResearch (Karpathy-style)** runs a mutation loop: change the skill, test, keep or discard. Fast and effective — but it assumes you already have good evals. In practice, most skills have no evals, or evals that were brainstormed rather than grounded in observed failures. Optimizing against brainstormed evals is what Hamel calls "optimizing against a fantasy."
+
+**AutoRefine closes the gap** by adding Hamel's Three Gulfs before the optimization loop:
+
+1. **Gulf of Comprehension** — You read 20+ skill outputs yourself and build a failure taxonomy from what you actually see, not what you imagined. This is manual and irreplaceable.
+2. **Gulf of Specification** — You write judges grounded in those observed failures, then validate them (TPR/TNR >90%). Now your evals measure what actually matters.
+3. **Gulf of Generalization** — *Now* you run AutoResearch. The mutation loop optimizes against validated judges, not guesswork.
+
+**The lesson we learned the hard way:** Our ds-review skill hit 100% on its initial evals — and an eval audit revealed the 100% was "likely an artifact of measuring a narrow slice of quality." The evals were too easy, not the skill too good. AutoRefine exists so you don't make the same mistake.
+
+| Approach | Builds evals? | Grounds evals in observation? | Validates judges? | Optimizes? |
+|----------|:---:|:---:|:---:|:---:|
+| Skill-Creator | No (bring your own) | No | No | Yes (description + blind A/B) |
+| Raw AutoResearch | No (bring your own) | No | No | Yes (mutation loop) |
+| **AutoRefine** | **Yes (Phase 3)** | **Yes (error analysis)** | **Yes (Phase 6, v1.1)** | **Yes (Phase 7)** |
 
 ## Results
 
