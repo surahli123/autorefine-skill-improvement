@@ -18,7 +18,7 @@ The agent detects your progress and picks up where you left off.
 
 1. **Target exists.** Confirm the path contains a SKILL.md. If not, ask for the correct path.
 2. **Detect enhancements.** Search for Hamel's `eval-audit` and `error-analysis` skills. If found, note in state.json. These enhance but are NOT required.
-3. **Report tier:** Full (Hamel's detected) or Basic (core methodology only, works on any agent with Read/Write/Bash).
+3. **Report tier:** Full (Hamel's detected) or Basic (core methodology only, works on any agent with Read/Write/Bash). When Full tier, each phase has deeper methodology in `references.md > Hamel Integration Details`.
 
 ## Initialize Workspace
 
@@ -34,7 +34,7 @@ If `autoresearch-<skill>/` doesn't exist in the target directory:
 {"skill_name":"<name>","status":"running","current_experiment":0,"baseline_score":null,"best_score":null,"experiments":[],"eval_breakdown":[]}
 ```
 4. Generate `results.tsv` with header: `experiment\tscore\tmax_score\tpass_rate\tstatus\tdescription`
-5. Generate empty `changelog.md` and `eval-suite.md` from formats shown in Phase 7
+5. Generate empty `changelog.md` (format in Phase 7) and `eval-suite.md` (format in Phase 3 Step 5)
 6. Copy `dashboard.html` from this skill's directory, replace `{{SKILL_NAME}}` in title
 
 If workspace exists **with** `state.json`: read it and print pipeline status.
@@ -100,7 +100,6 @@ Assess existing eval infrastructure, or document its absence.
 
 **If no evals exist:** Document: "No eval infrastructure. Phase 3 builds the foundation."
 
-**Enhancement:** If Hamel's evals-skills are available, see `references.md > Hamel Integration Details` for deeper methodology.
 
 **Output:** Write `eval-audit-report.md` with findings and remediation priorities.
 **State:** Mark phase 2 complete, advance to phase 3.
@@ -168,7 +167,6 @@ Generate `gate-report-gulf-1.md`:
 
 **STOP. Wait for user approval before Phase 4.**
 
-**Enhancement:** If Hamel's evals-skills are available, see `references.md > Hamel Integration Details` for deeper methodology.
 
 **State:** Mark phase 3 complete. Record traces_reviewed and taxonomy summary.
 
@@ -197,7 +195,7 @@ Example for ds-trace: Session Length × Domain Type × Error Density.
 3. Convert each tuple to a concrete test input (the fixture content).
 4. Combine with Phase 3's existing fixtures.
 
-**Target: 30-40 total labeled fixtures.** This is pragmatic for skill improvement — users have limited attention and token budgets. TPR/TNR will be directional, not statistically rigorous.
+**Target: 30-40 total labeled fixtures** (directional TPR/TNR — see Phase 6 for measurement caveats).
 
 ### Step 4: Split into train / dev / test
 Split following Hamel's methodology — train is small because it's ONLY for few-shot examples in judge prompts:
@@ -210,7 +208,6 @@ Split following Hamel's methodology — train is small because it's ONLY for few
 
 Write `fixtures-manifest.md` documenting: fixture ID, which split, Pass/Fail label, source (Phase 3 or Phase 4).
 
-**Enhancement:** If Hamel's evals-skills are available, see `references.md > Hamel Integration Details` for deeper methodology.
 
 **Output:** `fixtures-manifest.md` in workspace with labeled, split fixture inventory.
 **State:** Mark phase 4 complete. Record fixture_count, pass_count, fail_count, and split sizes in state.json. Advance to phase 5.
@@ -301,7 +298,6 @@ Result: Pass or Fail
 ### Step 4: Write judges to workspace
 Save each judge prompt to `judges/judge-E{N}-{name}.md`. Save code-based checks to `judges/code-E{N}-{name}.sh` or inline in the classification doc.
 
-**Enhancement:** If Hamel's evals-skills are available, see `references.md > Hamel Integration Details` for deeper methodology.
 
 **Output:** `eval-classification.md` + `judges/` directory with all evaluators.
 **State:** Mark phase 5 complete. Record code_eval_count, judge_eval_count in state.json. Advance to phase 6.
@@ -359,7 +355,6 @@ Generate `gate-report-gulf-2.md`:
 
 **STOP. Wait for user approval before Phase 7.**
 
-**Enhancement:** If Hamel's evals-skills are available, see `references.md > Hamel Integration Details` for deeper methodology.
 
 **Output:** `judge-validation-report.md` + `gate-report-gulf-2.md` in workspace.
 **State:** Mark phase 6 complete. Record validation results.
@@ -418,10 +413,8 @@ N\tX\tY\tZ%\tkeep\tdescription
   - **Standard (5 experiments)** — default. Covers the major failure categories.
   - **Deep (8-10 experiments)** — for critical skills the user wants to fully optimize. Extends into edge cases and sparse-trace handling.
 
-  Say: "How many experiments do you want to run? Quick (3), Standard (5), or Deep (8-10)? Quick is best for low-priority skills, Deep for skills you use daily."
 - **Target baseline 60-80%.** If baseline >90%, evals are too easy — harden them first.
 
-**Enhancement:** If Hamel's evals-skills are available, see `references.md > Hamel Integration Details` for deeper methodology.
 
 ### Serving the Dashboard
 ```bash
@@ -440,15 +433,11 @@ python3 -m http.server 8080
 
 2. **Error analysis cannot be automated.** Phase 3 requires the human to read outputs. An LLM doing it for you is comprehension theater.
 
-3. **100% on narrow evals ≠ quality.** Target 60-80% baseline. If baseline passes everything, harden your evals.
+3. **Let categories emerge.** In Phase 3, don't start with existing eval categories. Fresh eyes, fresh taxonomy.
 
-4. **Let categories emerge.** In Phase 3, don't start with existing eval categories. Fresh eyes, fresh taxonomy.
+4. **Keep rate matters more than final score.** 60% → 85% through 4 keeps out of 10 teaches more than 95% → 100% in 1.
 
-5. **One mutation per experiment.** Multi-variable changes make attribution impossible.
-
-6. **Keep rate matters more than final score.** 60% → 85% through 4 keeps out of 10 teaches more than 95% → 100% in 1.
-
-7. **High Phase 3 fail rates are expected.** A 60-100% fail rate in error analysis means your fixtures are diverse and your reviewer is rigorous — this is healthy. It produces a rich failure taxonomy that drives meaningful evals. A low fail rate (<30%) usually means the fixtures are too easy or the reviewer is too generous.
+5. **High Phase 3 fail rates are expected.** A 60-100% fail rate in error analysis means your fixtures are diverse and your reviewer is rigorous — this is healthy. A low fail rate (<30%) usually means the fixtures are too easy or the reviewer is too generous.
 
 8. **Dashboard needs HTTP serving.** `python3 -m http.server 8080` from the autoresearch directory. Direct `file://` won't work (CORS). Dashboard also requires internet for Chart.js CDN — if blocked, download `chart.umd.min.js` locally and update the script src.
 
