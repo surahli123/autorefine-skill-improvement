@@ -1,0 +1,8 @@
+# Internal session artifacts — never commit to remote
+docs/
+handover-*.md
+**/session-logs/
+**/autoresearch-*/
+
+# OS
+.DS_Store
