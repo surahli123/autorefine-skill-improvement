@@ -4,22 +4,24 @@
 
 A guided pipeline for iteratively improving any skill — from zero evals to optimized and validated. Point it at a skill, and it walks you through design audit, error analysis, and mutation-based optimization with a live dashboard.
 
-<!-- TODO: Add dashboard screenshot showing Karpathy step graph with real improvement data -->
+![AutoRefine Dashboard — ds-trace improving from 36.1% to 88.9% across 9 experiments](assets/dashboard-ds-trace.png)
 
 ## Results
 
-We used autorefine on two of our own skills:
+We used autorefine on our own skills:
 
-| Skill | Baseline | Final | Experiments | Key mutation |
-|-------|----------|-------|-------------|--------------|
-| ds-review | 85.7% | 100% | 3 | Location precision rule — banned vague references like "entire document" |
-| ds-trace | 60% | 100% | 3 | Tool diversity rule + substantive "what went wrong" requirement |
+| Skill | Baseline | Final | Experiments | Kept | Key improvements |
+|-------|----------|-------|-------------|------|-----------------|
+| ds-trace | 36.1% | 88.9% | 9 | 9/9 (100%) | Artifact capture, verification steps, decision reasoning depth, tool diversity self-check, short session minimum, bottleneck diagnosis |
+| ds-review | 85.7% | 100% | 3 | 2/3 (67%) | Location precision rule, severity calibration for prescriptive docs |
+
+**ds-trace detail:** 9 binary evals across 8 synthetic traces. Every experiment improved the score — the staircase in the dashboard shows steady improvement from 36% to 89% with zero discards. Each mutation added one specific instruction to the skill (artifact field, verification step, decision tradeoff, etc.).
 
 ## Install
 
 ```bash
-git clone https://github.com/<your-username>/autorefine.git
-cp -r autorefine/ ~/.claude/skills/autorefine/
+git clone https://github.com/surahli123/autorefine-skill-improvement.git
+cp -r autorefine-skill-improvement/autorefine/ ~/.claude/skills/autorefine/
 ```
 
 Or copy the 3 core files (`SKILL.md`, `dashboard.html`, `references.md`) directly to `~/.claude/skills/autorefine/`.
