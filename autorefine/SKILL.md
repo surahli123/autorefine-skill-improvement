@@ -238,33 +238,40 @@ If available, use `generate-synthetic-data` for systematic tuple generation. Ada
 
 ## Phase 5: Write Judges
 
-Build evaluators for each eval in the suite. Code-based for deterministic checks, LLM judges only for subjective criteria.
+Build evaluators for each eval in the suite. Code-based for deterministic checks, agent-as-judge for subjective criteria. No external API needed — the coding agent itself evaluates.
 
 ### Step 1: Classify evals as code-based or judge-based
-Review each eval in `eval-suite.md`. Exhaust code-based options before reaching for an LLM judge:
+Review each eval in `eval-suite.md`. Exhaust code-based options before reaching for an agent-as-judge:
 
 | Check type | Use when | Implementation |
 |-----------|----------|----------------|
 | **Code-based** | Eval can be verified by counting, regex, or field presence | Bash/grep/python one-liner |
-| **LLM judge** | Eval requires semantic judgment (quality, depth, reasoning) | Judge prompt with 4 components |
+| **Agent-as-judge** | Eval requires semantic judgment (quality, depth, reasoning) | Judge prompt file — agent reads + evaluates inline |
 
 Examples of code-based: "Does the trace mention ≥4 distinct tool types?" → count tool names. "Does 'What went wrong' say 'nothing'?" → regex check.
 
-Examples requiring LLM judge: "Is the artifact an actual code snippet vs tool metadata?" → requires semantic understanding. "Does the decision include genuine reasoning?" → requires judgment.
+Examples requiring agent-as-judge: "Is the artifact an actual code snippet vs tool metadata?" → requires semantic understanding. "Does the decision include genuine reasoning?" → requires judgment.
 
 Write the classification to `eval-classification.md`:
 ```
 | Eval | Type | Implementation |
 |------|------|----------------|
 | E1: Tool breadth | CODE | grep -c distinct tool names in Execution blocks, check ≥4 |
-| E6: Artifact capture | JUDGE | LLM judge: is the artifact real code or just a tool name? |
+| E6: Artifact capture | AGENT | Agent-as-judge: is the artifact real code or just a tool name? |
 ```
 
 ### Step 2: Build code-based evaluators
 For each code-based eval, write the check as a one-liner or short script. Test on 3 fixtures from the dev split (1 known Pass, 1 known Fail, 1 borderline) to verify.
 
-### Step 3: Build LLM judge prompts
-For each judge-based eval, write a prompt with **all 4 components**:
+### Step 3: Build agent-as-judge prompts
+For each judge-based eval, write a judge prompt file. **The coding agent itself IS the judge** — no external API needed. The agent reads the judge prompt + fixture and produces a verdict inline. This works on any coding agent (Claude Code, Gemini CLI, in-house agents).
+
+**How to run a judge:** Dispatch a subagent (or evaluate in main context) with:
+1. Read `judges/judge-E{N}-{name}.md` (the judge prompt)
+2. Read the fixture file being evaluated
+3. Output the verdict as: `Critique: [reasoning]` then `Result: Pass or Fail`
+
+Each judge prompt has **4 components:**
 
 **Component 1 — Task and criterion:**
 ```
@@ -282,7 +289,7 @@ These definitions come directly from the eval-suite.md entries.
 **Component 3 — Few-shot examples (from TRAIN split only):**
 Include at least 3 examples: one clear Pass, one clear Fail, one borderline. Borderline examples teach nuance and are the most valuable.
 
-Each example must include a **critique** (detailed assessment) BEFORE the verdict. This forces the judge to articulate reasoning.
+Each example must include a **critique** BEFORE the verdict — this forces the agent to reason before committing.
 
 ```
 ### Example 1: PASS
@@ -303,20 +310,18 @@ Result: Pass
 
 **NEVER use dev or test examples as few-shots.** This is data leakage.
 
-**Component 4 — Structured output:**
-```json
-{
-  "critique": "string — detailed assessment before verdict",
-  "result": "Pass or Fail"
-}
+**Component 4 — Output format:**
+The agent must output critique before verdict:
 ```
-Critique before verdict — forces reasoning before commitment.
+Critique: [detailed assessment — reference specific evidence from the fixture]
+Result: Pass or Fail
+```
 
 ### Step 4: Write judges to workspace
 Save each judge prompt to `judges/judge-E{N}-{name}.md`. Save code-based checks to `judges/code-E{N}-{name}.sh` or inline in the classification doc.
 
 ### Enhancement: write-judge-prompt (Hamel)
-If available, invoke `write-judge-prompt` for each judge-based eval. It enforces the 4-component structure and provides guidance on model selection and what to feed the judge.
+If available, invoke `write-judge-prompt` for richer judge prompt engineering. Adaptations: Hamel assumes external API calls → use agent-as-judge instead (the coding agent evaluates inline).
 
 **Output:** `eval-classification.md` + `judges/` directory with all evaluators.
 **State:** Mark phase 5 complete. Record code_eval_count, judge_eval_count in state.json. Advance to phase 6.
@@ -325,10 +330,10 @@ If available, invoke `write-judge-prompt` for each judge-based eval. It enforces
 
 ## Phase 6: Validate Judges
 
-Calibrate LLM judges against human labels. Code-based evals skip this phase (they're deterministic).
+Calibrate agent-as-judge evaluators against human labels. Code-based evals skip this phase (they're deterministic).
 
 ### Step 1: Run judges on dev split
-For each LLM judge, run it on every fixture in the dev split. Compare judge verdicts to human labels.
+For each agent-as-judge eval, read the judge prompt file + each dev fixture and produce a verdict. Compare agent verdicts to human labels. Run judges sequentially (not parallel) to avoid context contamination between evaluations.
 
 ### Step 2: Compute TPR and TNR per judge
 
@@ -351,7 +356,7 @@ For each case where judge disagrees with human:
 Refine judge prompts and re-run on dev set. Repeat until TPR and TNR stabilize.
 
 **If alignment stalls:**
-- Both low → use a more capable model for the judge
+- Both low → strengthen the judge prompt with more specific examples and sharper definitions
 - One metric low → inspect disagreements for that metric specifically
 - Both plateau below 80% → decompose the criterion into smaller, more atomic checks
 
