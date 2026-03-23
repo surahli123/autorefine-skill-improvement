@@ -4,6 +4,28 @@
 
 A guided pipeline for iteratively improving any skill — from zero evals to optimized and validated. Point it at a skill, and it walks you through design audit, error analysis, and mutation-based optimization with a live dashboard.
 
+## Why AutoRefine? (vs. Skill-Creator or Raw AutoResearch)
+
+There are simpler tools. Here's why we built this one.
+
+**Skill-Creator (Anthropic's default)** builds assertion-based evals, reviews transcripts after running the skill, and optimizes descriptions via iterative refinement with train/test splits. It's great for building skills from scratch and tuning trigger accuracy. But its eval grounding is partial — assertions are drafted post-run, not from a systematic failure taxonomy. And judge validation is qualitative (graders critique weak assertions) rather than quantitative (no TPR/TNR calibration).
+
+**Raw AutoResearch (Karpathy-style)** runs a mutation loop: change the skill, test, keep or discard. Fast and effective — but it assumes you already have good evals. In practice, most skills have no evals, or evals that were brainstormed rather than grounded in observed failures.
+
+**AutoRefine closes the gap** by adding Hamel's Three Gulfs before the optimization loop:
+
+1. **Gulf of Comprehension** — You read 20+ skill outputs yourself and build a failure taxonomy from what you actually see, not what you imagined. This is manual and irreplaceable.
+2. **Gulf of Specification** — You write judges grounded in those observed failures, then validate them (TPR/TNR >90%). Now your evals measure what actually matters.
+3. **Gulf of Generalization** — *Now* you run AutoResearch. The mutation loop optimizes against validated judges, not guesswork.
+
+| Approach | Builds evals? | Grounds in observation? | Validates judges? | Optimizes? |
+|----------|:---:|:---:|:---:|:---:|
+| Skill-Creator | Yes (assertion-based) | Partial (post-run transcript review) | Partial (qualitative, no TPR/TNR) | Yes (description tuning + feedback loop) |
+| Raw AutoResearch | No (bring your own) | No | No | Yes (mutation loop) |
+| **AutoRefine** | **Yes (Phase 3 taxonomy)** | **Yes (human error analysis)** | **Yes (Phase 6 TPR/TNR)** | **Yes (Phase 7 mutation loop)** |
+
+The real differentiator is **rigor**, not capability. Skill-creator builds evals and observes outputs, but doesn't formalize failures into a taxonomy or calibrate judges quantitatively. AutoRefine's advantage is the structured pipeline with human gates — so you know your evals measure what actually matters before you optimize against them.
+
 ## Results
 
 We used autorefine on two of our own skills:
