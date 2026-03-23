@@ -33,9 +33,11 @@ Header: `experiment\tscore\tmax_score\tpass_rate\tstatus\tdescription`
 {"skill":"<name>","session_start":"<ISO-timestamp>","entries":[]}
 ```
 Entry types:
-- Standard: `{"phase":"3","type":"sampling","detail":"..."}`
+- Design audit: `{"phase":"1","type":"design_audit","detail":"Scored 4 dims: Gotchas=Present, Voice=Partial, Disclosure=Missing, Scripts=N/A"}`
+- Sampling: `{"phase":"3","type":"sampling","detail":"Selected 8/15 traces, stratified by 3 dimensions"}`
 - Consistency flag: `{"phase":"3","type":"consistency_flag","detail":"T03 and T07 match C2, judged differently"}`
-- Override: `{"phase":"gate_1","type":"override","detail":"...","reason":"..."}`
+- Gate decision: `{"phase":"gate_1","type":"gate_decision","detail":"APPROVED"}`
+- Override: `{"phase":"gate_1","type":"override","detail":"Removed E4","reason":"..."}`
 - Judge gap: `{"phase":"7","type":"judge_gap","experiment":4,"agent_verdict":"keep","user_verdict":"discard","reason":"..."}`
 
 ---

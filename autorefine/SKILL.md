@@ -17,6 +17,8 @@ Guided skill improvement pipeline. Point at a skill: `/autorefine path/to/my-ski
    - **Standard** — Full pipeline (Phases 1-7). For skills needing eval methodology from scratch. ~60-90 min.
    - **Deep** — Standard + expanded fixture set (30+ fixtures). For critical skills requiring statistical rigor.
 
+   **Quick requires an existing approved workspace** — both gates approved + populated `eval-suite.md` + `judges/`. If user requests Quick without these: explain that Quick uses existing scorers (it doesn't build them), and suggest Standard instead.
+
    If workspace already has approved gates (both `gulf_1` and `gulf_2` = `"approved"` in state.json) AND `eval-suite.md` + `judges/` exist: offer Quick as default. Otherwise default to Standard.
 
 ## Initialize Workspace
@@ -65,7 +67,7 @@ Read the target SKILL.md. Score 4 dimensions: **Gotchas**, **Voice**, **Progress
 
 Detailed rubric: `references.md > V2.0 Design Audit Rubric`.
 
-**Output:** `design-audit.md`. **State:** advance to Phase 2.
+**Output:** `design-audit.md`. Append to session-log.json: `{"phase":"1","type":"design_audit","detail":"Scored 4 dims: Gotchas=X, Voice=X, Disclosure=X, Scripts=X"}`. **State:** advance to Phase 2.
 
 ---
 
@@ -102,7 +104,7 @@ Close the Gulf of Comprehension. **Most important phase. CANNOT BE AUTOMATED.**
 **Step 7: Generate eval suite.** Convert top failures into binary evals. Write `eval-suite.md`. Format: `references.md > Eval Suite Template`.
 
 ### Gate: Gulf 1 Exit
-Generate `gate-report-gulf-1.md` with: sample stats, fail rate, categories, consistency flags, proposed evals. **Override logging:** if user removes evals or rejects categories, append: `{"phase":"gate_1","type":"override","detail":"Removed E4","reason":"..."}`
+Generate `gate-report-gulf-1.md` with: sample stats, fail rate, categories, consistency flags, proposed evals. Append to session-log.json: `{"phase":"gate_1","type":"gate_decision","detail":"APPROVED"}` (or REJECTED). **Override logging:** if user removes evals or rejects categories, also append: `{"phase":"gate_1","type":"override","detail":"Removed E4","reason":"..."}`
 
 **STOP. Wait for user approval.**
 
@@ -146,7 +148,7 @@ Calibrate agent-as-judge evaluators against human labels. Code-based evals skip 
 **Step 5:** Final measurement on test split. Run once, record, do NOT iterate. Write `judge-validation-report.md`.
 
 ### Gate: Gulf 2 Exit
-Generate `gate-report-gulf-2.md` with: classification, TPR/TNR per judge, code eval results. **Override logging:** if user rejects judges, append: `{"phase":"gate_2","type":"override","detail":"...","reason":"..."}`
+Generate `gate-report-gulf-2.md` with: classification, TPR/TNR per judge, code eval results. Append to session-log.json: `{"phase":"gate_2","type":"gate_decision","detail":"APPROVED"}` (or REJECTED). **Override logging:** if user rejects judges, also append: `{"phase":"gate_2","type":"override","detail":"...","reason":"..."}`
 
 **STOP. Wait for user approval.**
 
@@ -162,14 +164,14 @@ The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + 
 
 **The Loop:**
 1. Run baseline on all fixtures, score against all evals → Experiment 0
-2. LOOP: analyze failures → hypothesize ONE change → mutate a copy → test → keep (score up) or discard (score same/worse) → record in results.json + results.tsv + changelog.md
+2. LOOP: analyze failures → hypothesize ONE change → mutate a copy → test → **present verdict to user** (show mutation diff, score change, proposed keep/discard) → user accepts or overrides → record in results.json + results.tsv + changelog.md
 3. Repeat until all evals pass or budget exhausted
 
 **Key rules:** One mutation per experiment. Mutate a copy (`<skill>-optimized.md`), not the original. If score improves, the mutated copy becomes the new baseline for the next experiment. Target baseline 60-80% (>90% = evals too easy). Formats: `references.md > Results & Changelog Schemas`.
 
 **Confidence-weighted scoring:** Weight each eval by its judge's validated TPR/TNR. Code evals = 1.0. Agent evals = (TPR+TNR)/2. Experiment score = weighted sum / sum of weights.
 
-**Judge gap detection:** When user overrides a Phase 7 keep/discard, log as `type: "judge_gap"` in session-log.json (distinct from `type: "override"`). These indicate judge blind spots.
+**User verdict confirmation:** After each experiment, present the score change and proposed keep/discard to the user. If the user overrides (e.g., discards a mutation the score says to keep, or vice versa), log as `type: "judge_gap"` in session-log.json: `{"phase":"7","type":"judge_gap","experiment":N,"agent_verdict":"keep","user_verdict":"discard","reason":"..."}`. These indicate judge blind spots and feed the loop-back prompt.
 
 **State:** Update after each experiment. **Dashboard:** serve workspace with `python3 -m http.server 8080`.
 

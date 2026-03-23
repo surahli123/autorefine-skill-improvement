@@ -91,19 +91,28 @@ assert_contains "$SKILL_CONTENT" "Quick" "Quick tier option"
 assert_contains "$SKILL_CONTENT" "Standard" "Standard tier option"
 assert_contains "$SKILL_CONTENT" "Deep" "Deep tier option"
 assert_contains "$SKILL_CONTENT" "Confidence-weighted scoring" "Feature 3: confidence scoring"
-assert_contains "$SKILL_CONTENT" "Judge gap detection" "Feature 4: judge gaps"
+assert_contains "$SKILL_CONTENT" "User verdict confirmation" "Feature 4: user verdict + judge gaps"
 assert_contains "$SKILL_CONTENT" "## Loop-Back Prompt" "Feature 5: loop-back"
 assert_contains "$SKILL_CONTENT" "## Session Close" "Feature 2: session close"
 
-# 2e. Philosophy briefing in pipeline status
+# 2e. Codex review fixes: Quick guard, user verdict, routine logging
+PREFLIGHT=$(sed -n '/^## Preflight/,/^## /p' "$SKILL_MD")
+assert_contains "$PREFLIGHT" "Quick requires" "Quick prerequisite guard in Preflight"
+PHASE7=$(sed -n '/^## Phase 7/,/^---/p' "$SKILL_MD")
+assert_contains "$PHASE7" "present verdict to user" "Phase 7 presents verdicts to user"
+PHASE1=$(sed -n '/^## Phase 1/,/^---/p' "$SKILL_MD")
+assert_contains "$PHASE1" "design_audit" "Phase 1 logs design_audit to session-log"
+assert_contains "$GULF1_GATE" "gate_decision" "Gate 1 logs gate_decision to session-log"
+assert_contains "$GULF2_GATE" "gate_decision" "Gate 2 logs gate_decision to session-log"
+
+# 2f. Philosophy briefing in pipeline status
 PIPELINE_STATUS=$(sed -n '/^## Pipeline Status/,/^---/p' "$SKILL_MD")
 assert_contains "$PIPELINE_STATUS" "builds the scorer" "Philosophy briefing present"
 
-# 2f. Skip-to-loop in Preflight
-PREFLIGHT=$(sed -n '/^## Preflight/,/^## /p' "$SKILL_MD")
+# 2g. Skip-to-loop in Preflight
 assert_contains "$PREFLIGHT" "approved" "Skip-to-loop detects approved gates"
 
-# 2g. References pointers (SKILL.md delegates to references.md)
+# 2h. References pointers (SKILL.md delegates to references.md)
 assert_contains "$SKILL_CONTENT" "references.md" "SKILL.md references references.md"
 REF_POINTERS=$(grep -c 'references.md' "$SKILL_MD")
 if [ "$REF_POINTERS" -ge 5 ]; then
@@ -112,7 +121,7 @@ else
     fail_test "SKILL.md has only $REF_POINTERS references.md pointers (need >=5)"
 fi
 
-# 2h. Gotchas section (condensed, with pointer to full list)
+# 2i. Gotchas section (condensed, with pointer to full list)
 GOTCHAS=$(sed -n '/^## Gotchas/,/^---/p' "$SKILL_MD")
 assert_contains "$GOTCHAS" "session-log.json" "Gotchas mention session-log"
 assert_contains "$GOTCHAS" "Gulf 1" "Gotchas mention Gulf 1"
@@ -143,9 +152,13 @@ assert_contains "$REFS_CONTENT" "loop_iteration" "state.json schema has loop_ite
 assert_contains "$REFS_CONTENT" "locked_judges" "state.json schema has locked_judges"
 assert_contains "$REFS_CONTENT" "session-log.json" "session-log schema present"
 
-# 3c. Session-log entry types documented
-assert_contains "$REFS_CONTENT" "judge_gap" "Judge gap entry type documented"
+# 3c. Session-log entry types documented (all 6 types)
+assert_contains "$REFS_CONTENT" "design_audit" "Design audit entry type documented"
+assert_contains "$REFS_CONTENT" "sampling" "Sampling entry type documented"
+assert_contains "$REFS_CONTENT" "consistency_flag" "Consistency flag entry type documented"
+assert_contains "$REFS_CONTENT" "gate_decision" "Gate decision entry type documented"
 assert_contains "$REFS_CONTENT" "override" "Override entry type documented"
+assert_contains "$REFS_CONTENT" "judge_gap" "Judge gap entry type documented"
 
 # 3d. Read when: tags present on key sections
 assert_contains "$REFS_CONTENT" "Read when:" "Read when: tags present"
