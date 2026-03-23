@@ -62,11 +62,14 @@ Choose your depth at the start:
 
 | Tier | Phases | Time | When to use |
 |------|--------|------|-------------|
-| **Quick** | 1 + 7 | ~15 min | Skills with existing evals or known failure modes |
+| **Quick** | Context-aware | ~15-30 min | Adapts based on workspace state (see below) |
 | **Standard** | 1-7 | ~60-90 min | Skills needing eval methodology from scratch |
 | **Deep** | 1-7 + expanded fixtures | ~2 hrs | Critical skills requiring statistical rigor |
 
-Quick requires an existing approved workspace (both gates passed, populated judges). If you haven't run Standard yet, start there.
+Quick is context-aware — it adapts based on your workspace state:
+- **First time (Quick Start, ~30 min):** Design audit → read 5 outputs → generate bootstrap evals → run 2-3 mutations. You see your skill improve with honest "directional" labeling. Everything carries forward into Standard.
+- **Returning with bootstrap evals (~15 min):** More mutations with your existing evals. Results still directional until you run Standard to validate.
+- **Returning with validated evals (~15 min):** Full confidence mutations with calibrated scoring.
 
 ## What It Does
 
@@ -90,6 +93,13 @@ Gulf 3: Generalization — Does it work on unseen inputs?
 ```
 
 Phase 3 (error analysis) is human-in-the-loop by design. You cannot automate comprehension.
+
+## v2.2 Features (NEW)
+
+- **Quick Start** — First-time path that shows value in ~30 min. Design audit → read 5 outputs → bootstrap evals → targeted mutations. Honestly labeled as "directional." Everything carries forward into Standard.
+- **Context-aware Quick tier** — Automatically detects workspace state and routes to the right path (first-timer vs. returning with bootstrap vs. returning with validated evals)
+- **Bootstrap eval generator** — Converts Phase 1 audit findings + observed failures into lightweight evals using a simplified zero-shot judge template
+- **Fresh scoring corpus** — Mini Phase 7 generates separate inputs for mutation scoring to prevent overfitting on the traces you just reviewed
 
 ## v2.1 Features
 
