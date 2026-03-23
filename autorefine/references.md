@@ -12,7 +12,7 @@ Read when: Initialize Workspace or resuming a session.
 ```json
 {"schema_version":2,"skill_name":"<name>","skill_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null}
 ```
-- `schema_version`: increment when adding fields (current: 2)
+- `schema_version`: increment when adding fields (2 for Standard/Deep, 3 for Quick Start)
 - `loop_iteration`: tracks Phase 7→5 loop-backs (0 = first run)
 - `locked_judges`: judge IDs approved in prior loops — don't re-validate
 
@@ -39,6 +39,140 @@ Entry types:
 - Gate decision: `{"phase":"gate_1","type":"gate_decision","detail":"APPROVED"}`
 - Override: `{"phase":"gate_1","type":"override","detail":"Removed E4","reason":"..."}`
 - Judge gap: `{"phase":"7","type":"judge_gap","experiment":4,"agent_verdict":"keep","user_verdict":"discard","reason":"..."}`
+- Mini observation (Quick Start): `{"phase":"qs_2","type":"mini_observation","detail":"Reviewed 5 traces: 3 pass, 2 fail"}`
+
+---
+
+## Quick Start > Mini Phase 3 Template
+
+Read when: Quick Start QS Step 2 active.
+
+### Input Generation
+Map top-5 Phase 1 gaps to inputs (one input per gap). If fewer than 5 gaps, fill remaining from the diversity spread:
+- 1 short+simple, 1 short+complex, 1 medium+complex, 1 long+simple, 1 long+complex
+
+Length thresholds (same as Smart Sampling): short (<500 chars), medium (500-2000), long (>2000).
+
+For interactive/session-spanning skills: create synthetic output fixtures instead of running the skill live. Same fallback as Standard Phase 3 Step 1.
+
+### Trace Presentation Format
+```
+--- Trace N/5 ---
+Input: [1-2 sentence summary of the input]
+Output: [full skill output]
+
+Pass or Fail? (one-line note if Fail)
+```
+
+---
+
+## Quick Start > Bootstrap Eval Generator
+
+Read when: Quick Start QS Step 3 active.
+
+### Conversion Rules
+**Phase 1 gap → structural eval:**
+- "Missing gotchas section" → "Does the output include a gotchas/warnings section? Pass/Fail."
+- "No progressive disclosure" → "Does the output use headers/sections to organize content? Pass/Fail."
+- "Weak instructional voice" → "Does the output use 'Do X because Y' format for directives? Pass/Fail."
+
+**Mini Phase 3 failure → behavioral eval:**
+- User note "missed the main entity" → "Does the output reference the primary entity from the input? Pass/Fail."
+- User note "too vague" → "Does the output include specific, concrete examples? Pass/Fail."
+- User note "wrong format" → "Does the output follow the expected structure? Pass/Fail."
+
+**Rule:** Prefer code-based (grep, regex, field presence) over agent-as-judge. Only use judge for subjective criteria.
+
+### Bootstrap Judge Template (Zero-Shot)
+Bootstrap judges use a simplified template — NO few-shot examples, NO train split (5 traces is too few).
+
+```
+You are an evaluator. Assess whether the skill output meets this criterion:
+
+CRITERION: [specific criterion from failure taxonomy or Phase 1 gap]
+
+PASS: [concrete, observable success — one sentence]
+FAIL: [concrete failure — one sentence, with example from Mini Phase 3 if available]
+
+Read the input and output below, then respond with:
+Critique: [1-2 sentences of reasoning]
+Result: Pass or Fail
+```
+
+### Per-Eval Metadata
+Tag EACH bootstrap eval individually in eval-suite.md (not as a suite-level header):
+```
+EVAL 1: Missing Gotchas Check
+Question: Does the output include a gotchas/warnings section?
+Pass: Gotchas section present with ≥1 specific warning
+Fail: No gotchas section or only generic warnings
+Why: Phase 1 found "Missing gotchas section"
+Source: quick_start | Validated: false | Confidence: directional
+```
+
+When Standard Phase 6 validates a specific bootstrap eval with TPR/TNR > 90%, update THAT eval's tag: `Validated: true | Confidence: calibrated`. Do not mark other evals as validated.
+
+---
+
+## Quick Start > Directional Results Template
+
+Read when: Quick Start QS Step 5 active.
+
+```
+## Quick Start Results — DIRECTIONAL (not validated)
+
+### Before
+[Phase 1 audit score summary]
+
+### After (2-3 mutations applied)
+[Updated score, which evals flipped, mutation descriptions]
+
+### What Changed
+- Experiment 1: [description] — [keep/discard] (directional score: X%)
+- Experiment 2: [description] — [keep/discard] (directional score: X%)
+
+### Confidence Note
+These results use bootstrap evals (not validated with TPR/TNR).
+Improvements are directional — run Standard for calibrated measurement.
+
+### Next Steps
+- Run Standard to validate evals and get calibrated scores
+- Or run Quick again for more mutations with current bootstrap evals
+```
+
+---
+
+## Quick Start > State Schema
+
+Read when: Quick Start QS Step 5 (state update) or Initialize Workspace.
+
+### state.json after Quick Start
+```json
+{
+  "schema_version": 3,
+  "skill_name": "<name>",
+  "skill_path": "<path>",
+  "started": "<today>",
+  "current_phase": "quick_start_complete",
+  "current_gulf": 1,
+  "phases": {},
+  "gates": {"gulf_1": "pending", "gulf_2": "pending"},
+  "hamel_available": false,
+  "loop_iteration": 0,
+  "locked_judges": [],
+  "memory_path": null,
+  "quick_start": {
+    "completed": true,
+    "mini_phase_3_traces": 5,
+    "bootstrap_evals": 4,
+    "mutations_run": 3,
+    "scoring_inputs": 8,
+    "timestamp": "<ISO-timestamp>"
+  }
+}
+```
+
+**Schema migration:** When reading state.json with `schema_version: 2`, treat as legacy — Quick Start not available, proceed with Standard/Deep routing only. No migration needed; schema_version 3 is only written by Quick Start.
 
 ---
 

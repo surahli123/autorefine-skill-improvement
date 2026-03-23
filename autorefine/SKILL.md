@@ -13,18 +13,31 @@ Guided skill improvement pipeline. Point at a skill: `/autorefine path/to/my-ski
 2. **Detect enhancements.** Search for Hamel's `eval-audit` and `error-analysis` skills. If found, note in state.json. These enhance but are NOT required.
 3. **Report tier:** Full (Hamel's detected) or Basic (core methodology only).
 4. **Choose pipeline depth:**
-   - **Quick** — Phase 1 (design audit) + Phase 7 (autoresearch loop). For skills with known failure modes or existing evals. ~15 min.
+   - **Quick** — Context-aware. Routes based on workspace state (~15-30 min). See routing below.
    - **Standard** — Full pipeline (Phases 1-7). For skills needing eval methodology from scratch. ~60-90 min.
    - **Deep** — Standard + expanded fixture set (30+ fixtures). For critical skills requiring statistical rigor.
 
-   **Quick requires an existing approved workspace** — both gates approved + populated `eval-suite.md` + `judges/`. If user requests Quick without these: explain that Quick uses existing scorers (it doesn't build them), and suggest Standard instead.
+   **Quick tier routing (3 states):**
+   ```
+   State 1: No workspace exists
+     → Quick Start path (~30 min)
+     → "First time? Let's find what your skill actually does wrong."
+   State 1b: Workspace exists with schema_version 2 (legacy v2.1), no quick_start field
+     → Standard/Deep only (legacy workspace — Quick Start not available)
+     → "This workspace was created before Quick Start. Use Standard or Deep."
+   State 2: quick_start.completed = true, gates still pending
+     → Quick Returning (~15 min): Phase 1 + Phase 7 with directional warning
+     → "Your evals haven't been validated — results are still directional."
+   State 3: Both gulf_1 and gulf_2 = "approved" in state.json
+     → Quick Returning (~15 min): Phase 1 + Phase 7, full confidence
+   ```
 
-   If workspace already has approved gates (both `gulf_1` and `gulf_2` = `"approved"` in state.json) AND `eval-suite.md` + `judges/` exist: offer Quick as default. Otherwise default to Standard.
+   If workspace has approved gates: offer Quick as default. If quick_start_complete: offer Quick with directional note. Otherwise default to Standard (offer Quick Start as faster alternative).
 
 ## Initialize Workspace
 
 If `autoresearch-<skill>/` doesn't exist: create it with `traces/` and `judges/` subdirectories. Generate these files (see `references.md > Workspace Schemas` for exact formats):
-- `state.json` — pipeline state (schema_version:2)
+- `state.json` — pipeline state (schema_version:2 for Standard/Deep, schema_version:3 for Quick Start — see `references.md > Quick Start > State Schema`)
 - `results.json` — experiment results for dashboard
 - `results.tsv` — append-only experiment log
 - `session-log.json` — per-session audit trail
@@ -41,6 +54,7 @@ Print at every session start:
 ```
 AutoRefine: <name>
 ================================================================
+Quick Start                        [STATUS]
 Gulf 1: Comprehension
   Phase 1: Design Audit          [STATUS]
   Phase 2: Eval Audit             [STATUS]
@@ -58,6 +72,69 @@ Gulf 3: Generalization
 > Skip Gulf 1 and you optimize against a fantasy.
 ```
 STATUS values: `not started`, `in progress`, `complete`, `skipped`. Read from `state.json.phases`.
+
+---
+
+## Quick Start Path
+
+Read when: Quick Start path active (State 1 from Preflight routing).
+
+> **Preview mode.** Quick Start gives you a taste of autorefine in ~30 min. It does NOT validate Gulf 1 or Gulf 2 — bootstrap evals are directional, not calibrated. Run Standard to get validated results.
+
+### QS Step 1: Phase 1 Design Audit (5 min)
+Run Phase 1 as normal (see below). No changes.
+
+*Why this step:* "This tells us what your skill *should* do based on best practices. But the real failures might be different — that's why Step 2 exists."
+
+### QS Step 2: Mini Phase 3 — Observation (10 min)
+Generate 5 inputs targeting the skill. Use Phase 1 findings as **focus areas** (not literal inputs — structural gaps like "missing gotchas" guide what scenarios to test, not what text to send). Sort findings by priority, take top 5 as focus areas, generate one diverse input per focus area that exercises the skill in a way where that gap would matter. If fewer than 5 gaps, fill remaining slots from the diversity spread (see `references.md > Quick Start > Mini Phase 3 Template`). For interactive or session-spanning skills, create synthetic output fixtures instead (same fallback as Standard Phase 3 Step 1).
+
+Run the skill on each input. Present outputs one at a time for user judgment:
+```
+--- Trace 1/5 ---
+Input: [summary]
+Output: [skill output]
+Pass or Fail? (one-line note if Fail)
+```
+
+Append to session-log.json: `{"phase":"qs_2","type":"mini_observation","detail":"Reviewed 5 traces: N pass, M fail"}`.
+
+*Why this step:* "You're reading actual outputs — not imagining what could go wrong. Evals built from observation catch real failures. Evals built from imagination catch hypothetical ones."
+
+**Graceful exit:** If Phase 1 found ≤1 issue AND all 5 traces pass: set `quick_start.completed = true` and `quick_start.graceful_exit = true` in state.json (prevents re-entry into Quick Start on next run). Tell the user: "Your skill looks clean on this sample. Quick Start needs failure signal to work. Try Standard for a deeper look, or skip autorefine." Stop here.
+
+### QS Step 3: Bootstrap Eval Generator (3 min)
+Auto-generate lightweight evals from Phase 1 findings (→ structural checks) + Mini Phase 3 failures (→ behavioral checks). Write each eval using the `references.md > Eval Suite Template` format (`EVAL N: [Name]...`). See `references.md > Quick Start > Bootstrap Eval Generator` for conversion rules and the simplified zero-shot judge template.
+
+**Eval types:** Code-based where possible (deterministic). Agent-as-judge only for subjective criteria — use the zero-shot bootstrap template (NO few-shot examples, NO train split).
+
+**Write judge files:** For each agent-as-judge eval, write the judge prompt to `judges/judge-E{N}-bootstrap-{name}.md` using the Bootstrap Judge Template from `references.md > Quick Start > Bootstrap Eval Generator`. For each code-based eval, write to `judges/code-E{N}-bootstrap-{name}.sh`. Phase 7 reads from `judges/` — if the files don't exist there, scoring will fail.
+
+**Minimum floor:** 3 evals. If Phase 1 + Mini Phase 3 yield fewer, supplement with additional Phase 1 pattern checks.
+
+**Labeling:** Tag every bootstrap eval in eval-suite.md with per-eval metadata: `Source: quick_start | Validated: false | Confidence: directional`. Apply this tag to EACH eval entry individually, not as a suite-level header.
+
+Present all evals in a numbered list. User responds: "approved", "drop N", "change N to [description]", or "add [new eval]". Single interaction, not a gate.
+
+*Why this step:* "These evals are rough — think of them as a first-draft relevance model. Useful for direction, not for production metrics. Run Standard to validate with TPR/TNR."
+
+### QS Step 4: Mini Phase 7 — Targeted Mutations (10 min)
+Generate 5-10 **fresh** scoring inputs — NOT the same as Mini Phase 3 traces (reusing = overfitting). Use the same input generation heuristic from QS Step 2 with different seed values. Save scoring inputs to `traces/qs-scoring-S01.md` through `traces/qs-scoring-S10.md`.
+
+Run 2-3 mutations targeting the top Phase 1 + Mini Phase 3 findings. Score with bootstrap evals using simplified weighting: code evals = 1.0, agent-as-judge = 0.5 (flat discount, not empirical TPR/TNR).
+
+Present each mutation to the user (diff, score change, proposed keep/discard). User confirms or overrides. Record in results.json + session-log.json.
+
+**Time note:** Estimates assume skill execution < 30 sec per run. Slow skills may push total to ~35 min.
+
+*Why this step:* "You're seeing your skill get better. But bootstrap evals are rough — a passing mutation might miss subtle regressions. Standard mode builds evals you can trust."
+
+### QS Step 5: Results + Handoff (2 min)
+Show before/after comparison. All results labeled "directional improvement, not validated."
+
+**State update:** In state.json, set `quick_start.completed = true` with metadata (traces, evals, mutations, timestamp). Keep `gates.gulf_1` and `gates.gulf_2` as `"pending"`. Set `current_phase: "quick_start_complete"`. Bump `schema_version` to 3 if needed.
+
+**Handoff:** "Your skill is better. Here's what Standard gives you: validated evals with TPR/TNR, a full failure taxonomy, and confidence-weighted optimization. Everything you just built carries forward — Standard extends this workspace."
 
 ---
 
@@ -158,9 +235,14 @@ Generate `gate-report-gulf-2.md` with: classification, TPR/TNR per judge, code e
 
 ## Phase 7: AutoResearch Loop
 
-The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + judges. If either is empty (Quick tier without existing evals), STOP and tell the user to run Standard pipeline first.
+The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + judges.
 
-**Budget:** Ask user — Quick (3), Standard (5), Deep (8-10).
+**Mode detection:**
+- If `quick_start.completed` = true AND both `gates.gulf_1` = "pending" AND `gates.gulf_2` = "pending" → **Mini mode** (bootstrap evals, simplified weighting, directional labeling). Budget: 2-3 experiments.
+- If gates approved → **Full mode** (validated evals, confidence-weighted scoring). Budget: ask user — Quick (3), Standard (5), Deep (8-10).
+- If neither → STOP and tell the user to run Standard pipeline first.
+
+**Mini mode differences:** Fresh scoring corpus (5-10 generated inputs, NOT reusing Quick Start traces). Simplified weighting: code evals = 1.0, agent-as-judge = 0.5. All results labeled "directional." No confidence weighting from Phase 6 (evals aren't validated).
 
 **The Loop:**
 1. Run baseline on all fixtures, score against all evals → Experiment 0
@@ -212,6 +294,7 @@ See `references.md > Gotchas` for the full list. Critical ones:
 3. **session-log.json is best-effort.** If corrupted or missing, recreate and continue. Never blocks.
 4. **Never run two sessions on same skill.** state.json has no locking.
 5. **"Invoke" means "read and follow."** Not all agents support direct skill invocation.
+6. **Quick Start is a preview, not validation.** Bootstrap evals are directional, not calibrated. Quick Start does NOT satisfy Gulf 1 or Gulf 2. Run Standard to validate results.
 
 ---
 
