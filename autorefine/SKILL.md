@@ -25,11 +25,13 @@ Guided skill improvement pipeline. Point at a skill: `/autorefine path/to/my-ski
    State 1b: Workspace exists with schema_version 2 (legacy v2.1), no quick_start field
      → Standard/Deep only (legacy workspace — Quick Start not available)
      → "This workspace was created before Quick Start. Use Standard or Deep."
-   State 2: quick_start.completed = true, gates still pending
-     → Quick Returning (~15 min): Phase 1 + Phase 7 with directional warning
+   State 2: quick_start.completed = true, both gates still "pending"
+     → Quick Returning (~15 min): Run Phase 1 (design audit), then skip to Phase 7 in Mini mode. Show directional warning at start.
+     → Steps: (1) Run Phase 1 as normal. (2) Skip Phases 2-6. (3) Run Phase 7 — it auto-detects Mini mode from state. (4) Run Session Close.
      → "Your evals haven't been validated — results are still directional."
    State 3: Both gulf_1 and gulf_2 = "approved" in state.json
-     → Quick Returning (~15 min): Phase 1 + Phase 7, full confidence
+     → Quick Returning (~15 min): Run Phase 1 (design audit), then skip to Phase 7 in Full mode.
+     → Steps: (1) Run Phase 1 as normal. (2) Skip Phases 2-6. (3) Run Phase 7 — it auto-detects Full mode from state. (4) Run Session Close.
    ```
 
    If workspace has approved gates: offer Quick as default. If quick_start_complete: offer Quick with directional note. Otherwise default to Standard (offer Quick Start as faster alternative).
@@ -89,7 +91,7 @@ Run Phase 1 as normal (see below). No changes.
 ### QS Step 2: Mini Phase 3 — Observation (10 min)
 Generate 5 inputs targeting the skill. Use Phase 1 findings as **focus areas** (not literal inputs — structural gaps like "missing gotchas" guide what scenarios to test, not what text to send). Sort findings by priority, take top 5 as focus areas, generate one diverse input per focus area that exercises the skill in a way where that gap would matter. If fewer than 5 gaps, fill remaining slots from the diversity spread (see `references.md > Quick Start > Mini Phase 3 Template`). For interactive or session-spanning skills, create synthetic output fixtures instead (same fallback as Standard Phase 3 Step 1).
 
-Run the skill on each input. Present outputs one at a time for user judgment:
+Run the skill on each input (read the target SKILL.md and provide the input as if you were a user requesting the skill — capture the full output). If the skill errors on an input, record the trace as a Fail with note "skill execution error: [error message]" and continue to the next input. Present outputs one at a time for user judgment:
 ```
 --- Trace 1/5 ---
 Input: [summary]
@@ -97,7 +99,7 @@ Output: [skill output]
 Pass or Fail? (one-line note if Fail)
 ```
 
-Append to session-log.json: `{"phase":"qs_2","type":"mini_observation","detail":"Reviewed 5 traces: N pass, M fail"}`.
+Append to session-log.json: `{"phase":"quick_start","step":"observation","type":"mini_observation","detail":"Reviewed 5 traces: N pass, M fail"}`.
 
 *Why this step:* "You're reading actual outputs — not imagining what could go wrong. Evals built from observation catch real failures. Evals built from imagination catch hypothetical ones."
 
@@ -119,7 +121,7 @@ Present all evals in a numbered list. User responds: "approved", "drop N", "chan
 *Why this step:* "These evals are rough — think of them as a first-draft relevance model. Useful for direction, not for production metrics. Run Standard to validate with TPR/TNR."
 
 ### QS Step 4: Mini Phase 7 — Targeted Mutations (10 min)
-Generate 5-10 **fresh** scoring inputs — NOT the same as Mini Phase 3 traces (reusing = overfitting). Use the same input generation heuristic from QS Step 2 with different seed values. Save scoring inputs to `traces/qs-scoring-S01.md` through `traces/qs-scoring-S10.md`.
+Generate 5-10 **fresh** scoring inputs — NOT the same as Mini Phase 3 traces (reusing = overfitting). Use the diversity spread from `references.md > Quick Start > Mini Phase 3 Template`, but target different Phase 1 gaps or different complexity levels than QS Step 2. Ensure zero overlap with the 5 QS Step 2 inputs. Save scoring inputs to `traces/qs-scoring-S01.md` through `traces/qs-scoring-S10.md`.
 
 Run 2-3 mutations targeting the top Phase 1 + Mini Phase 3 findings. Score with bootstrap evals using simplified weighting: code evals = 1.0, agent-as-judge = 0.5 (flat discount, not empirical TPR/TNR).
 
@@ -132,9 +134,16 @@ Present each mutation to the user (diff, score change, proposed keep/discard). U
 ### QS Step 5: Results + Handoff (2 min)
 Show before/after comparison. All results labeled "directional improvement, not validated."
 
-**State update:** In state.json, set `quick_start.completed = true` with metadata (traces, evals, mutations, timestamp). Keep `gates.gulf_1` and `gates.gulf_2` as `"pending"`. Set `current_phase: "quick_start_complete"`. Bump `schema_version` to 3 if needed.
+**State update:** In state.json, set `quick_start.completed = true` with metadata (traces, evals, mutations, timestamp). Keep `gates.gulf_1` and `gates.gulf_2` as `"pending"`. Set `current_phase: 0` (integer — 0 means Quick Start complete; phases 1-7 use integers 1-7). Set `phases.design_audit: "complete"` (Phase 1 was run). Bump `schema_version` to 3.
 
 **Handoff:** "Your skill is better. Here's what Standard gives you: validated evals with TPR/TNR, a full failure taxonomy, and confidence-weighted optimization. Everything you just built carries forward — Standard extends this workspace."
+
+**Standard transition rules:** When Standard runs on a Quick Start workspace:
+- Phase 1: Re-run (skill may have changed from mutations). Overwrite `design-audit.md`.
+- Phase 2: Acknowledge existing bootstrap evals in eval-suite.md. Audit them alongside any other eval infrastructure.
+- Phase 3: Start fresh with full 20+ traces. Reference QS mini observations as prior context but don't skip reviews. Overwrite `error-analysis-traces.md`.
+- Phase 5: Keep bootstrap evals that align with the new failure taxonomy. Discard the rest. Write validated judges to replace bootstrap judges in `judges/`.
+- Phase 6: Validate all judges (including promoted bootstrap ones). Update per-eval metadata: `Source: standard | Validated: true`.
 
 ---
 
@@ -237,10 +246,10 @@ Generate `gate-report-gulf-2.md` with: classification, TPR/TNR per judge, code e
 
 The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + judges.
 
-**Mode detection:**
-- If `quick_start.completed` = true AND both `gates.gulf_1` = "pending" AND `gates.gulf_2` = "pending" → **Mini mode** (bootstrap evals, simplified weighting, directional labeling). Budget: 2-3 experiments.
-- If gates approved → **Full mode** (validated evals, confidence-weighted scoring). Budget: ask user — Quick (3), Standard (5), Deep (8-10).
-- If neither → STOP and tell the user to run Standard pipeline first.
+**Mode detection (check in this order):**
+1. If both `gates.gulf_1` = "approved" AND `gates.gulf_2` = "approved" → **Full mode** (validated evals, confidence-weighted scoring). Budget: ask user — Quick (3), Standard (5), Deep (8-10).
+2. Else if `quick_start.completed` = true AND both gates = "pending" → **Mini mode** (bootstrap evals, simplified weighting, directional labeling). Budget: 2-3 experiments.
+3. Else → STOP and tell the user to run Standard pipeline first.
 
 **Mini mode differences:** Fresh scoring corpus (5-10 generated inputs, NOT reusing Quick Start traces). Simplified weighting: code evals = 1.0, agent-as-judge = 0.5. All results labeled "directional." No confidence weighting from Phase 6 (evals aren't validated).
 

@@ -126,12 +126,12 @@ Serve it: `cd autoresearch-<skill>/ && python3 -m http.server 8080`
 
 | File | Lines | Role |
 |------|-------|------|
-| `SKILL.md` | 220 | **Action script** — every line is an instruction the agent follows |
-| `references.md` | 370 | **Detail library** — templates, schemas, formulas, rubrics. Read on demand via `references.md > Section` pointers |
+| `SKILL.md` | ~305 | **Action script** — every line is an instruction the agent follows |
+| `references.md` | ~510 | **Detail library** — templates, schemas, formulas, rubrics. Read on demand via `references.md > Section` pointers |
 | `dashboard.html` | — | Chart.js dashboard with Karpathy step graph, auto-refreshes every 10s |
 | `validate-host.sh` | — | Tests whether your agent supports `Read when:` progressive disclosure |
 
-The agent loads only the 220-line action script. When it needs a template or formula, the script tells it exactly which section of references.md to read.
+The agent loads only the ~305-line action script. When it needs a template or formula, the script tells it exactly which section of references.md to read.
 
 ## Requirements
 

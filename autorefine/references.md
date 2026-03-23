@@ -39,7 +39,7 @@ Entry types:
 - Gate decision: `{"phase":"gate_1","type":"gate_decision","detail":"APPROVED"}`
 - Override: `{"phase":"gate_1","type":"override","detail":"Removed E4","reason":"..."}`
 - Judge gap: `{"phase":"7","type":"judge_gap","experiment":4,"agent_verdict":"keep","user_verdict":"discard","reason":"..."}`
-- Mini observation (Quick Start): `{"phase":"qs_2","type":"mini_observation","detail":"Reviewed 5 traces: 3 pass, 2 fail"}`
+- Mini observation (Quick Start): `{"phase":"quick_start","step":"observation","type":"mini_observation","detail":"Reviewed 5 traces: 3 pass, 2 fail"}`
 
 ---
 
@@ -48,8 +48,9 @@ Entry types:
 Read when: Quick Start QS Step 2 active.
 
 ### Input Generation
-Map top-5 Phase 1 gaps to inputs (one input per gap). If fewer than 5 gaps, fill remaining from the diversity spread:
+Map Phase 1 gaps to inputs (one input per gap, max 5). If fewer than 5 gaps, fill remaining slots from the diversity spread — pick to maximize diversity (prioritize different length categories first):
 - 1 short+simple, 1 short+complex, 1 medium+complex, 1 long+simple, 1 long+complex
+- Example: 3 gaps → 2 remaining → pick 1 short+simple and 1 long+complex (maximizes length spread)
 
 Length thresholds (same as Smart Sampling): short (<500 chars), medium (500-2000), long (>2000).
 
@@ -153,9 +154,9 @@ Read when: Quick Start QS Step 5 (state update) or Initialize Workspace.
   "skill_name": "<name>",
   "skill_path": "<path>",
   "started": "<today>",
-  "current_phase": "quick_start_complete",
+  "current_phase": 0,
   "current_gulf": 1,
-  "phases": {},
+  "phases": {"design_audit": "complete"},
   "gates": {"gulf_1": "pending", "gulf_2": "pending"},
   "hamel_available": false,
   "loop_iteration": 0,
