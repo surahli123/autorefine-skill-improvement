@@ -10,7 +10,7 @@ Read when: Initialize Workspace or resuming a session.
 
 ### state.json
 ```json
-{"schema_version":2,"skill_name":"<name>","skill_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[]}
+{"schema_version":2,"skill_name":"<name>","skill_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null}
 ```
 - `schema_version`: increment when adding fields (current: 2)
 - `loop_iteration`: tracks Phase 7→5 loop-backs (0 = first run)
@@ -34,6 +34,7 @@ Header: `experiment\tscore\tmax_score\tpass_rate\tstatus\tdescription`
 ```
 Entry types:
 - Standard: `{"phase":"3","type":"sampling","detail":"..."}`
+- Consistency flag: `{"phase":"3","type":"consistency_flag","detail":"T03 and T07 match C2, judged differently"}`
 - Override: `{"phase":"gate_1","type":"override","detail":"...","reason":"..."}`
 - Judge gap: `{"phase":"7","type":"judge_gap","experiment":4,"agent_verdict":"keep","user_verdict":"discard","reason":"..."}`
 
@@ -78,6 +79,8 @@ Read when: Phase 1 active.
 ### Dimension 2: Instructional Voice
 - Sample 5-10 directives. Count "Do X because Y" vs "X is Y."
 - At Standard: >80% instructional. Partial: 40-80%. Missing: <40%.
+- Before: "Causal forests estimate heterogeneous treatment effects"
+- After: "Use causal forests when you need CATE estimates across segments because they handle high-dimensional covariates without pre-specifying interactions"
 
 ### Dimension 3: Progressive Disclosure
 - Is the skill a folder or single file? Do references have `Read when:` tags?
@@ -256,6 +259,90 @@ Read when: something goes wrong, or starting a session.
 2. **Phase 3 fail rate <20%.** Fixtures too easy or reviewer too generous. Add harder inputs.
 3. **AutoResearch plateaus after 3+ experiments.** Evals may not discriminate, or failure needs architectural change.
 4. **Fixtures don't represent real usage.** Include 3-5 "ugly" real-world inputs.
+
+---
+
+## Failure Taxonomy Template
+
+Read when: Phase 3 Step 6.
+
+```
+## Failure Taxonomy: <skill>
+1. [Category Name] — [description] — observed in N/M traces
+2. [Category Name] — [description] — observed in N/M traces
+```
+
+---
+
+## Judge Execution Procedure
+
+Read when: Phase 6 (running judges) or Phase 7 (scoring experiments).
+
+To run an agent-as-judge eval:
+1. Read `judges/judge-E{N}-{name}.md` (the judge prompt)
+2. Read the fixture file being evaluated
+3. Output: `Critique: [reasoning]` then `Result: Pass or Fail`
+
+Dispatch as a subagent or evaluate in main context. Run judges sequentially (not parallel) to avoid context contamination.
+
+---
+
+## Judge Validation Report Format
+
+Read when: Phase 6 Step 5.
+
+```
+| Judge | Dev TPR | Dev TNR | Test TPR | Test TNR | Status |
+|-------|---------|---------|----------|----------|--------|
+| E1: Name | 92% | 88% | 89% | 85% | APPROVED |
+```
+
+---
+
+## Per-Phase State Fields
+
+Read when: updating state.json after a phase.
+
+| Phase | Fields to record |
+|-------|-----------------|
+| 1 | `design_audit: "complete"` |
+| 2 | `eval_audit: "complete"` |
+| 3 | `traces_reviewed, sampled_trace_ids, sampling_strategy, taxonomy_summary` |
+| 4 | `fixture_count, pass_count, fail_count, split_sizes` |
+| 5 | `code_eval_count, judge_eval_count` |
+| 6 | `validation_results` (TPR/TNR per judge) |
+| 7 | `current_experiment, best_score` |
+
+---
+
+## Confidence-Weighted Scoring
+
+Read when: Phase 7 active.
+
+Formula: `score = sum(weight_i * pass_i) / sum(weight_i)` where `pass_i` is 1 (pass) or 0 (fail).
+
+Weights:
+- Code-based evals: `weight = 1.0`
+- Agent-as-judge evals: `weight = (TPR + TNR) / 2` from Phase 6 validation
+
+Example: 5 evals, 3 code (weight 1.0 each) + 2 agent (weights 0.92, 0.70). Mutation passes all code evals + fails both agent evals. Score = (1+1+1+0+0) / (1+1+1+0.92+0.70) = 3/4.62 = 64.9%. Without weighting: 3/5 = 60%. The weighting gives less influence to the noisy agent judge (0.70).
+
+---
+
+## Loop-Back Protocol
+
+Read when: Loop-Back Prompt fires (≥2 judge_gap entries).
+
+**When `locked_judges` gets populated:** At Gulf 2 gate approval, record all approved judge IDs in `state.json.locked_judges`.
+
+**Append mode for Phase 5:**
+- Step 1: Skip classification of existing evals. Only classify NEW evals derived from judge gap reasons.
+- Step 2-3: Write only NEW judges. Do NOT modify locked judges.
+- Step 4: Append new judge files to `judges/`. Do not overwrite existing ones.
+
+**Phase 6 on loop-back:** Validate only judges NOT in `locked_judges`. Locked judges keep their prior TPR/TNR.
+
+**Phase 7 on loop-back:** Re-run with the expanded eval suite (old + new judges). Score may drop — this is more accurate measurement, not regression. Explain this to the user.
 
 ---
 

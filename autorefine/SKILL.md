@@ -55,6 +55,7 @@ Gulf 3: Generalization
 > Gulf 1 builds the scorer. Gulf 3 uses the scorer.
 > Skip Gulf 1 and you optimize against a fantasy.
 ```
+STATUS values: `not started`, `in progress`, `complete`, `skipped`. Read from `state.json.phases`.
 
 ---
 
@@ -90,7 +91,7 @@ Close the Gulf of Comprehension. **Most important phase. CANNOT BE AUTOMATED.**
 
 **Step 4: Preliminary clustering.** Assign each sampled trace a category ID (C1, C2, C3...) by surface patterns (adapt to skill type). Target 3-5 clusters. If <3, skip consistency checks. Write clusters to `error-analysis-traces.md` header.
 
-**Step 5: Human reviews.** Present sampled traces one at a time. For each: ask Pass/Fail + notes. Record in `error-analysis-traces.md` (columns: #, Fixture, Cluster, Pass/Fail, Notes). User can stop after ≥5 traces.
+**Step 5: Human reviews.** Present sampled traces one at a time. For each, ask: (1) Pass or Fail? (2) If Fail: what went wrong? (free text) (3) If Pass: anything surprising or borderline? Record in `error-analysis-traces.md` (columns: #, Fixture, Cluster, Pass/Fail, Notes). User can stop after ≥5 traces.
 
 **Consistency check (after ≥5 reviews):** If same-cluster traces got different verdicts, flag it. Append: `{"phase":"3","type":"consistency_flag","detail":"T03 and T07 match C2, judged differently"}`. If user confirms both verdicts, log resolution.
 
@@ -155,7 +156,7 @@ Generate `gate-report-gulf-2.md` with: classification, TPR/TNR per judge, code e
 
 ## Phase 7: AutoResearch Loop
 
-The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + judges.
+The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + judges. If either is empty (Quick tier without existing evals), STOP and tell the user to run Standard pipeline first.
 
 **Budget:** Ask user — Quick (3), Standard (5), Deep (8-10).
 
@@ -164,7 +165,7 @@ The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + 
 2. LOOP: analyze failures → hypothesize ONE change → mutate a copy → test → keep (score up) or discard (score same/worse) → record in results.json + results.tsv + changelog.md
 3. Repeat until all evals pass or budget exhausted
 
-**Key rules:** One mutation per experiment. Score the mutated copy, not the original. Target baseline 60-80% (>90% = evals too easy). Formats: `references.md > Results & Changelog Schemas`.
+**Key rules:** One mutation per experiment. Mutate a copy (`<skill>-optimized.md`), not the original. If score improves, the mutated copy becomes the new baseline for the next experiment. Target baseline 60-80% (>90% = evals too easy). Formats: `references.md > Results & Changelog Schemas`.
 
 **Confidence-weighted scoring:** Weight each eval by its judge's validated TPR/TNR. Code evals = 1.0. Agent evals = (TPR+TNR)/2. Experiment score = weighted sum / sum of weights.
 
@@ -193,7 +194,7 @@ Runs after Phase 7, or when user stops mid-pipeline. Minimum: session-log must h
 
 1. **Synthesize** session-log.json into 3-5 bullet learning summary (what worked, what was overridden, patterns emerged)
 2. **User curates** — present summary, ask for edits or approval
-3. **Persist** to agent memory system (path from state.json, or ask on first run and record)
+3. **Persist** to agent memory system (path from `state.json.memory_path`, or ask on first run and record). If no memory system exists, write to `autoresearch-<skill>/learnings.md` as fallback.
 4. **Archive** — rename session-log.json to `session-log-<timestamp>.json`
 
 If <3 entries: "Not enough data for a learning summary yet."

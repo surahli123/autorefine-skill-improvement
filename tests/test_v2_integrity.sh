@@ -156,7 +156,7 @@ echo ""
 # =================================================================
 echo "--- Line budget ---"
 assert_line_count_le "$SKILL_MD" 250 "SKILL.md within action script budget"
-assert_line_count_le "$REFS_MD" 320 "references.md within detail budget"
+assert_line_count_le "$REFS_MD" 400 "references.md within detail budget"
 echo ""
 
 # =================================================================
