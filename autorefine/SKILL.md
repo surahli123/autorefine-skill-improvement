@@ -86,13 +86,13 @@ Close the Gulf of Comprehension. **Most important phase. CANNOT BE AUTOMATED.**
 
 **Step 2: Run the skill.** Invoke on each fixture (15-25). Save outputs to `traces/trace-T01.md` through `traces/trace-T25.md`.
 
-**Step 3: Smart sampling.** Select 8-10 traces using stratified sampling. On first run, infer dimensions from fixture properties (input length, source, planted flaw). On re-runs, use Phase 4 dimensions. Ensure every dimension value represented at least once. Show the user which traces were selected and why. Log to session-log.json. Methodology: `references.md > Smart Sampling Methodology`.
+**Step 3: Smart sampling.** Select 8-10 traces using stratified sampling. On first run, infer dimensions from fixture properties (input length, source, planted flaw). On re-runs, use Phase 4 dimensions. Ensure every dimension value represented at least once. Show the user which traces were selected and why. Append to session-log.json: `{"phase":"3","type":"sampling","detail":"Selected N/M traces..."}`. Methodology: `references.md > Smart Sampling Methodology`.
 
 **Step 4: Preliminary clustering.** Assign each sampled trace a category ID (C1, C2, C3...) by surface patterns (adapt to skill type). Target 3-5 clusters. If <3, skip consistency checks. Write clusters to `error-analysis-traces.md` header.
 
 **Step 5: Human reviews.** Present sampled traces one at a time. For each: ask Pass/Fail + notes. Record in `error-analysis-traces.md` (columns: #, Fixture, Cluster, Pass/Fail, Notes). User can stop after ≥5 traces.
 
-**Consistency check (after ≥5 reviews):** If same-cluster traces got different verdicts, flag it. Log flags to session-log.json. If user confirms both verdicts, log resolution.
+**Consistency check (after ≥5 reviews):** If same-cluster traces got different verdicts, flag it. Append: `{"phase":"3","type":"consistency_flag","detail":"T03 and T07 match C2, judged differently"}`. If user confirms both verdicts, log resolution.
 
 **Mid-phase resume:** Track `traces_reviewed` and `sampled_trace_ids` in state.json.
 
@@ -101,7 +101,7 @@ Close the Gulf of Comprehension. **Most important phase. CANNOT BE AUTOMATED.**
 **Step 7: Generate eval suite.** Convert top failures into binary evals. Write `eval-suite.md`. Format: `references.md > Eval Suite Template`.
 
 ### Gate: Gulf 1 Exit
-Generate `gate-report-gulf-1.md` with: sample stats, fail rate, categories, consistency flags, proposed evals. **Override logging:** each override needs a one-line reason → session-log.json.
+Generate `gate-report-gulf-1.md` with: sample stats, fail rate, categories, consistency flags, proposed evals. **Override logging:** if user removes evals or rejects categories, append: `{"phase":"gate_1","type":"override","detail":"Removed E4","reason":"..."}`
 
 **STOP. Wait for user approval.**
 
@@ -145,7 +145,7 @@ Calibrate agent-as-judge evaluators against human labels. Code-based evals skip 
 **Step 5:** Final measurement on test split. Run once, record, do NOT iterate. Write `judge-validation-report.md`.
 
 ### Gate: Gulf 2 Exit
-Generate `gate-report-gulf-2.md` with: classification, TPR/TNR per judge, code eval results. **Override logging:** each override needs a reason → session-log.json.
+Generate `gate-report-gulf-2.md` with: classification, TPR/TNR per judge, code eval results. **Override logging:** if user rejects judges, append: `{"phase":"gate_2","type":"override","detail":"...","reason":"..."}`
 
 **STOP. Wait for user approval.**
 
