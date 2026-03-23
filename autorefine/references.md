@@ -119,3 +119,21 @@ If skill-creator is available, use its specialized subagents to strengthen the l
 **Comparator** — For rigorous A/B testing between the baseline and mutated skill, dispatch the comparator with both outputs (blinded — it doesn't know which is which). It scores on content + structure rubrics and picks a winner. Use when score deltas are small and you need confidence the mutation actually helped.
 
 **Analyzer** — After the comparator picks a winner, dispatch the analyzer with both skills + transcripts. It explains WHY the winner won and produces prioritized improvement suggestions. Use to inform your next mutation hypothesis.
+
+---
+
+## Smart Sampling Methodology
+
+Read when: Phase 3 active, or user asks about sampling strategy.
+
+### Why 8-10 traces, not all 20+
+
+Full review of all traces provides maximum coverage but creates HITL friction that blocks adoption. 8-10 traces with stratified sampling captures dimension coverage while keeping the review under 30 minutes. The consistency detection mechanism catches cases where the reduced sample introduces contradictory judgments.
+
+### Why lightweight dimensions before Phase 4
+
+Phase 4 defines formal, failure-oriented dimensions (e.g., Session Length x Domain Type x Error Density). But on a first run, Phase 4 hasn't executed yet. The lightweight dimensions in Step 3 (input length, fixture source, planted flaw) are observable without any prior analysis. They're weaker than Phase 4 dimensions but sufficient for first-pass stratification. On re-runs, Phase 4 dimensions automatically take over.
+
+### When to override consistency flags
+
+Not every flag requires changing a verdict. Same-cluster traces can legitimately get different verdicts if one is borderline — e.g., two "short output" traces where one is concise-but-complete and the other is truncated. The flag's purpose is to prompt reflection, not enforce consistency. If the user confirms both verdicts after reviewing, move on.
