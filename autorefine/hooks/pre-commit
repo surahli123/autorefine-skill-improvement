@@ -1,0 +1,19 @@
+#!/bin/bash
+# Block commits that add internal artifacts to the public repo.
+# These belong in dev/ (private submodule), not the public repo.
+#
+# Only blocks additions/copies/modifications (ACM), not deletions —
+# so cleanup of accidentally tracked files still works.
+
+BLOCKED_DIRS="audits/ principles/ references/ tests/ docs/"
+
+for dir in $BLOCKED_DIRS; do
+    if git diff --cached --diff-filter=ACM --name-only | grep -q "^${dir}"; then
+        echo ""
+        echo "BLOCKED: Attempting to commit files in ${dir}"
+        echo "These are internal artifacts that belong in dev/ (private submodule)."
+        echo "Move them to dev/${dir} instead."
+        echo ""
+        exit 1
+    fi
+done

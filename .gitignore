@@ -2,5 +2,6 @@
 audits/
 principles/
 references/
+tests/
 docs/
 handover-*.md
