@@ -1,7 +1,0 @@
-# Internal development artifacts — live in dev/ (private submodule)
-audits/
-principles/
-references/
-tests/
-docs/
-handover-*.md
