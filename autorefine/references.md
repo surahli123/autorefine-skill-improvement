@@ -1,35 +1,66 @@
 # AutoRefine References
 
-Read when: user asks "why this order", "why can't I skip to autoresearch", or needs the v2.0 audit rubric.
+Templates, schemas, methodology rationale, and detailed rubrics. SKILL.md references specific sections — read on demand, not upfront.
+
+---
+
+## Workspace Schemas
+
+Read when: Initialize Workspace or resuming a session.
+
+### state.json
+```json
+{"schema_version":2,"skill_name":"<name>","skill_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[]}
+```
+- `schema_version`: increment when adding fields (current: 2)
+- `loop_iteration`: tracks Phase 7→5 loop-backs (0 = first run)
+- `locked_judges`: judge IDs approved in prior loops — don't re-validate
+
+### results.json
+```json
+{"skill_name":"<name>","status":"running","current_experiment":0,"baseline_score":null,"best_score":null,"experiments":[],"eval_breakdown":[]}
+```
+Each experiment in `experiments[]`:
+```json
+{"id":N,"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}]}
+```
+
+### results.tsv
+Header: `experiment\tscore\tmax_score\tpass_rate\tstatus\tdescription`
+
+### session-log.json
+```json
+{"skill":"<name>","session_start":"<ISO-timestamp>","entries":[]}
+```
+Entry types:
+- Standard: `{"phase":"3","type":"sampling","detail":"..."}`
+- Override: `{"phase":"gate_1","type":"override","detail":"...","reason":"..."}`
+- Judge gap: `{"phase":"7","type":"judge_gap","experiment":4,"agent_verdict":"keep","user_verdict":"discard","reason":"..."}`
 
 ---
 
 ## The Three Gulfs
 
-Why the pipeline follows this order: Comprehension → Specification → Generalization.
+Read when: user asks "why this order" or "why can't I skip to autoresearch."
 
 ### Gulf 1: Comprehension
 **Gap:** What you think your skill does vs. what it actually does.
 **How to close:** Manual error analysis. Read every output. No automation can close this.
-**Must be closed first** — everything downstream depends on it.
 
 ### Gulf 2: Specification
 **Gap:** What you want your skill to do vs. what your judges actually measure.
-**Direct consequence of skipping comprehension.** If you haven't seen real failures, you can't write judges that measure what matters. You'll optimize against a fantasy.
+**Depends on Gulf 1.** You can't write good judges without seeing real failures.
 
 ### Gulf 3: Generalization
 **Gap:** Test performance vs. real-world performance on unseen inputs.
-**This is what AutoResearch addresses.** But only if the first two gulfs are already closed.
+**This is AutoResearch.** But only works if Gulfs 1-2 are closed.
 
-### Why You Can't Skip to AutoResearch
-
-Three takes from practitioners who tried:
-
-| Take | Approach | Result |
-|------|----------|--------|
-| 1 | Pointed AutoResearch at skill. Let it generate inputs, judges, everything. | Scores went up. Skill got worse. Optimized the wrong things. |
-| 2 | Used structured input generation (dimensions, personas). Still no manual reading. | Better inputs. But judges still measuring imagined targets. |
-| 3 | Read outputs manually. Built failure taxonomy. Wrote judges against observed failures. Then ran AutoResearch. | Actually improved the skill. |
+### Why You Can't Skip
+| Approach | Result |
+|----------|--------|
+| AutoResearch without manual reading | Scores up, skill worse. Optimized wrong things. |
+| Structured inputs but no manual reading | Better inputs, judges still measuring imagined targets. |
+| Manual reading → taxonomy → judges → AutoResearch | Actually improved the skill. |
 
 > "If you are not willing to look at some data manually on a regular cadence you are wasting your time with evals." — Hamel Husain
 
@@ -37,88 +68,36 @@ Three takes from practitioners who tried:
 
 ## V2.0 Design Audit Rubric
 
-Detailed checklist for Phase 1. Based on Thariq (Anthropic), Koylan (v2.0 rewrite), and Google (5 patterns).
+Read when: Phase 1 active.
 
 ### Dimension 1: Gotchas Section
-- **Exists?** Look for a `## Gotchas` heading
-- **Count:** Target 5-9 per skill. Under 5 = likely missing failure modes. Over 9 = probably too granular.
-- **Quality check for each gotcha:**
-  - Names a specific, non-obvious failure (not "be careful with X")
-  - Explains WHY it happens (the mechanism)
-  - States the CONSEQUENCE if ignored (what breaks)
-  - Is experience-derived, not theoretical
-- **Example of good gotcha:** "**Dashboard needs HTTP serving.** The dashboard.html fetches results.json via fetch(). Opening the file directly (file://) won't work because of browser CORS restrictions. Serve it: `python3 -m http.server 8080`."
-- **Example of bad gotcha:** "Be careful with large files." (No mechanism, no consequence, generic)
+- Target 5-9 per skill. Each names a specific failure, explains WHY, states consequence.
+- Good: "**Dashboard needs HTTP serving.** fetch() fails on file:// due to CORS."
+- Bad: "Be careful with large files."
 
 ### Dimension 2: Instructional Voice
-- **Test:** Sample 5-10 directives. Count "Do X because Y" vs. "X is Y" format.
-- **At Standard:** >80% instructional
-- **Partial:** 40-80% instructional
-- **Missing:** <40% instructional
-- **Before:** "Causal forests estimate heterogeneous treatment effects"
-- **After:** "Use causal forests when you need CATE estimates across segments because they handle high-dimensional covariates without pre-specifying interactions"
+- Sample 5-10 directives. Count "Do X because Y" vs "X is Y."
+- At Standard: >80% instructional. Partial: 40-80%. Missing: <40%.
 
 ### Dimension 3: Progressive Disclosure
-- **Folder structure:** Is the skill a folder (SKILL.md + references/) or a single file?
-- **Reference tagging:** Do references have `Read when: [condition]` triggers?
-- **Why it matters:** Agents load skill descriptions initially; full content only on activation. Flat reference lists invite loading everything, wasting context budget.
+- Is the skill a folder or single file? Do references have `Read when:` tags?
+- Flat reference lists waste context budget.
 
 ### Dimension 4: Composable Scripts (if applicable)
-Only score if the skill has Python/JS scripts. Skip if none.
-- **`__all__` exports** — prevents namespace pollution
-- **Type hints on public signatures** — agents can reason about inputs/outputs
-- **`Use when:` docstrings** — agents know when to call each function
-- **`if __name__ == "__main__":` blocks** — runnable demos, not just importable code
+- `__all__`, type hints, `Use when:` docstrings, `if __name__` demos.
 
 ---
 
-## Hamel Integration Details
+## Eval Audit Categories
 
-Read when: `hamel_available` is true in state.json, or user asks about Hamel's eval skills integration.
+Read when: Phase 2 active.
 
-### Phase 2: eval-audit
-If `hamel_available` is true in state.json, invoke the `eval-audit` skill for deeper analysis. It runs the same 6 diagnostics above but with richer heuristics: flags class imbalance in metrics, detects stale analyses, and recommends specific next skills.
-
-**How to invoke:** Provide the eval artifacts (eval-suite.md, results files, fixture paths) as context. The skill produces a structured findings report with problem title, status, explanation, and recommended fix for each diagnostic.
-
-### Phase 3: error-analysis
-If `hamel_available` is true, invoke the `error-analysis` skill to structure the review process. Adaptations for skills vs. LLM pipelines:
-- Hamel's skill expects ~100 production traces → use 20-25 fixture outputs instead
-- Hamel's skill uses LLM-assisted clustering after ~30 traces → use manual clustering (our trace count is smaller)
-- Hamel's skill recommends random/stratified/outlier sampling → use fixture diversity instead (we control inputs)
-- The core protocol is the same: read every output → judge Pass/Fail → capture root cause (not explanation) → cluster into 5-10 categories → compute failure rates
-
-### Phase 3: generate-synthetic-data
-If `hamel_available` is true, use the `generate-synthetic-data` skill to prepare diverse fixtures in Step 1. It generates inputs via dimension-based tuples:
-1. Define 3 failure-prone dimensions (e.g., Document Type × Quality Level × Domain)
-2. Draft 20 tuples with user feedback
-3. LLM generates more tuples, user validates
-4. Convert tuples to natural language test inputs
-This produces more systematically diverse fixtures than ad hoc generation.
-
-### Phase 4: generate-synthetic-data
-If available, use `generate-synthetic-data` for systematic tuple generation. Adaptations for skills:
-- Hamel targets ~100 traces → use 30-40 for skills (attention + token pragmatism)
-- Hamel's Step 6 says "run through full pipeline" → for session-spanning skills, generate synthetic output fixtures instead (same adaptation as Phase 3)
-
-### Phase 5: write-judge-prompt
-If available, invoke `write-judge-prompt` for richer judge prompt engineering. Adaptations: Hamel assumes external API calls → use agent-as-judge instead (the coding agent evaluates inline).
-
-### Phase 6: validate-evaluator
-If available, invoke `validate-evaluator` for deeper calibration. Adaptations for skills:
-- Hamel targets ~100 labeled examples → use 30-40 for skills
-- Hamel recommends Rogan-Gladen correction → skip for skills (not enough data for meaningful correction)
-- Hamel recommends bootstrap CI → skip for skills (same reason)
-- The core protocol applies: dev iteration → test once → report TPR/TNR
-
-### Phase 7: skill-creator subagents
-If skill-creator is available, use its specialized subagents to strengthen the loop:
-
-**Grader** — After each experiment run, dispatch the grader subagent with the eval expectations and skill output. It returns structured pass/fail verdicts with evidence, verifies claims from the output, AND critiques the evals themselves (flags assertions that would pass bad outputs). Provide: expectations list, output files, transcript.
-
-**Comparator** — For rigorous A/B testing between the baseline and mutated skill, dispatch the comparator with both outputs (blinded — it doesn't know which is which). It scores on content + structure rubrics and picks a winner. Use when score deltas are small and you need confidence the mutation actually helped.
-
-**Analyzer** — After the comparator picks a winner, dispatch the analyzer with both skills + transcripts. It explains WHY the winner won and produces prioritized improvement suggestions. Use to inform your next mutation hypothesis.
+1. **Error analysis grounding** — Were evals built from observed failures, or brainstormed?
+2. **Evaluator design** — Binary pass/fail? Or vague Likert scales? Holistic evals bundling multiple failure modes?
+3. **Judge validation** — Any TPR/TNR measurements? Golden dataset? Or untested judges?
+4. **Train/test split** — Same fixtures for iteration AND measurement? (= data leakage)
+5. **Labeled data** — How many labeled examples? Target: >50. Under 25 is critical gap.
+6. **Maintenance** — Process for re-auditing after skill changes? Or "set and forget"?
 
 ---
 
@@ -127,13 +106,179 @@ If skill-creator is available, use its specialized subagents to strengthen the l
 Read when: Phase 3 active, or user asks about sampling strategy.
 
 ### Why 8-10 traces, not all 20+
+Full review provides maximum coverage but creates HITL friction that blocks adoption. 8-10 traces with stratified sampling captures dimension coverage while keeping review under 30 minutes.
 
-Full review of all traces provides maximum coverage but creates HITL friction that blocks adoption. 8-10 traces with stratified sampling captures dimension coverage while keeping the review under 30 minutes. The consistency detection mechanism catches cases where the reduced sample introduces contradictory judgments.
+### Lightweight dimensions (pre-Phase 4)
+- **Input length:** short (<500 chars), medium (500-2000), long (>2000)
+- **Fixture source:** generated / real / synthetic
+- **Planted flaw:** yes / no
 
-### Why lightweight dimensions before Phase 4
+On re-runs, Phase 4 dimensions automatically take over.
 
-Phase 4 defines formal, failure-oriented dimensions (e.g., Session Length x Domain Type x Error Density). But on a first run, Phase 4 hasn't executed yet. The lightweight dimensions in Step 3 (input length, fixture source, planted flaw) are observable without any prior analysis. They're weaker than Phase 4 dimensions but sufficient for first-pass stratification. On re-runs, Phase 4 dimensions automatically take over.
+### Consistency detection algorithm
+After each judgment (starting at review #5): scan prior traces with same cluster ID. Flag if different verdicts. Purpose: prompt reflection, not enforce consistency.
 
-### When to override consistency flags
+---
 
-Not every flag requires changing a verdict. Same-cluster traces can legitimately get different verdicts if one is borderline — e.g., two "short output" traces where one is concise-but-complete and the other is truncated. The flag's purpose is to prompt reflection, not enforce consistency. If the user confirms both verdicts after reviewing, move on.
+## Eval Suite Template
+
+Read when: Phase 3 Step 7 or writing evals.
+
+```
+EVAL 1: [Name]
+Question: [specific yes/no question]
+Pass: [what success looks like]
+Fail: [what failure looks like]
+Why: [which observed failure mode this catches]
+```
+
+---
+
+## Dimension Template
+
+Read when: Phase 4 Step 2.
+
+```
+Dimension 1: [Name] — [What it captures]
+  Values: [value_a, value_b, value_c, ...]
+```
+Example: Session Length × Domain Type × Error Density.
+
+### Train/Dev/Test Split
+| Split | Size | Purpose | Rules |
+|-------|------|---------|-------|
+| **Train** | ~15% (5-6) | Few-shot examples for judge prompts | Clear-cut Pass/Fail only |
+| **Dev** | ~42% (13-17) | Iterative judge refinement | Never in judge prompts |
+| **Test** | ~43% (13-17) | Final unbiased measurement | Do NOT look at during dev |
+
+---
+
+## Judge Prompt Template
+
+Read when: Phase 5 Step 3 (building agent-as-judge prompts).
+
+The coding agent itself IS the judge — no external API needed. Agent reads judge prompt + fixture, outputs verdict inline.
+
+### 4 Required Components
+
+**Component 1 — Task and criterion:**
+```
+You are an evaluator assessing whether [specific criterion from failure taxonomy].
+```
+One failure mode per judge. Never bundle multiple criteria.
+
+**Component 2 — Pass/Fail definitions:**
+```
+PASS: [concrete, observable success]
+FAIL: [concrete failure, with examples from Phase 3 traces]
+```
+
+**Component 3 — Few-shot examples (TRAIN split only):**
+3 examples: clear Pass, clear Fail, borderline. Each must include critique BEFORE verdict.
+```
+### Example 1: PASS
+Input: [fixture excerpt]
+Critique: [why this passes — reference specific evidence]
+Result: Pass
+```
+**NEVER use dev or test examples.** This is data leakage.
+
+**Component 4 — Output format:**
+```
+Critique: [detailed assessment referencing specific evidence]
+Result: Pass or Fail
+```
+
+---
+
+## TPR/TNR Reference
+
+Read when: Phase 6 active.
+
+### Formulas
+```
+TPR = (judge says Pass AND human says Pass) / (human says Pass)
+TNR = (judge says Fail AND human says Fail) / (human says Fail)
+```
+Target: >90% both. With 30-40 fixtures (~15 dev), treat as directional signal.
+
+### Disagreement Actions
+| Type | Judge | Human | Fix |
+|------|-------|-------|-----|
+| False Pass | Pass | Fail | Strengthen Fail definitions or add edge-case examples |
+| False Fail | Fail | Pass | Clarify Pass definitions or adjust examples |
+
+### If alignment stalls
+- Both low → sharper definitions + more specific examples
+- One low → inspect disagreements for that metric
+- Both <80% → decompose criterion into smaller atomic checks
+
+---
+
+## Results & Changelog Schemas
+
+Read when: Phase 7 active.
+
+### Changelog Format
+```markdown
+## Experiment N — [keep/discard]
+**Score:** X/Y (Z%)
+**Change:** [what was mutated]
+**Reasoning:** [why this should help]
+**Result:** [which evals flipped]
+**Failing outputs:** [remaining failures, or "None"]
+```
+
+### Results.json experiment record
+```json
+{"id":N,"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}]}
+```
+
+---
+
+## Gotchas
+
+Read when: something goes wrong, or starting a session.
+
+1. **Don't skip Gulf 1.** A 100% score on narrow evals is an artifact, not evidence of quality.
+2. **Error analysis cannot be automated.** Phase 3 requires the human to read outputs. An LLM doing it is comprehension theater.
+3. **Let categories emerge.** In Phase 3, don't start with existing eval categories. Fresh eyes.
+4. **Keep rate > final score.** 60%→85% through 4 keeps teaches more than 95%→100% in 1.
+5. **High Phase 3 fail rates are healthy.** 60-100% fail = diverse fixtures + rigorous reviewer. <30% = too easy.
+6. **Dashboard needs HTTP serving.** `python3 -m http.server 8080`. Direct `file://` fails (CORS). Needs internet for Chart.js CDN.
+7. **Never run two sessions on same skill.** state.json has no locking.
+8. **"Invoke" means "read and follow."** Not all agents support direct skill invocation.
+9. **session-log.json is best-effort.** If corrupted, recreate and continue. Never blocks.
+
+## When AutoRefine Doesn't Help
+
+1. **Phase 1 passes but skill is bad.** Design audit checks structure, not logic. Skip to Phase 3.
+2. **Phase 3 fail rate <20%.** Fixtures too easy or reviewer too generous. Add harder inputs.
+3. **AutoResearch plateaus after 3+ experiments.** Evals may not discriminate, or failure needs architectural change.
+4. **Fixtures don't represent real usage.** Include 3-5 "ugly" real-world inputs.
+
+---
+
+## Hamel Integration Details
+
+Read when: `hamel_available` is true in state.json.
+
+### Phase 2: eval-audit
+Invoke for deeper analysis — flags class imbalance, stale analyses, recommends next skills.
+
+### Phase 3: error-analysis
+Adaptations: use 20-25 fixture outputs (not 100 production traces), manual clustering (smaller trace count), fixture diversity instead of random sampling.
+
+### Phase 3/4: generate-synthetic-data
+Dimension-based tuple generation: define 3 dimensions → draft 20 tuples → LLM generates more → convert to test inputs. Target 30-40 for skills (not 100).
+
+### Phase 5: write-judge-prompt
+Use for richer prompt engineering. Adapt: agent-as-judge instead of external API calls.
+
+### Phase 6: validate-evaluator
+Deeper calibration. Skip Rogan-Gladen correction and bootstrap CI (insufficient data for skills). Core protocol applies: dev iteration → test once → report TPR/TNR.
+
+### Phase 7: skill-creator subagents
+- **Grader** — structured pass/fail verdicts with evidence + eval critique
+- **Comparator** — blinded A/B testing between baseline and mutation
+- **Analyzer** — explains WHY winner won + prioritized improvement suggestions
