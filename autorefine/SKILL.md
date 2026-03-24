@@ -39,14 +39,14 @@ Guided skill improvement pipeline. Point at a skill: `/autorefine path/to/my-ski
 ## Initialize Workspace
 
 If `autoresearch-<skill>/` doesn't exist: create it with `traces/` and `judges/` subdirectories. Generate these files (see `references.md > Workspace Schemas` for exact formats):
-- `state.json` — pipeline state (schema_version:2 for Standard/Deep, schema_version:3 for Quick Start — see `references.md > Quick Start > State Schema`)
+- `state.json` — pipeline state (schema_version:4 for new workspaces — see `references.md > Workspace Schemas`)
 - `results.json` — experiment results for dashboard
 - `results.tsv` — append-only experiment log
 - `session-log.json` — per-session audit trail
 - `changelog.md`, `eval-suite.md`, `error-analysis-traces.md` — empty, formatted in later phases
 - Copy `dashboard.html` from this skill's directory, replace `{{SKILL_NAME}}`
 
-If workspace exists **with** `state.json`: read it and print pipeline status. Rotate `session-log.json` (rename to `session-log-<session_start, colons→dashes>.json`, create fresh). If `session-log.json` missing (pre-v2 workspace), create it.
+If workspace exists **with** `state.json`: read it and print pipeline status. **Check for checkpoint:** if `state.json.checkpoint` is not null and has `next_action`, enter resume mode — read all files in `checkpoint.files_to_read_on_resume`, print "Resuming from checkpoint: {next_action}", clear the checkpoint (set to null), and proceed from `next_action`. See `references.md > Checkpoint Schema > Resume Detection`. Rotate `session-log.json` (rename to `session-log-<session_start, colons→dashes>.json`, create fresh). If `session-log.json` missing (pre-v2 workspace), create it. Legacy workspaces (schema_version 2 or 3) are read-compatible — checkpoint fields default to null.
 
 If workspace exists **without** `state.json`: back up to `autoresearch-<skill>-prev/` and create fresh.
 
@@ -151,9 +151,14 @@ Show before/after comparison. All results labeled "directional improvement, not 
 
 Read the target SKILL.md. Score 4 dimensions: **Gotchas**, **Voice**, **Progressive Disclosure**, **Scripts** (if any). For each Partial/Missing: quote the problem, recommend a fix, assign priority.
 
-Detailed rubric: `references.md > V2.0 Design Audit Rubric`.
+**Gotchas dimension — 3-stage detection:**
+1. **Taxonomy scan:** Check skill against 6 gotcha categories (shell execution, path handling, state mutation, concurrent access, auth/secrets, external APIs). Skills touching NONE → score "N/A." Full category list: `references.md > Gotcha Taxonomy`.
+2. **Static evidence:** For each matched category, cite the specific line(s) creating the risk. Example: "Line 47: `$B goto $URL` — no URL sanitization."
+3. **Smoke probe:** For the top 2 highest-risk findings, construct a minimal test input and run the target skill with it. Narrate before each probe. Record as `confirmed` or `not_confirmed`. For session-spanning skills, skip probes and record as `suspected`. Details: `references.md > Gotcha Taxonomy > Smoke Probe Instructions`.
 
-**Output:** `design-audit.md`. Append to session-log.json: `{"phase":"1","type":"design_audit","detail":"Scored 4 dims: Gotchas=X, Voice=X, Disclosure=X, Scripts=X"}`. **State:** advance to Phase 2.
+Remaining dimensions: `references.md > V2.0 Design Audit Rubric`.
+
+**Output:** `design-audit.md` (Gotchas section includes taxonomy, evidence, confidence levels, and probe results). Append to session-log.json: `{"phase":"1","type":"design_audit","detail":"Scored 4 dims: Gotchas=X (N categories matched, M confirmed), Voice=X, Disclosure=X, Scripts=X"}`. Phase 3 inherits `suspected` gotcha items as targeting input. **State:** advance to Phase 2.
 
 ---
 
@@ -179,7 +184,7 @@ Close the Gulf of Comprehension. **Most important phase. CANNOT BE AUTOMATED.**
 
 **Step 4: Preliminary clustering.** Assign each sampled trace a category ID (C1, C2, C3...) by surface patterns (adapt to skill type). Target 3-5 clusters. If <3, skip consistency checks. Write clusters to `error-analysis-traces.md` header.
 
-**Step 5: Human reviews.** Present sampled traces one at a time. For each, ask: (1) Pass or Fail? (2) If Fail: what went wrong? (free text) (3) If Pass: anything surprising or borderline? Record in `error-analysis-traces.md` (columns: #, Fixture, Cluster, Pass/Fail, Notes). User can stop after ≥5 traces.
+**Step 5: Human reviews.** Present sampled traces in batches of 5 using the worksheet format. For each trace, the user provides: Pass or Fail, and a note if Fail. Record in `error-analysis-traces.md` (columns: #, Fixture, Cluster, Pass/Fail, Notes). User can stop after ≥5 traces. Format details: `references.md > Batch Review Format`.
 
 **Consistency check (after ≥5 reviews):** If same-cluster traces got different verdicts, flag it. Append: `{"phase":"3","type":"consistency_flag","detail":"T03 and T07 match C2, judged differently"}`. If user confirms both verdicts, log resolution.
 
@@ -227,11 +232,11 @@ Generate `gate-report-gulf-1.md` with: sample stats, fail rate, categories, cons
 
 Calibrate agent-as-judge evaluators against human labels. Code-based evals skip (deterministic).
 
-**Step 1:** Run each judge on dev split. Compare verdicts to human labels.
-**Step 2:** Compute TPR and TNR. Target: >90% both. Formulas: `references.md > TPR/TNR Reference`.
-**Step 3:** Inspect disagreements — False Pass → strengthen Fail defs. False Fail → clarify Pass defs.
-**Step 4:** Iterate on dev until stable. If stalled: both low → sharper definitions; one low → inspect that metric; both <80% → decompose criterion.
-**Step 5:** Final measurement on test split. Run once, record, do NOT iterate. Write `judge-validation-report.md`.
+**Steps 1-4 (dev split — human reviews):** Run each judge on dev split. Present judge verdicts vs human labels using batch review format (`references.md > Batch Review Format`). Compute TPR and TNR. Inspect disagreements — False Pass → strengthen Fail defs; False Fail → clarify Pass defs. Iterate until stable. Formulas: `references.md > TPR/TNR Reference`.
+
+**Step 5 (test split — automated, NO human review):** Final measurement on test split. Run once, record, do NOT iterate. The human does NOT see test examples — this preserves the holdout. Write `judge-validation-report.md`.
+
+**Step 6: Generate judge confidence cards.** For each agent-as-judge eval, generate a confidence card showing TPR/TNR with interpretation, evidence examples, and known blind spots. Template: `references.md > Judge Confidence Card Template`. Walk the human through each card with narration. If TPR-TNR gap > 20 points, flag the asymmetry explicitly.
 
 ### Gate: Gulf 2 Exit
 Generate `gate-report-gulf-2.md` with: classification, TPR/TNR per judge, code eval results. Append to session-log.json: `{"phase":"gate_2","type":"gate_decision","detail":"APPROVED"}` (or REJECTED). **Override logging:** if user rejects judges, also append: `{"phase":"gate_2","type":"override","detail":"...","reason":"..."}`
@@ -254,17 +259,23 @@ The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + 
 **Mini mode differences:** Fresh scoring corpus (5-10 generated inputs, NOT reusing Quick Start traces). Simplified weighting: code evals = 1.0, agent-as-judge = 0.5. All results labeled "directional." No confidence weighting from Phase 6 (evals aren't validated).
 
 **The Loop:**
-1. Run baseline on all fixtures, score against all evals → Experiment 0
-2. LOOP: analyze failures → hypothesize ONE change → mutate a copy → test → **present verdict to user** (show mutation diff, score change, proposed keep/discard) → user accepts or overrides → record in results.json + results.tsv + changelog.md
+1. Run baseline on all fixtures, score against all evals → Experiment 0. Record `eval_results` per eval.
+2. LOOP:
+   a. Analyze failures → hypothesize ONE change → **save backup** (`<skill>-optimized-prev.md`) → mutate a copy
+   b. Score mutation against all evals → record `eval_results`
+   c. **Regression check:** Compare current `eval_results` against prior kept experiments. If any eval that previously passed now fails → regression detected. Details: `references.md > Regression Check Schema`. Skip on experiment 0/1 (no prior experiments).
+   d. **Present to user** — show mutation diff, score change, regression status, proposed keep/discard. One decision point.
+   e. User accepts or overrides → record in results.json (with `eval_results` + `regression_check`) + results.tsv + changelog.md
+   f. If discarded (regression or user choice): restore backup as current baseline
 3. Repeat until all evals pass or budget exhausted
 
 **Key rules:** One mutation per experiment. Mutate a copy (`<skill>-optimized.md`), not the original. If score improves, the mutated copy becomes the new baseline for the next experiment. Target baseline 60-80% (>90% = evals too easy). Formats: `references.md > Results & Changelog Schemas`.
 
 **Confidence-weighted scoring:** Weight each eval by its judge's validated TPR/TNR. Code evals = 1.0. Agent evals = (TPR+TNR)/2. Experiment score = weighted sum / sum of weights.
 
-**User verdict confirmation:** After each experiment, present the score change and proposed keep/discard to the user. If the user overrides (e.g., discards a mutation the score says to keep, or vice versa), log as `type: "judge_gap"` in session-log.json: `{"phase":"7","type":"judge_gap","experiment":N,"agent_verdict":"keep","user_verdict":"discard","reason":"..."}`. These indicate judge blind spots and feed the loop-back prompt.
+**User verdict confirmation:** After each experiment, present the score change, regression status, and proposed keep/discard to the user. If the user overrides (e.g., keeps despite regression, or discards despite clean score), log as `type: "judge_gap"` in session-log.json: `{"phase":"7","type":"judge_gap","experiment":N,"agent_verdict":"keep","user_verdict":"discard","reason":"..."}`. These indicate judge blind spots and feed the loop-back prompt. Regression overrides also log: `{"phase":"7","type":"regression",...,"user_action":"keep_override"}`.
 
-**State:** Update after each experiment. **Dashboard:** serve workspace with `python3 -m http.server 8080`.
+**State:** Update after each experiment (include `eval_results` and `regression_check`). **Dashboard:** serve workspace with `python3 -m http.server 8080`.
 
 ---
 
@@ -283,14 +294,18 @@ If user loops back: Phase 5 enters append mode (`locked_judges` prevents modifyi
 
 ## Session Close
 
-Runs after Phase 7, or when user stops mid-pipeline. Minimum: session-log must have ≥3 entries.
+Runs after Phase 7, when user stops mid-pipeline, or when user explicitly pauses. Minimum: session-log must have ≥3 entries for learning summary.
 
-1. **Synthesize** session-log.json into 3-5 bullet learning summary (what worked, what was overridden, patterns emerged)
-2. **User curates** — present summary, ask for edits or approval
-3. **Persist** to agent memory system (path from `state.json.memory_path`, or ask on first run and record). If no memory system exists, write to `autoresearch-<skill>/learnings.md` as fallback.
-4. **Archive** — rename session-log.json to `session-log-<timestamp>.json`
+1. **Save checkpoint** — update `state.json.checkpoint` with current state and write `resume-prompt.txt` to workspace root. See `references.md > Checkpoint Schema`. Append to session-log: `{"type":"checkpoint",...}`.
+2. **Synthesize** session-log.json into 3-5 bullet learning summary (what worked, what was overridden, patterns emerged)
+3. **User curates** — present summary, ask for edits or approval
+4. **Persist** to agent memory system (path from `state.json.memory_path`, or ask on first run and record). If no memory system exists, write to `autoresearch-<skill>/learnings.md` as fallback.
+5. **Present resume prompt** — "You can resume anytime. Paste this into a new session:" followed by the resume prompt from `resume-prompt.txt`.
+6. **Archive** — rename session-log.json to `session-log-<timestamp>.json`
 
-If <3 entries: "Not enough data for a learning summary yet."
+If <3 entries: still save checkpoint (step 1), skip learning summary. Say: "Not enough data for a learning summary yet. Checkpoint saved — you can resume later."
+
+**Phase boundary checkpoints:** At every phase completion (not just Session Close), update `state.json.checkpoint` and write `resume-prompt.txt`. This is automatic — no user interaction needed. Log to session-log.
 
 ---
 

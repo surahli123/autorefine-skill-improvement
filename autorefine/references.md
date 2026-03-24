@@ -10,11 +10,12 @@ Read when: Initialize Workspace or resuming a session.
 
 ### state.json
 ```json
-{"schema_version":2,"skill_name":"<name>","skill_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null}
+{"schema_version":4,"skill_name":"<name>","skill_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null}
 ```
-- `schema_version`: increment when adding fields (2 for Standard/Deep, 3 for Quick Start)
+- `schema_version`: 4 for v2.3 workspaces. Legacy: 2 = Standard/Deep (v2.1), 3 = Quick Start (v2.2). New fields default to null when reading v2/v3 workspaces.
 - `loop_iteration`: tracks Phase 7→5 loop-backs (0 = first run)
 - `locked_judges`: judge IDs approved in prior loops — don't re-validate
+- `checkpoint`: resume state — see `Checkpoint Schema` section. null when no checkpoint active.
 
 ### results.json
 ```json
@@ -22,8 +23,10 @@ Read when: Initialize Workspace or resuming a session.
 ```
 Each experiment in `experiments[]`:
 ```json
-{"id":N,"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}]}
+{"id":N,"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}],"eval_results":[{"eval":"E1","result":"pass"},{"eval":"E2","result":"fail"}],"regression_check":null}
 ```
+- `eval_results`: per-eval Pass/Fail for this experiment. Used by regression checks to compare across experiments.
+- `regression_check`: null (no check run), or `{"passed":true,"details":"..."}`, or `{"passed":false,"regressions":[{"experiment":1,"eval":"E2","was":"pass","now":"fail","detail":"..."}]}`
 
 ### results.tsv
 Header: `experiment\tscore\tmax_score\tpass_rate\tstatus\tdescription`
@@ -40,6 +43,8 @@ Entry types:
 - Override: `{"phase":"gate_1","type":"override","detail":"Removed E4","reason":"..."}`
 - Judge gap: `{"phase":"7","type":"judge_gap","experiment":4,"agent_verdict":"keep","user_verdict":"discard","reason":"..."}`
 - Mini observation (Quick Start): `{"phase":"quick_start","step":"observation","type":"mini_observation","detail":"Reviewed 5 traces: 3 pass, 2 fail"}`
+- Checkpoint: `{"phase":"3","type":"checkpoint","detail":"Saved checkpoint at Phase 3 boundary. Resume prompt written."}`
+- Regression: `{"phase":"7","type":"regression","experiment":3,"detail":"E2 regressed: was pass (exp 1), now fail. Gotcha section removed by mutation.","user_action":"discard"}`
 
 ---
 
@@ -506,3 +511,239 @@ Deeper calibration. Skip Rogan-Gladen correction and bootstrap CI (insufficient 
 - **Grader** — structured pass/fail verdicts with evidence + eval critique
 - **Comparator** — blinded A/B testing between baseline and mutation
 - **Analyzer** — explains WHY winner won + prioritized improvement suggestions
+
+---
+
+## Gotcha Taxonomy
+
+Read when: Phase 1 active (Gotcha Detection).
+
+### 6 Categories
+
+Check the target skill against each category. For each match, cite specific lines creating the risk.
+
+| Category | What to look for | Example patterns |
+|----------|-----------------|-----------------|
+| **Shell execution** | Commands, subshells, exec, `$B`, `Bash` tool calls | `$B goto $URL`, `bash -c "$CMD"`, `` `command` `` |
+| **Path handling** | File reads/writes, directory creation, deletion, traversal | `rm -rf $DIR`, `cat $FILE`, `mkdir -p $PATH` |
+| **State mutation** | Files written to disk, config changes, git operations | `git commit`, `Write` tool, `state.json` updates |
+| **Concurrent access** | Shared files without locking, race conditions | Two sessions on same workspace, no file locks |
+| **Authentication / secrets** | API keys, tokens, credentials in instructions or output | `$API_KEY`, `Authorization: Bearer`, `.env` references |
+| **External API calls** | Network requests, third-party services, webhooks | `WebSearch`, `WebFetch`, `curl`, API endpoints |
+
+### Scoring Scale
+
+- **N/A** — Skill touches NONE of the 6 categories. No gotcha-prone patterns detected. This is the correct score for simple skills (e.g., a formatting skill that only reads and reformats text).
+- **Present** — Applicable categories found AND the skill documents corresponding gotchas with specific warnings.
+- **Missing** — Applicable categories found BUT the skill has NO documented gotchas for those categories. This is the failure case.
+
+### Smoke Probe Instructions
+
+For the top 2 highest-risk findings from the static evidence step:
+
+1. **Narrate before probing:** "I found [risk] on line [N]. I'm going to test this with a probe input to confirm the risk."
+2. **Construct ONE minimal input** designed to trigger the risk. Keep it safe — the goal is to observe the skill's handling, not to cause damage. Example: for an unsanitized URL, use `javascript:alert(1)` not an actual exploit.
+3. **Run the target skill** with the probe input (same execution model as Phase 3 — read the skill and provide the input as if you were a user).
+4. **Record the result:**
+   - `confirmed` — probe demonstrated the risk. Include the probe input and relevant output excerpt.
+   - `not_confirmed` — skill handled the probe safely. Note this in the audit but still report the static evidence.
+5. **For session-spanning or interactive skills:** Skip the smoke probe. Record as `suspected` (static evidence only). Same fallback as Phase 3 Step 1 for these skill types.
+
+Cap at 2 probes per audit to keep Phase 1 under 10 minutes.
+
+---
+
+## Judge Confidence Card Template
+
+Read when: Phase 6 Step 5 (after validation complete).
+
+Generate `judge-confidence-card.md` in the workspace. One card per agent-as-judge eval (skip code-based evals — they are deterministic).
+
+```markdown
+# Judge Confidence Card: E{N} — {eval name}
+
+## Metrics
+- **TPR:** {X}% — catches {X} out of 100 real failures
+- **TNR:** {Y}% — correctly accepts {Y} out of 100 passing outputs
+- **Confidence:** {High|Medium|Low}
+
+{If |TPR - TNR| > 20: "**ASYMMETRY WARNING:** This judge is much better at {catching failures|accepting good outputs} ({higher}%) than {the other} ({lower}%). Interpret results with this bias in mind."}
+
+## Evidence: What the judge got right
+| # | Fixture | Human | Judge | Critique excerpt |
+|---|---------|-------|-------|-----------------|
+| 1 | {fixture name} | Pass | Pass | "{first sentence of judge critique}" |
+| 2 | ... | Fail | Fail | "..." |
+| 3 | ... | ... | ... | "..." |
+
+## Evidence: What the judge got wrong
+| # | Fixture | Human | Judge | Why it disagreed |
+|---|---------|-------|-------|-----------------|
+| 1 | {fixture name} | Fail | Pass | {analysis of why judge missed this} |
+
+## Known blind spots
+{Patterns derived from False Pass and False Fail analysis. 1-3 bullets.}
+- "{pattern 1}"
+- "{pattern 2}"
+```
+
+### Confidence Level Thresholds
+- **High:** TPR + TNR > 180 (both metrics strong)
+- **Medium:** 150 < TPR + TNR ≤ 180 (adequate but watch for weaknesses)
+- **Low:** TPR + TNR ≤ 150 (judge needs refinement before trusting results)
+
+These are percentage points summed (range 0-200). Example: TPR=92%, TNR=85% → sum=177 → Medium.
+
+### Narration Template
+After generating the card, walk the human through it:
+"Here's your judge for E{N}. It catches failures well ({TPR}% TPR) but {occasionally marks passing outputs as failures | misses some real failures} ({TNR}% TNR). Its main weakness is {blind spot pattern}. Here are the examples it got right and wrong — check whether its reasoning makes sense to you."
+
+---
+
+## Batch Review Format
+
+Read when: Phase 3 Step 5 (trace review) or Phase 6 Steps 1-4 (dev split judge validation).
+
+**Important:** Batch review applies to Phase 6 dev split ONLY. Phase 6 Step 5 (test split) runs WITHOUT human review — it is automated measurement. Never show test-split examples to the human.
+
+### Worksheet Presentation
+
+Present traces/judge results in batches of 5. Show a summary table first, then full details for each item.
+
+```
+=== Batch Review: {context} ({start}-{end} of {total}) ===
+
+| # | Input Summary | Output Summary | Cluster | Your Verdict |
+|---|--------------|----------------|---------|-------------|
+| T01 | {1-line input summary} | {1-line output summary} | {cluster} | ___ |
+| T02 | ... | ... | ... | ___ |
+| T03 | ... | ... | ... | ___ |
+| T04 | ... | ... | ... | ___ |
+| T05 | ... | ... | ... | ___ |
+
+Review each item below, then give your verdicts in one message.
+Format: T01:Pass T02:Fail(reason) T03:Pass ...
+```
+
+Then show each item in full detail below the table.
+
+### Narration Before Batch
+"Here are 5 {traces|judge results} to review. I've grouped them by similarity — {cluster narrative}. When you're ready, give me your verdicts in one go: `T01:Pass T02:Fail(reason) ...`"
+
+### Verdict Parsing
+Expected format: `T01:Pass T02:Fail(missed entity) T03:Pass T04:Fail(flaw not caught) T05:Pass`
+
+Parsing rules:
+- Split on whitespace to get per-trace tokens
+- Each token: `{ID}:{verdict}` or `{ID}:{verdict}({note})`
+- Verdict is case-insensitive: Pass, pass, PASS all valid
+- Notes in parentheses are optional — record if present
+- If parsing fails (freeform text, missing IDs, unrecognized format): fall back to asking one at a time (current Phase 3 behavior). Say: "I couldn't parse that format. Let me ask one at a time instead."
+
+### Batch Size
+Default: 5 items per batch. On the first batch, offer: "Want a different batch size? Default is 5." If user requests a different size, use that for remaining batches.
+
+---
+
+## Checkpoint Schema
+
+Read when: Initialize Workspace (resume detection) or Session Close (checkpoint writing).
+
+### Checkpoint fields in state.json
+
+The `checkpoint` field in state.json stores resume state. Set to null when no checkpoint is active (fresh start or after successful resume).
+
+```json
+{
+  "checkpoint": {
+    "next_action": "Begin Phase 4: Expand Inputs",
+    "files_to_read_on_resume": ["state.json", "error-analysis-traces.md", "failure-taxonomy.md", "eval-suite.md", "session-log.json"],
+    "files_modified": ["error-analysis-traces.md", "failure-taxonomy.md", "eval-suite.md"],
+    "resume_prompt": "Continue autorefine on [skill]. Workspace at [path]. Last completed: Phase 3 error analysis (8 traces reviewed, 3 failure categories, 5 evals drafted). Gulf 1 gate pending. Next: Phase 4.",
+    "timestamp": "2026-03-23T20:46:00Z"
+  }
+}
+```
+
+**Phase 7 mid-experiment checkpoint:**
+```json
+{
+  "checkpoint": {
+    "next_action": "Continue Phase 7: AutoResearch Loop — resume from experiment 4",
+    "files_to_read_on_resume": ["state.json", "results.json", "eval-suite.md", "changelog.md"],
+    "files_modified": ["results.json", "results.tsv", "changelog.md"],
+    "resume_prompt": "Continue autorefine on [skill]. Workspace at [path]. Phase 7 in progress: 3 experiments complete (kept 1,3; discarded 2). Best score: 0.82. Budget remaining: 2. Resume from experiment 4.",
+    "timestamp": "2026-03-23T21:15:00Z"
+  }
+}
+```
+
+### resume-prompt.txt
+
+Written alongside state.json checkpoint. Standalone human-readable file — the user can `cat` it directly.
+
+Format:
+```
+Continue autorefine on {skill_name}.
+Workspace: {workspace_path}
+Last completed: {phase description with key metrics}
+Next: {next_action}
+
+To resume, paste this prompt into a new autorefine session.
+```
+
+### Resume Detection (Initialize Workspace)
+
+When reading state.json on startup:
+1. If `checkpoint` is not null and `checkpoint.next_action` exists → resume mode
+2. Read all files listed in `checkpoint.files_to_read_on_resume`
+3. Print resume context: "Resuming from checkpoint: {next_action}"
+4. Set `checkpoint` to null (clear the checkpoint — it's been consumed)
+5. Proceed from `checkpoint.next_action`
+
+### Checkpoint Writing (Phase Boundaries + Pause)
+
+At every phase boundary (phase completes) and on user-initiated pause:
+1. Update `state.json.checkpoint` with current state
+2. Write `resume-prompt.txt` to workspace root
+3. Append to session-log: `{"type":"checkpoint",...}`
+
+On user-initiated pause, also offer: "Want to save key learnings to memory before pausing?"
+
+---
+
+## Regression Check Schema
+
+Read when: Phase 7 active (after scoring, before presenting to user).
+
+### When to Run
+
+After scoring a mutation against the eval suite, BEFORE presenting results to the user. This ensures the user sees score + regression status together in one decision point.
+
+**Skip on experiment 1** (baseline) — no prior experiments to compare against.
+
+### How It Works
+
+1. Score the current mutation against all evals (this already happens in Phase 7). Record per-eval results in `eval_results`.
+2. Load `eval_results` from prior kept experiments in `results.json` (cap at 5 most recent for Deep tier).
+3. For each eval: compare current result against the BEST prior result for that eval across kept experiments.
+   - If an eval was `pass` in ANY prior kept experiment and is now `fail` → regression detected.
+4. Record `regression_check` in the current experiment record.
+
+### Presenting Results
+
+**No regressions:**
+"Score: {X}%. Regression check: all prior improvements stable. {Recommend keep/discard based on score}."
+
+**Regressions found:**
+"Score: {X}%. **Regression warning:** {N} eval(s) that previously passed now fail:
+- E{N}: was pass (experiment {M}), now fail. {detail}
+Recommend discard — this mutation breaks previous improvements."
+
+The user can override (keep anyway). Log as: `{"phase":"7","type":"regression","experiment":N,...,"user_action":"keep_override","reason":"..."}`
+
+### Backup and Revert
+
+- **Before each mutation:** save `<skill>-optimized-prev.md` as backup. Overwritten before each new mutation (single-level undo).
+- **On discard (regression or user choice):** restore backup as the current baseline. Do NOT record the discarded mutation as "keep" in results.json.
+- **On keep:** backup is no longer needed (next mutation will create a new one).
