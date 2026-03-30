@@ -46,7 +46,7 @@ If `autoresearch-<skill>/` doesn't exist: create it with `traces/` and `judges/`
 - `changelog.md`, `eval-suite.md`, `error-analysis-traces.md` — empty, formatted in later phases
 - Copy `dashboard.html` from this skill's directory, replace `{{SKILL_NAME}}`
 
-If workspace exists **with** `state.json`: read it and print pipeline status. **Check for checkpoint:** if `state.json.checkpoint` is not null and has `next_action`, enter resume mode — read all files in `checkpoint.files_to_read_on_resume`, print "Resuming from checkpoint: {next_action}", clear the checkpoint (set to null), and proceed from `next_action`. See `references.md > Checkpoint Schema > Resume Detection`. Rotate `session-log.json` (rename to `session-log-<session_start, colons→dashes>.json`, create fresh). If `session-log.json` missing (pre-v2 workspace), create it. Legacy workspaces (schema_version 2 or 3) are read-compatible — checkpoint fields default to null.
+If workspace exists **with** `state.json`: read it and print pipeline status. **Check for checkpoint:** if `state.json.checkpoint` is not null and has `next_action`, enter resume mode — read all files in `checkpoint.files_to_read_on_resume` (skip any missing files and note which were missing), print "Resuming from checkpoint: {next_action}", clear the checkpoint (set to null), and proceed from `next_action`. See `references.md > Checkpoint Schema > Resume Detection`. Rotate `session-log.json` (rename to `session-log-<session_start, colons→dashes>.json`, create fresh). If `session-log.json` missing (pre-v2 workspace), create it. Legacy workspaces (schema_version 2 or 3) are read-compatible — checkpoint fields default to null.
 
 If workspace exists **without** `state.json`: back up to `autoresearch-<skill>-prev/` and create fresh.
 
@@ -134,7 +134,7 @@ Present each mutation to the user (diff, score change, proposed keep/discard). U
 ### QS Step 5: Results + Handoff (2 min)
 Show before/after comparison. All results labeled "directional improvement, not validated."
 
-**State update:** In state.json, set `quick_start.completed = true` with metadata (traces, evals, mutations, timestamp). Keep `gates.gulf_1` and `gates.gulf_2` as `"pending"`. Set `current_phase: 0` (integer — 0 means Quick Start complete; phases 1-7 use integers 1-7). Set `phases.design_audit: "complete"` (Phase 1 was run). Bump `schema_version` to 3.
+**State update:** In state.json, set `quick_start.completed = true` with metadata (traces, evals, mutations, timestamp). Keep `gates.gulf_1` and `gates.gulf_2` as `"pending"`. Set `current_phase: 0` (integer — 0 means Quick Start complete; phases 1-7 use integers 1-7). Set `phases.design_audit: "complete"` (Phase 1 was run). Keep `schema_version` at 4 (do NOT downgrade).
 
 **Handoff:** "Your skill is better. Here's what Standard gives you: validated evals with TPR/TNR, a full failure taxonomy, and confidence-weighted optimization. Everything you just built carries forward — Standard extends this workspace."
 
@@ -263,7 +263,7 @@ The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + 
 2. LOOP:
    a. Analyze failures → hypothesize ONE change → **save backup** (`<skill>-optimized-prev.md`) → mutate a copy
    b. Score mutation against all evals → record `eval_results`
-   c. **Regression check:** Compare current `eval_results` against prior kept experiments. If any eval that previously passed now fails → regression detected. Details: `references.md > Regression Check Schema`. Skip on experiment 0/1 (no prior experiments).
+   c. **Regression check:** Compare current `eval_results` against prior kept experiments. If any eval that previously passed now fails → regression detected. Details: `references.md > Regression Check Schema`. Skip on experiments 0 and 1 (baseline has no prior kept experiments to compare against).
    d. **Present to user** — show mutation diff, score change, regression status, proposed keep/discard. One decision point.
    e. User accepts or overrides → record in results.json (with `eval_results` + `regression_check`) + results.tsv + changelog.md
    f. If discarded (regression or user choice): restore backup as current baseline
