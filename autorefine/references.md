@@ -155,7 +155,7 @@ Read when: Quick Start QS Step 5 (state update) or Initialize Workspace.
 ### state.json after Quick Start
 ```json
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "skill_name": "<name>",
   "skill_path": "<path>",
   "started": "<today>",
@@ -178,7 +178,7 @@ Read when: Quick Start QS Step 5 (state update) or Initialize Workspace.
 }
 ```
 
-**Schema migration:** When reading state.json with `schema_version: 2`, treat as legacy — Quick Start not available, proceed with Standard/Deep routing only. No migration needed; schema_version 3 is only written by Quick Start.
+**Schema migration:** When reading state.json with `schema_version: 2`, treat as legacy — Quick Start not available, proceed with Standard/Deep routing only. When reading `schema_version: 3`, treat as legacy Quick Start (v2.2) — read-compatible with v2.3, checkpoint fields default to null. New workspaces and Quick Start completions both write schema_version 4.
 
 ---
 
@@ -638,6 +638,7 @@ Parsing rules:
 - Each token: `{ID}:{verdict}` or `{ID}:{verdict}({note})`
 - Verdict is case-insensitive: Pass, pass, PASS all valid
 - Notes in parentheses are optional — record if present
+- If fewer verdicts received than traces in the batch: accept the ones provided, then ask for the missing ones: "Missing verdicts for {IDs}. Pass or Fail?"
 - If parsing fails (freeform text, missing IDs, unrecognized format): fall back to asking one at a time (current Phase 3 behavior). Say: "I couldn't parse that format. Let me ask one at a time instead."
 
 ### Batch Size
@@ -696,7 +697,7 @@ To resume, paste this prompt into a new autorefine session.
 
 When reading state.json on startup:
 1. If `checkpoint` is not null and `checkpoint.next_action` exists → resume mode
-2. Read all files listed in `checkpoint.files_to_read_on_resume`
+2. Read all files listed in `checkpoint.files_to_read_on_resume`. If any file is missing, skip it and note: "Missing file: {filename} — may have been deleted between sessions."
 3. Print resume context: "Resuming from checkpoint: {next_action}"
 4. Set `checkpoint` to null (clear the checkpoint — it's been consumed)
 5. Proceed from `checkpoint.next_action`
@@ -720,7 +721,7 @@ Read when: Phase 7 active (after scoring, before presenting to user).
 
 After scoring a mutation against the eval suite, BEFORE presenting results to the user. This ensures the user sees score + regression status together in one decision point.
 
-**Skip on experiment 1** (baseline) — no prior experiments to compare against.
+**Skip on experiments 0 and 1** — experiment 0 is the baseline (no mutation), experiment 1 is the first mutation (no prior kept experiments to compare against).
 
 ### How It Works
 
