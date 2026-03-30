@@ -220,7 +220,7 @@ Generate `gate-report-gulf-1.md` with: sample stats, fail rate, categories, cons
 
 **Step 2: Build code-based evaluators.** One-liner or short script per eval. Test on 3 dev fixtures.
 
-**Step 3: Build agent-as-judge prompts.** Each judge has 4 components: task+criterion, Pass/Fail definitions, 3 few-shot examples (TRAIN split only — never dev/test), critique-before-verdict output format. The coding agent itself IS the judge — no external API needed. Full template: `references.md > Judge Prompt Template`.
+**Step 3: Build agent-as-judge prompts.** Each judge has 4 components: task+criterion, Pass/Fail definitions, 3 few-shot examples (TRAIN split only — never dev/test), critique-before-verdict output format. The coding agent itself IS the judge — no external API needed. **Anti-rigidity rule:** Score on outcome achievement, not path matching. A judge that fails outputs for using different structure or wording than the reference is penalizing creativity, not catching errors. Full template: `references.md > Judge Prompt Template`.
 
 **Step 4: Write to workspace.** Save to `judges/judge-E{N}-{name}.md` and `judges/code-E{N}-{name}.sh`.
 
@@ -269,11 +269,15 @@ The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + 
    f. If discarded (regression or user choice): restore backup as current baseline
 3. Repeat until all evals pass or budget exhausted
 
-**Key rules:** One mutation per experiment. Mutate a copy (`<skill>-optimized.md`), not the original. If score improves, the mutated copy becomes the new baseline for the next experiment. Target baseline 60-80% (>90% = evals too easy). Formats: `references.md > Results & Changelog Schemas`.
+**Key rules:** One mutation per experiment. Mutate a copy (`<skill>-optimized.md`), not the original. If score improves, the mutated copy becomes the new baseline for the next experiment. Target baseline 60-80% (>90% = evals too easy). **Mutation types:** add, modify, OR delete. After every 2-3 additive mutations, try one subtractive mutation — remove instructions and measure if performance improves. Shorter skills often outperform bloated ones. Formats: `references.md > Results & Changelog Schemas`.
 
 **Confidence-weighted scoring:** Weight each eval by its judge's validated TPR/TNR. Code evals = 1.0. Agent evals = (TPR+TNR)/2. Experiment score = weighted sum / sum of weights.
 
 **User verdict confirmation:** After each experiment, present the score change, regression status, and proposed keep/discard to the user. If the user overrides (e.g., keeps despite regression, or discards despite clean score), log as `type: "judge_gap"` in session-log.json: `{"phase":"7","type":"judge_gap","experiment":N,"agent_verdict":"keep","user_verdict":"discard","reason":"..."}`. These indicate judge blind spots and feed the loop-back prompt. Regression overrides also log: `{"phase":"7","type":"regression",...,"user_action":"keep_override"}`.
+
+**Eval dimension pruning:** After the loop completes, check results.json for evals that passed 100% across ALL experiments (baseline + mutations). Flag them: "E{N} passed every experiment. This eval may no longer discriminate — consider whether the model has outgrown it or the criterion is too lenient."
+
+**Mutation history:** Record discarded experiments with the same detail as kept ones — full `changes[]` diff, `eval_results`, and `regression_check`. Discarded mutations have diagnostic value: patterns in what fails reveal what the skill actually needs.
 
 **State:** Update after each experiment (include `eval_results` and `regression_check`). **Dashboard:** serve workspace with `python3 -m http.server 8080`.
 
@@ -319,6 +323,7 @@ See `references.md > Gotchas` for the full list. Critical ones:
 4. **Never run two sessions on same skill.** state.json has no locking.
 5. **"Invoke" means "read and follow."** Not all agents support direct skill invocation.
 6. **Quick Start is a preview, not validation.** Bootstrap evals are directional, not calibrated. Quick Start does NOT satisfy Gulf 1 or Gulf 2. Run Standard to validate results.
+7. **Critical state lives in files, not conversation.** Keep mutation rationale, eval scores, and pipeline state in workspace files (state.json, results.json). Auto-compact at ~85% context erases conversation history — only the skill file (loaded via system prompt) survives.
 
 ---
 
