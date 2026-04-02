@@ -77,7 +77,27 @@ If workspace `traces/` and `judges/` subdirectories don't exist: create them. Ge
 - `changelog.md`, `eval-suite.md`, `error-analysis-traces.md` — empty, formatted in later phases
 - Copy `dashboard.html` from this skill's directory, replace `{{SKILL_NAME}}`
 
-If workspace exists **with** `state.json`: read it and print pipeline status. **Check for checkpoint:** if `state.json.checkpoint` is not null and has `next_action`, enter resume mode — read all files in `checkpoint.files_to_read_on_resume` (skip any missing files and note which were missing), print "Resuming from checkpoint: {next_action}", clear the checkpoint (set to null), and proceed from `next_action`. See `references.md > Checkpoint Schema > Resume Detection`. Rotate `session-log.json` (rename to `session-log-<session_start, colons→dashes>.json`, create fresh). If `session-log.json` missing (pre-v2 workspace), create it. Legacy workspaces (schema_version 2 or 3) are read-compatible — checkpoint fields default to null.
+If workspace exists **with** `state.json`: read it and print pipeline status.
+
+**Ambient learning check (on resume only, AFTER checkpoint recovery):**
+This runs AFTER the checkpoint resume logic completes (not before — overwriting the workspace copy before checkpoint recovery would corrupt in-progress experiments).
+
+Guard: `state.json.original_skill_path` must exist and be readable. If unreadable (sandbox, deleted), skip ambient learning silently and continue.
+
+1. Run `diff state.json.original_skill_path/SKILL.md [workspace]/skill-under-test/SKILL.md`. If the `diff` command fails (sandbox restriction), skip ambient learning and continue.
+2. If no diff → skill unchanged. Continue.
+3. If diff exists → size gate:
+   - **Small diff (≤20 lines changed):** likely preference signal. Proceed to step 4.
+   - **Large diff (>20 lines, ≤50% of file):** warn: "Large diff detected (N lines). Treat as preference signal or new baseline?" If user says baseline → skip to step 5.
+   - **Rewrite (>50% of file):** skip rule extraction. Log `{"type":"ambient_learning","skipped":true,"reason":"full_rewrite","diff_size":N}`. Go to step 5.
+4. **Extract preference rules.** Show the diff to the user. Ask: "Should I learn from these edits? (y/n)". If yes, extract rules using this format:
+   ```
+   RULE: [one-sentence preference]
+   EVIDENCE: [quote removed text] → [quote added text] (max 2 lines each)
+   CONFIDENCE: high (clear intent) | medium (inferred) | low (ambiguous)
+   ```
+   Only auto-log `high` and `medium` rules. Present `low` rules for user confirmation. Distinguish preference edits from bug fixes (if the user fixed a typo or corrected a factual error, that's a fix, not a preference — skip it). Log to `[workspace]/preferences.md` (separate from `learnings.md` used by Session Close) and session-log: `{"type":"ambient_learning","rules_extracted":N,"diff_size":N}`.
+5. **Sync workspace copy.** Always update: `cp [original]/SKILL.md [workspace]/skill-under-test/SKILL.md`. This ensures the next mutation cycle starts from the user's current version. **Check for checkpoint:** if `state.json.checkpoint` is not null and has `next_action`, enter resume mode — read all files in `checkpoint.files_to_read_on_resume` (skip any missing files and note which were missing), print "Resuming from checkpoint: {next_action}", clear the checkpoint (set to null), and proceed from `next_action`. See `references.md > Checkpoint Schema > Resume Detection`. Rotate `session-log.json` (rename to `session-log-<session_start, colons→dashes>.json`, create fresh). If `session-log.json` missing (pre-v2 workspace), create it. Legacy workspaces (schema_version 2 or 3) are read-compatible — checkpoint fields default to null.
 
 If workspace exists **without** `state.json`: back up the workspace to `[chosen-workspace]-prev/` and create a fresh workspace at `[chosen-workspace]/`.
 
@@ -292,7 +312,7 @@ The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + 
 **The Loop:**
 1. Run baseline on all fixtures, score against all evals → Experiment 0. Record `eval_results` per eval.
 2. LOOP:
-   a. Analyze failures → hypothesize ONE change → **save backup** (`[workspace]/<skill>-optimized-prev.md`) → mutate a copy
+   a. Analyze failures → hypothesize ONE change. If `[workspace]/preferences.md` exists, read it first — do NOT propose mutations that contradict learned user preferences. **Save backup** (`[workspace]/<skill>-optimized-prev.md`) → mutate a copy
    b. **Score mutation (with bias reduction for agent-as-judge evals):**
       - For **code-based evals**: run directly (deterministic, no bias risk).
       - For **agent-as-judge evals**: the agent that hypothesized the mutation is biased toward finding it improved. Reduce this bias using the strongest available mechanism:
