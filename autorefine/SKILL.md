@@ -300,6 +300,8 @@ The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + 
         **Tier 1 — Subagent dispatch (strong isolation, use when available):**
         Write `[workspace]/eval-tasks/exp{N}-E{M}.md` containing ONLY: the judge prompt (from `judges/`), the fixture input, and the skill output to evaluate (the mutated output — judge scores ONE output per invocation, same format as Phase 6 validation). Do NOT include: baseline output, mutation hypothesis, or Phase 1-3 findings. Dispatch a subagent with ONLY this file as input. Subagent produces Critique + Pass/Fail. Parent reads the verdict.
 
+        **Fork economics (Tier 1 only):** When dispatching eval subagents, omit `subagent_type` to trigger a fork instead of a spawn. The fork inherits the parent's cached prompt prefix — judge prompts, fixtures, and workspace context are already loaded. Only the eval-task file content differs per experiment. This means each eval subagent pays cache price (1/10) for the shared prefix and full price only for the new eval-task content (~500 tokens). With 5 agent-as-judge evals across 5 experiments = 25 dispatches, fork saves ~80% vs spawn. If fork is unavailable (in-house agent), fall back to Tier 2.
+
         **Tier 2 — Behavioral instruction (bias reduction, for Read/Write/Bash-only agents):**
         If subagent dispatch is unavailable: score each agent-as-judge eval by reading ONLY the judge prompt file and the skill output. Before scoring, explicitly state: "I am now evaluating this output against the rubric only. I am disregarding my prior reasoning about why this mutation was made." This is a *heuristic* that reduces but does not eliminate self-certification bias.
 
