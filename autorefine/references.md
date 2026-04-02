@@ -51,7 +51,7 @@ Entry types:
 - Regression: `{"phase":"7","type":"regression","experiment":3,"detail":"E2 regressed: was pass (exp 1), now fail. Gotcha section removed by mutation.","user_action":"discard"}`
 - Circuit breaker: `{"phase":"7","type":"circuit_breaker","diagnosis":"content_ceiling|strategy_review","consecutive_discards":3,"experiments":[3,4,5]}`
 - Circuit breaker override: `{"phase":"7","type":"circuit_breaker_override","reason":"user chose to continue"}`
-- Apply back: `{"type":"apply_back","applied":true,"source":"[workspace]/skill-under-test/SKILL.md","target":"[original]/SKILL.md"}`
+- Apply back: `{"type":"apply_back","applied":true,"source":"[workspace]/skill-under-test/SKILL.md","target":"[original-skill-path]/SKILL.md"}`
 - Ambient learning: `{"type":"ambient_learning","rules_extracted":2,"diff_size":12}` or `{"type":"ambient_learning","skipped":true,"reason":"full_rewrite","diff_size":180}`
 
 ---
@@ -166,6 +166,8 @@ Read when: Quick Start QS Step 5 (state update) or Initialize Workspace.
   "schema_version": 4,
   "skill_name": "<name>",
   "skill_path": "<path>",
+  "original_skill_path": "<path>",
+  "workspace_path": "<path>",
   "started": "<today>",
   "current_phase": 0,
   "current_gulf": 1,
@@ -175,6 +177,9 @@ Read when: Quick Start QS Step 5 (state update) or Initialize Workspace.
   "loop_iteration": 0,
   "locked_judges": [],
   "memory_path": null,
+  "checkpoint": null,
+  "consecutive_discards": 0,
+  "circuit_breaker": null,
   "quick_start": {
     "completed": true,
     "mini_phase_3_traces": 5,

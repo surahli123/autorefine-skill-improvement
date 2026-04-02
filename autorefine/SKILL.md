@@ -67,7 +67,7 @@ After Step 0 completes, print:
 
 ## Initialize Workspace
 
-**Workspace path** was confirmed in Preflight Step 0. The workspace is at `[chosen-workspace]/` and the working copy of the skill is at `[chosen-workspace]/skill-under-test/`.
+**Workspace path** was confirmed in Preflight Step 0. The workspace is at `[workspace]/` and the working copy of the skill is at `[workspace]/skill-under-test/`. (After Preflight, `[workspace]` = the path chosen in Step 0.3 and persisted in `state.json.workspace_path`.)
 
 If workspace `traces/` and `judges/` subdirectories don't exist: create them. Generate these files (see `references.md > Workspace Schemas` for exact formats):
 - `state.json` — pipeline state (schema_version:4 for new workspaces — see `references.md > Workspace Schemas`)
@@ -79,12 +79,14 @@ If workspace `traces/` and `judges/` subdirectories don't exist: create them. Ge
 
 If workspace exists **with** `state.json`: read it and print pipeline status.
 
-**Ambient learning check (on resume only, AFTER checkpoint recovery):**
-This runs AFTER the checkpoint resume logic completes (not before — overwriting the workspace copy before checkpoint recovery would corrupt in-progress experiments).
+**Step A: Checkpoint recovery (runs FIRST on resume).**
+If `state.json.checkpoint` is not null and has `next_action`, enter resume mode — read all files in `checkpoint.files_to_read_on_resume` (skip any missing files and note which were missing), print "Resuming from checkpoint: {next_action}", clear the checkpoint (set to null). See `references.md > Checkpoint Schema > Resume Detection`. Rotate `session-log.json` (rename to `session-log-<session_start, colons→dashes>.json`, create fresh). If `session-log.json` missing (pre-v2 workspace), create it. Legacy workspaces (schema_version 2 or 3) are read-compatible — checkpoint fields default to null. If checkpoint has `next_action` pointing to a Phase 7 experiment, **skip ambient learning entirely** (workspace copy must match the in-progress experiment state) and proceed from `next_action`.
+
+**Step B: Ambient learning (runs AFTER checkpoint recovery, only if NOT resuming mid-Phase-7).**
 
 Guard: `state.json.original_skill_path` must exist and be readable. If unreadable (sandbox, deleted), skip ambient learning silently and continue.
 
-1. Run `diff state.json.original_skill_path/SKILL.md [workspace]/skill-under-test/SKILL.md`. If the `diff` command fails (sandbox restriction), skip ambient learning and continue.
+1. Run `diff [original-skill-path]/SKILL.md [workspace]/skill-under-test/SKILL.md`. If the `diff` command fails (sandbox restriction), skip ambient learning and continue.
 2. If no diff → skill unchanged. Continue.
 3. If diff exists → size gate:
    - **Small diff (≤20 lines changed):** likely preference signal. Proceed to step 4.
@@ -97,9 +99,9 @@ Guard: `state.json.original_skill_path` must exist and be readable. If unreadabl
    CONFIDENCE: high (clear intent) | medium (inferred) | low (ambiguous)
    ```
    Only auto-log `high` and `medium` rules. Present `low` rules for user confirmation. Distinguish preference edits from bug fixes (if the user fixed a typo or corrected a factual error, that's a fix, not a preference — skip it). Log to `[workspace]/preferences.md` (separate from `learnings.md` used by Session Close) and session-log: `{"type":"ambient_learning","rules_extracted":N,"diff_size":N}`.
-5. **Sync workspace copy.** Always update: `cp [original]/SKILL.md [workspace]/skill-under-test/SKILL.md`. This ensures the next mutation cycle starts from the user's current version. **Check for checkpoint:** if `state.json.checkpoint` is not null and has `next_action`, enter resume mode — read all files in `checkpoint.files_to_read_on_resume` (skip any missing files and note which were missing), print "Resuming from checkpoint: {next_action}", clear the checkpoint (set to null), and proceed from `next_action`. See `references.md > Checkpoint Schema > Resume Detection`. Rotate `session-log.json` (rename to `session-log-<session_start, colons→dashes>.json`, create fresh). If `session-log.json` missing (pre-v2 workspace), create it. Legacy workspaces (schema_version 2 or 3) are read-compatible — checkpoint fields default to null.
+5. **Sync workspace copy.** Always update: `cp [original-skill-path]/SKILL.md [workspace]/skill-under-test/SKILL.md`. This ensures the next mutation cycle starts from the user's current version.
 
-If workspace exists **without** `state.json`: back up the workspace to `[chosen-workspace]-prev/` and create a fresh workspace at `[chosen-workspace]/`.
+If workspace exists **without** `state.json`: back up the workspace to `[workspace]-prev/` and create a fresh workspace at `[workspace]/`.
 
 ## Pipeline Status
 
@@ -397,7 +399,7 @@ If session-log has ≥2 `judge_gap` entries:
 > - [reason 2]
 > Loop back to Phase 5 to refine judges, then re-run Phase 7? Or accept current results?"
 
-If user loops back: Phase 5 enters append mode (`locked_judges` prevents modifying approved judges). Phase 6 validates only new judges. Phase 7 re-runs with expanded suite. Score may drop — this is more accurate measurement, not regression. Explain this to the user. Max 2 loop-backs per session. Increment `loop_iteration` in state.json.
+If user loops back: Phase 5 enters append mode (`locked_judges` prevents modifying approved judges). Phase 6 validates only new judges. Phase 7 re-runs with expanded suite — reset `consecutive_discards = 0` in state.json on re-entry (scoring changed, old counter is invalid). Score may drop — this is more accurate measurement, not regression. Explain this to the user. Max 2 loop-backs per session. Increment `loop_iteration` in state.json.
 
 ---
 
@@ -405,11 +407,12 @@ If user loops back: Phase 5 enters append mode (`locked_judges` prevents modifyi
 
 Runs after Phase 7, when user stops mid-pipeline, or when user explicitly pauses. Minimum: session-log must have ≥3 entries for learning summary.
 
-0. **Apply back gate** — If any mutations were kept, ask: "Apply the improved SKILL.md back to the original location ([original-skill-path])? (y/n)". If yes: `cp [workspace]/skill-under-test/SKILL.md [original-skill-path]/SKILL.md`. If no: tell the user where the improved version lives. Log the decision to session-log.json: `{"type":"apply_back","applied":true/false,"source":"[workspace]/skill-under-test/SKILL.md","target":"[original-skill-path]/SKILL.md"}`. **If the copy fails** (e.g., sandbox restriction): don't retry. Print the full path and tell the user to copy manually: `cp [workspace path] [original path]`.
+0. **Apply back gate** — If any mutations were kept: first sync the best kept mutation into the working copy (`cp [workspace]/<skill>-optimized.md [workspace]/skill-under-test/SKILL.md`) so the working copy reflects the latest improvements. Then ask: "Apply the improved SKILL.md back to the original location ([original-skill-path])? (y/n)". If yes: `cp [workspace]/skill-under-test/SKILL.md [original-skill-path]/SKILL.md`. If no: tell the user where the improved version lives. Log the decision to session-log.json: `{"type":"apply_back","applied":true/false,"source":"[workspace]/skill-under-test/SKILL.md","target":"[original-skill-path]/SKILL.md"}`. **If the copy fails** (e.g., sandbox restriction): don't retry. Print the full path and tell the user to copy manually: `cp [workspace]/skill-under-test/SKILL.md [original-skill-path]/SKILL.md`.
+0b. **Clean up temporary files** — Remove `[workspace]/eval-tasks/` directory if it exists (debugging artifacts from Phase 7 verification isolation).
 1. **Save checkpoint** — update `state.json.checkpoint` with current state and write `resume-prompt.txt` to workspace root. See `references.md > Checkpoint Schema`. Append to session-log: `{"type":"checkpoint",...}`.
 2. **Synthesize** session-log.json into 3-5 bullet learning summary (what worked, what was overridden, patterns emerged)
 3. **User curates** — present summary, ask for edits or approval
-4. **Persist** to agent memory system (path from `state.json.memory_path`, or ask on first run and record). If no memory system exists, write to `[chosen-workspace]/learnings.md` as fallback.
+4. **Persist** to agent memory system (path from `state.json.memory_path`, or ask on first run and record). If no memory system exists, write to `[workspace]/learnings.md` as fallback.
 5. **Present resume prompt** — "You can resume anytime. Paste this into a new session:" followed by the resume prompt from `resume-prompt.txt`.
 6. **Archive** — rename session-log.json to `session-log-<timestamp>.json`
 
