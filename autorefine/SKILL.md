@@ -293,7 +293,17 @@ The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + 
 1. Run baseline on all fixtures, score against all evals → Experiment 0. Record `eval_results` per eval.
 2. LOOP:
    a. Analyze failures → hypothesize ONE change → **save backup** (`[workspace]/<skill>-optimized-prev.md`) → mutate a copy
-   b. Score mutation against all evals → record `eval_results`
+   b. **Score mutation (with bias reduction for agent-as-judge evals):**
+      - For **code-based evals**: run directly (deterministic, no bias risk).
+      - For **agent-as-judge evals**: the agent that hypothesized the mutation is biased toward finding it improved. Reduce this bias using the strongest available mechanism:
+
+        **Tier 1 — Subagent dispatch (strong isolation, use when available):**
+        Write `[workspace]/eval-tasks/exp{N}-E{M}.md` containing ONLY: the judge prompt (from `judges/`), the fixture input, and the skill output to evaluate (the mutated output — judge scores ONE output per invocation, same format as Phase 6 validation). Do NOT include: baseline output, mutation hypothesis, or Phase 1-3 findings. Dispatch a subagent with ONLY this file as input. Subagent produces Critique + Pass/Fail. Parent reads the verdict.
+
+        **Tier 2 — Behavioral instruction (bias reduction, for Read/Write/Bash-only agents):**
+        If subagent dispatch is unavailable: score each agent-as-judge eval by reading ONLY the judge prompt file and the skill output. Before scoring, explicitly state: "I am now evaluating this output against the rubric only. I am disregarding my prior reasoning about why this mutation was made." This is a *heuristic* that reduces but does not eliminate self-certification bias.
+
+        Keep eval-task files in `[workspace]/eval-tasks/` for debugging (clean up at Session Close, not per-eval). Record `eval_results` per eval.
    c. **Regression check:** Compare current `eval_results` against prior kept experiments. If any eval that previously passed now fails → regression detected. Details: `references.md > Regression Check Schema`. Skip on experiments 0 and 1 (baseline has no prior kept experiments to compare against).
    d. **Present to user** — show mutation diff, score change, regression status, proposed keep/discard. One decision point.
    e. User accepts or overrides → record in results.json (with `eval_results` + `regression_check`) + results.tsv + changelog.md
@@ -400,7 +410,8 @@ See `references.md > Gotchas` for the full list. Critical ones:
 7. **Critical state lives in files, not conversation.** Keep mutation rationale, eval scores, and pipeline state in workspace files (state.json, results.json). Auto-compact at ~85% context erases conversation history — only the skill file (loaded via system prompt) survives.
 8. **Never write to the original skill path during the pipeline.** All work happens on the workspace copy at `[workspace]/skill-under-test/`. The original is only touched during Session Close "Apply back gate" with explicit user approval.
 9. **Sandbox environments block cross-directory access.** If Preflight Step 0 fails on read/write, use `/tmp/` as workspace and copy the skill in. Don't spend time debugging sandbox paths — use the workaround.
-10. **Workspace location must be confirmed, never assumed.** The agent must NEVER create a workspace directory without asking the user where. Default recommendation is `/tmp/autorefine-[skill-name]/` (safest). Creating inside a repo risks breaking git state, CI, or other tools.
+10. **Agent-as-judge evals should not see mutation reasoning.** The agent that hypothesized a mutation is biased toward finding it improved. Tier 1 (subagent dispatch) achieves real isolation — the judge has no mutation context. Tier 2 (behavioral instruction) reduces but does not eliminate bias — the agent still has mutation context in conversation history. Tier 2 is a heuristic, not a guarantee. If scoring feels unreliable, loop back to Phase 5-6 to add more code-based evals (which are immune to this bias).
+11. **Workspace location must be confirmed, never assumed.** The agent must NEVER create a workspace directory without asking the user where. Default recommendation is `/tmp/autorefine-[skill-name]/` (safest). Creating inside a repo risks breaking git state, CI, or other tools.
 
 ---
 
