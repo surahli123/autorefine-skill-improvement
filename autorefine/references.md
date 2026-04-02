@@ -54,7 +54,7 @@ Entry types:
 - Circuit breaker override: `{"phase":"7","type":"circuit_breaker_override","reason":"user chose to continue"}`
 - Discard autopsy: `{"phase":"7","type":"discard_autopsy","experiment":N,"classification":"wrong_target|wrong_params|wrong_type","reasoning":"1-sentence explanation"}`
 - Canonical headings: `{"phase":"7","type":"canonical_headings","sections":["section1","section2","..."]}`
-- Derived registry snapshot: `{"phase":"7","type":"derived_registry_snapshot","experiment":N,"sections_explored":{"section1":{"count":2,"best_delta":0.12},...},"mutation_types":{"add":3,"modify":2,"delete":1},"diversity_score":0.6}`
+- Derived registry snapshot: `{"phase":"7","type":"derived_registry_snapshot","experiment":N,"sections_explored":{"section1":{"count":2,"best_delta":0.12,"last_tried":3,"autopsy_pattern":"wrong_target"},...},"mutation_types":{"add":3,"modify":2,"delete":1},"diversity_score":0.6}`
 - Apply back: `{"type":"apply_back","applied":true,"source":"[workspace]/skill-under-test/SKILL.md","target":"[original-skill-path]/SKILL.md"}`
 - Ambient learning: `{"type":"ambient_learning","rules_extracted":2,"diff_size":12}` or `{"type":"ambient_learning","skipped":true,"reason":"full_rewrite","diff_size":180}`
 
@@ -393,7 +393,7 @@ Read when: Phase 7 active.
 
 ### Results.json experiment record
 ```json
-{"id":N,"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}]}
+{"id":N,"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}],"eval_results":[{"eval":"E1","result":"pass"}],"regression_check":null,"discard_autopsy":null}
 ```
 
 ---
@@ -491,6 +491,10 @@ This snapshot is forensic only — nothing reads it as authoritative state. It c
 ### Mini Mode
 
 Derived registry computes in Mini mode. With 2-3 experiments, diversity_score will typically be low (1-2 sections out of many). The score is still useful as a diagnostic in the session-log snapshot but does not trigger the Mutation Reviewer (P2, not yet implemented) or the circuit breaker (disabled in Mini).
+
+### Heading Granularity
+
+Canonical headings are parsed at `##` level only. Skills with meaningful structure at `###` level will report higher `diversity_score` than warranted (e.g., a skill with 3 `##` headings each containing 5 `###` sub-sections shows diversity based on 3 sections, not 15). This is acceptable for v1 — `##` headings correspond to the sections the agent targets in mutations. If mutation granularity moves to `###` level, update the heading parse to match.
 
 ### Multi-Section Mutations
 
