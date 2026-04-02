@@ -9,10 +9,39 @@ Guided skill improvement pipeline. Point at a skill: `/autorefine path/to/my-ski
 
 ## Preflight
 
-1. **Target exists.** Confirm the path contains a SKILL.md. If not, ask.
-2. **Detect enhancements.** Search for Hamel's `eval-audit` and `error-analysis` skills. If found, note in state.json. These enhance but are NOT required.
-3. **Report tier:** Full (Hamel's detected) or Basic (core methodology only).
-4. **Choose pipeline depth:**
+### Step 0: Environment Check (MANDATORY — runs first, < 15 seconds)
+
+Fast-fail checks. If ANY fail, STOP immediately with an actionable error message. Do NOT retry or explore alternatives silently.
+
+1. **Target skill path.** If user provided a path, use it. If not, ask: "Which skill should I improve? Provide the full path to the skill directory."
+2. **Target readable.** Run: `head -5 [skill-path]/SKILL.md`. If this fails → STOP: "I can't read your skill at [skill-path]. If you're in a sandboxed environment, copy your skill into my working directory first: `cp -r [skill-path] ./skill-under-test/` then re-invoke with `./skill-under-test/`"
+3. **Workspace location.** Ask the user (ONE question, wait for answer):
+   ```
+   Where should I create the AutoRefine workspace?
+     a) /tmp/autorefine-[skill-name]/  ← recommended (safe, no repo interference)
+     b) Next to your skill: [skill-parent]/autorefine-[skill-name]/
+     c) Custom path
+   ```
+   Default to (a) if user says "whatever" or "default." NEVER create the workspace without this confirmation.
+4. **Workspace writable.** Run: `mkdir -p [chosen-workspace] && touch [chosen-workspace]/.preflight-test && rm [chosen-workspace]/.preflight-test`. If this fails → STOP: "I can't write to [chosen-workspace]. Try option (a) /tmp/ which is always writable, or specify a different path."
+5. **Skill import.** Copy the entire skill directory into the workspace: `cp -r [skill-path]/ [chosen-workspace]/skill-under-test/`. All subsequent reads and writes operate ONLY on `[workspace]/skill-under-test/`, never on the original skill path. This protects the user's real skill from accidental modification.
+6. **Persist paths.** Record in state.json: `original_skill_path: [skill-path]`, `workspace_path: [chosen-workspace]`. These are needed for Session Close (Apply Back gate) and session resume.
+
+After Step 0 completes, print:
+```
+✓ Preflight passed
+  Target skill: [skill-path]/SKILL.md
+  Workspace: [chosen-workspace]/
+  Working copy: [chosen-workspace]/skill-under-test/SKILL.md
+  Original path saved for apply-back: [skill-path]
+  Original skill is UNTOUCHED until you approve changes.
+```
+
+### Step 1: Detect & Configure
+
+1. **Detect enhancements.** Search for Hamel's `eval-audit` and `error-analysis` skills. If found, note in state.json. These enhance but are NOT required.
+2. **Report tier:** Full (Hamel's detected) or Basic (core methodology only).
+3. **Choose pipeline depth:**
    - **Quick** — Context-aware. Routes based on workspace state (~15-30 min). See routing below.
    - **Standard** — Full pipeline (Phases 1-7). For skills needing eval methodology from scratch. ~60-90 min.
    - **Deep** — Standard + expanded fixture set (30+ fixtures). For critical skills requiring statistical rigor.
@@ -38,7 +67,9 @@ Guided skill improvement pipeline. Point at a skill: `/autorefine path/to/my-ski
 
 ## Initialize Workspace
 
-If `autoresearch-<skill>/` doesn't exist: create it with `traces/` and `judges/` subdirectories. Generate these files (see `references.md > Workspace Schemas` for exact formats):
+**Workspace path** was confirmed in Preflight Step 0. The workspace is at `[workspace]/` and the working copy of the skill is at `[workspace]/skill-under-test/`. (After Preflight, `[workspace]` = the path chosen in Step 0.3 and persisted in `state.json.workspace_path`.)
+
+If workspace `traces/` and `judges/` subdirectories don't exist: create them. Generate these files (see `references.md > Workspace Schemas` for exact formats):
 - `state.json` — pipeline state (schema_version:4 for new workspaces — see `references.md > Workspace Schemas`)
 - `results.json` — experiment results for dashboard
 - `results.tsv` — append-only experiment log
@@ -46,9 +77,31 @@ If `autoresearch-<skill>/` doesn't exist: create it with `traces/` and `judges/`
 - `changelog.md`, `eval-suite.md`, `error-analysis-traces.md` — empty, formatted in later phases
 - Copy `dashboard.html` from this skill's directory, replace `{{SKILL_NAME}}`
 
-If workspace exists **with** `state.json`: read it and print pipeline status. **Check for checkpoint:** if `state.json.checkpoint` is not null and has `next_action`, enter resume mode — read all files in `checkpoint.files_to_read_on_resume` (skip any missing files and note which were missing), print "Resuming from checkpoint: {next_action}", clear the checkpoint (set to null), and proceed from `next_action`. See `references.md > Checkpoint Schema > Resume Detection`. Rotate `session-log.json` (rename to `session-log-<session_start, colons→dashes>.json`, create fresh). If `session-log.json` missing (pre-v2 workspace), create it. Legacy workspaces (schema_version 2 or 3) are read-compatible — checkpoint fields default to null.
+If workspace exists **with** `state.json`: read it and print pipeline status.
 
-If workspace exists **without** `state.json`: back up to `autoresearch-<skill>-prev/` and create fresh.
+**Step A: Checkpoint recovery (runs FIRST on resume).**
+If `state.json.checkpoint` is not null and has `next_action`, enter resume mode — read all files in `checkpoint.files_to_read_on_resume` (skip any missing files and note which were missing), print "Resuming from checkpoint: {next_action}", clear the checkpoint (set to null). See `references.md > Checkpoint Schema > Resume Detection`. Rotate `session-log.json` (rename to `session-log-<session_start, colons→dashes>.json`, create fresh). If `session-log.json` missing (pre-v2 workspace), create it. Legacy workspaces (schema_version 2 or 3) are read-compatible — checkpoint fields default to null. If checkpoint has `next_action` pointing to a Phase 7 experiment, **skip ambient learning entirely** (workspace copy must match the in-progress experiment state) and proceed from `next_action`.
+
+**Step B: Ambient learning (runs AFTER checkpoint recovery, only if NOT resuming mid-Phase-7).**
+
+Guard: `state.json.original_skill_path` must exist and be readable. If unreadable (sandbox, deleted), skip ambient learning silently and continue.
+
+1. Run `diff [original-skill-path]/SKILL.md [workspace]/skill-under-test/SKILL.md`. If the `diff` command fails (sandbox restriction), skip ambient learning and continue.
+2. If no diff → skill unchanged. Continue.
+3. If diff exists → size gate:
+   - **Small diff (≤20 lines changed):** likely preference signal. Proceed to step 4.
+   - **Large diff (>20 lines, ≤50% of file):** warn: "Large diff detected (N lines). Treat as preference signal or new baseline?" If user says baseline → skip to step 5.
+   - **Rewrite (>50% of file):** skip rule extraction. Log `{"type":"ambient_learning","skipped":true,"reason":"full_rewrite","diff_size":N}`. Go to step 5.
+4. **Extract preference rules.** Show the diff to the user. Ask: "Should I learn from these edits? (y/n)". If yes, extract rules using this format:
+   ```
+   RULE: [one-sentence preference]
+   EVIDENCE: [quote removed text] → [quote added text] (max 2 lines each)
+   CONFIDENCE: high (clear intent) | medium (inferred) | low (ambiguous)
+   ```
+   Only auto-log `high` and `medium` rules. Present `low` rules for user confirmation. Distinguish preference edits from bug fixes (if the user fixed a typo or corrected a factual error, that's a fix, not a preference — skip it). Log to `[workspace]/preferences.md` (separate from `learnings.md` used by Session Close) and session-log: `{"type":"ambient_learning","rules_extracted":N,"diff_size":N}`.
+5. **Sync workspace copy.** Always update: `cp [original-skill-path]/SKILL.md [workspace]/skill-under-test/SKILL.md`. This ensures the next mutation cycle starts from the user's current version.
+
+If workspace exists **without** `state.json`: back up the workspace to `[workspace]-prev/` and create a fresh workspace at `[workspace]/`.
 
 ## Pipeline Status
 
@@ -91,7 +144,7 @@ Run Phase 1 as normal (see below). No changes.
 ### QS Step 2: Mini Phase 3 — Observation (10 min)
 Generate 5 inputs targeting the skill. Use Phase 1 findings as **focus areas** (not literal inputs — structural gaps like "missing gotchas" guide what scenarios to test, not what text to send). Sort findings by priority, take top 5 as focus areas, generate one diverse input per focus area that exercises the skill in a way where that gap would matter. If fewer than 5 gaps, fill remaining slots from the diversity spread (see `references.md > Quick Start > Mini Phase 3 Template`). For interactive or session-spanning skills, create synthetic output fixtures instead (same fallback as Standard Phase 3 Step 1).
 
-Run the skill on each input (read the target SKILL.md and provide the input as if you were a user requesting the skill — capture the full output). If the skill errors on an input, record the trace as a Fail with note "skill execution error: [error message]" and continue to the next input. Present outputs one at a time for user judgment:
+Run the skill on each input (read `[workspace]/skill-under-test/SKILL.md` and provide the input as if you were a user requesting the skill — capture the full output). If the skill errors on an input, record the trace as a Fail with note "skill execution error: [error message]" and continue to the next input. Present outputs one at a time for user judgment:
 ```
 --- Trace 1/5 ---
 Input: [summary]
@@ -123,7 +176,7 @@ Present all evals in a numbered list. User responds: "approved", "drop N", "chan
 ### QS Step 4: Mini Phase 7 — Targeted Mutations (10 min)
 Generate 5-10 **fresh** scoring inputs — NOT the same as Mini Phase 3 traces (reusing = overfitting). Use the diversity spread from `references.md > Quick Start > Mini Phase 3 Template`, but target different Phase 1 gaps or different complexity levels than QS Step 2. Ensure zero overlap with the 5 QS Step 2 inputs. Save scoring inputs to `traces/qs-scoring-S01.md` through `traces/qs-scoring-S10.md`.
 
-Run 2-3 mutations targeting the top Phase 1 + Mini Phase 3 findings. Score with bootstrap evals using simplified weighting: code evals = 1.0, agent-as-judge = 0.5 (flat discount, not empirical TPR/TNR).
+Run 2-3 mutations targeting the top Phase 1 + Mini Phase 3 findings. Score with bootstrap evals using simplified weighting: code evals = 1.0, agent-as-judge = 0.5 (flat discount, not empirical TPR/TNR). **Mini mode skips verification isolation** (Phase 7 step 2b) — bootstrap evals are already labeled "directional" and the overhead isn't justified for 2-3 experiments.
 
 Present each mutation to the user (diff, score change, proposed keep/discard). User confirms or overrides. Record in results.json + session-log.json.
 
@@ -149,7 +202,7 @@ Show before/after comparison. All results labeled "directional improvement, not 
 
 ## Phase 1: Design Audit
 
-Read the target SKILL.md. Score 4 dimensions: **Gotchas**, **Voice**, **Progressive Disclosure**, **Scripts** (if any). For each Partial/Missing: quote the problem, recommend a fix, assign priority.
+Read the workspace copy of the target skill at `[workspace]/skill-under-test/SKILL.md` (established in Preflight Step 0). Score 4 dimensions: **Gotchas**, **Voice**, **Progressive Disclosure**, **Scripts** (if any). For each Partial/Missing: quote the problem, recommend a fix, assign priority.
 
 **Gotchas dimension — 3-stage detection:**
 1. **Taxonomy scan:** Check skill against 6 gotcha categories (shell execution, path handling, state mutation, concurrent access, auth/secrets, external APIs). Skills touching NONE → score "N/A." Full category list: `references.md > Gotcha Taxonomy`.
@@ -259,17 +312,76 @@ The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + 
 **Mini mode differences:** Fresh scoring corpus (5-10 generated inputs, NOT reusing Quick Start traces). Simplified weighting: code evals = 1.0, agent-as-judge = 0.5. All results labeled "directional." No confidence weighting from Phase 6 (evals aren't validated).
 
 **The Loop:**
-1. Run baseline on all fixtures, score against all evals → Experiment 0. Record `eval_results` per eval.
+1. Run baseline on all fixtures, score against all evals → Experiment 0. Record `eval_results` per eval. **Canonical heading parse:** parse the target skill's `##` headings into a list of section names. Log to session-log: `{"phase":"7","type":"canonical_headings","sections":["heading1","heading2",...]}`. This list is the denominator for `diversity_score` in the derived mutation registry (see `references.md > Derived Mutation Registry`).
 2. LOOP:
-   a. Analyze failures → hypothesize ONE change → **save backup** (`<skill>-optimized-prev.md`) → mutate a copy
-   b. Score mutation against all evals → record `eval_results`
+   a. Analyze failures → hypothesize ONE change. If `[workspace]/preferences.md` exists, read it first — do NOT propose mutations that contradict learned user preferences. **If recent experiments were discarded, read their `discard_autopsy` classification** — avoid same target if `wrong_target`, try different params if `wrong_params`, try different mutation type (add↔delete↔modify) if `wrong_type`. **Check search diversity:** compute the derived mutation registry (see `references.md > Derived Mutation Registry`). If `diversity_score < 0.5`, prioritize unexplored sections. Log the snapshot to session-log. **Save backup** (`[workspace]/<skill>-optimized-prev.md`) → mutate a copy
+   b. **Score mutation (with bias reduction for agent-as-judge evals):**
+      - For **code-based evals**: run directly (deterministic, no bias risk).
+      - For **agent-as-judge evals**: the agent that hypothesized the mutation is biased toward finding it improved. Reduce this bias using the strongest available mechanism:
+
+        **Tier 1 — Subagent dispatch (strong isolation, use when available):**
+        Write `[workspace]/eval-tasks/exp{N}-E{M}.md` containing ONLY: the judge prompt (from `judges/`), the fixture input, and the skill output to evaluate (the mutated output — judge scores ONE output per invocation, same format as Phase 6 validation). Do NOT include: baseline output, mutation hypothesis, or Phase 1-3 findings. Dispatch a subagent with ONLY this file as input. Subagent produces Critique + Pass/Fail. Parent reads the verdict.
+
+        **Fork economics (Tier 1 only):** When dispatching eval subagents, omit `subagent_type` to trigger a fork instead of a spawn. The fork inherits the parent's cached prompt prefix — judge prompts, fixtures, and workspace context are already loaded. Only the eval-task file content differs per experiment. This means each eval subagent pays cache price (1/10) for the shared prefix and full price only for the new eval-task content (~500 tokens). With 5 agent-as-judge evals across 5 experiments = 25 dispatches, fork saves ~80% vs spawn. If fork is unavailable (in-house agent), fall back to Tier 2.
+
+        **Tier 2 — Behavioral instruction (bias reduction, for Read/Write/Bash-only agents):**
+        If subagent dispatch is unavailable: score each agent-as-judge eval by reading ONLY the judge prompt file and the skill output. Before scoring, explicitly state: "I am now evaluating this output against the rubric only. I am disregarding my prior reasoning about why this mutation was made." This is a *heuristic* that reduces but does not eliminate self-certification bias.
+
+        Keep eval-task files in `[workspace]/eval-tasks/` for debugging (clean up at Session Close, not per-eval). Record `eval_results` per eval.
    c. **Regression check:** Compare current `eval_results` against prior kept experiments. If any eval that previously passed now fails → regression detected. Details: `references.md > Regression Check Schema`. Skip on experiments 0 and 1 (baseline has no prior kept experiments to compare against).
    d. **Present to user** — show mutation diff, score change, regression status, proposed keep/discard. One decision point.
    e. User accepts or overrides → record in results.json (with `eval_results` + `regression_check`) + results.tsv + changelog.md
-   f. If discarded (regression or user choice): restore backup as current baseline
-3. Repeat until all evals pass or budget exhausted
+   f. If discarded (regression or user choice): **discard autopsy first** (reads from `experiments[]` in results.json, not the skill file), then restore backup as current baseline. Classify why using `references.md > Discard Autopsy Heuristics` — `wrong_target` (section unlikely to respond), `wrong_params` (right section, wrong approach), or `wrong_type` (add/modify/delete mismatch). Record in `experiments[].discard_autopsy` and session-log: `{"phase":"7","type":"discard_autopsy","experiment":N,"classification":"...","reasoning":"1-sentence"}`. For kept experiments, `discard_autopsy` is null.
+   g. **Circuit breaker check** — see below
+3. Repeat until all evals pass, budget exhausted, or circuit breaker stops the loop
 
-**Key rules:** One mutation per experiment. Mutate a copy (`<skill>-optimized.md`), not the original. If score improves, the mutated copy becomes the new baseline for the next experiment. Target baseline 60-80% (>90% = evals too easy). **Mutation types:** add, modify, OR delete. After every 2-3 additive mutations, try one subtractive mutation — remove instructions and measure if performance improves. Shorter skills often outperform bloated ones. Formats: `references.md > Results & Changelog Schemas`.
+**Circuit breaker:**
+Track `consecutive_discards` in state.json (integer, starts at 0). Update **after step (e)**, using the final keep/discard outcome:
+- Experiment **kept** (by agent or user override) → reset `consecutive_discards = 0`
+- Experiment **discarded** (regression, low score, or user override to discard) → increment `consecutive_discards += 1`
+
+Disabled in Mini mode (`quick_start.completed = true` AND `gates.gulf_1 = "pending"`). Discard autopsy (step 2f) runs in all modes including Mini. Reset to 0 on Phase 7 re-entry after loop-back.
+
+If `consecutive_discards >= 3`: STOP mutations and classify:
+
+1. **Content ceiling** — if current baseline score > 80% AND all 3 discarded experiments scored within 5 percentage points of the current baseline:
+   → "Your skill scores [X]%. The last 3 mutations all scored [Y-Z]%, unable to push past baseline. Either the skill is done, or add harder eval fixtures targeting dimensions not yet covered."
+
+2. **Strategy review needed** — all other cases. Present the raw data:
+   → "3 consecutive discards. Here's the data for your review:"
+   - Last 3 experiments: scores, sections targeted (`changes[].location`), eval results, discard reason (regression / low score / user override), AND `discard_autopsy` classification
+   - If all 3 autopsy classifications are `wrong_target`: "All 3 targeted unresponsive sections. Explore untried sections or add harder eval fixtures."
+   - If all 3 are `wrong_params`: "Right sections but wrong approach. Try fundamentally different mutation strategies (e.g., rewrite vs. tweak, subtractive vs. additive)."
+   - If all 3 are `wrong_type`: "Mutation type mismatch. Reverse direction: if adding, try deleting; if modifying, try replacing entirely."
+   - If mixed or < 5 total experiments: present the autopsy breakdown and note: "Mixed signals — review the pattern before continuing."
+   - If >= 5 total experiments with no clear autopsy pattern: "Possible causes: evals can't discriminate (scores flat across experiments), or judge noise (scores swing >15pp between adjacent experiments)."
+   → "Recommendation: review eval-suite.md. Consider looping back to Phase 5-6, targeting different SKILL.md sections, or accepting current quality."
+
+Report format (only show "Continue?" if budget remains):
+Compute the derived mutation registry before presenting the diagnosis (see `references.md > Derived Mutation Registry`). Log the snapshot to session-log.
+
+```
+⚠ Circuit breaker: 3 consecutive discards
+  Best score achieved: [X]% (Experiment [N])
+  Diagnosis: [content ceiling | strategy review needed]
+  Search diversity: [diversity_score] ([N]/[M] sections explored)
+  Autopsy pattern: [summary of last 3 discard_autopsy classifications]
+  Evidence: [raw data points including discard reasons]
+  Recommendation: [specific action]
+
+  [If budget remains] Continue anyway? (not recommended) / Stop and address diagnosis?
+  [If budget exhausted] Budget exhausted. Review the diagnosis above.
+```
+
+If user continues: reset `consecutive_discards = 0` and resume the mutation loop (do NOT exit Phase 7). If breaker triggers again: "Circuit breaker triggered a second time (triggered_count: 2). The pattern of repeated discards suggests the current approach isn't working. Consider ending Phase 7." Still allow user to override.
+
+Record in state.json: `circuit_breaker: {triggered_count: N, last_experiment: N, diagnosis: "..."}`. Record in session-log.json: `{"phase":"7","type":"circuit_breaker","diagnosis":"...","consecutive_discards":3,"experiments":[...]}`.
+
+**After circuit breaker — two paths:**
+- If user chose **stop**: exit the mutation loop. Phase 7 is done (early termination). Proceed to Loop-Back Prompt check, then Session Close.
+- If user chose **continue**: reset counter, resume mutation loop at step (a). Do NOT proceed to Loop-Back Prompt yet — that only runs when the loop fully ends.
+
+**Key rules:** One mutation per experiment. Mutate a copy (`[workspace]/<skill>-optimized.md`), not the workspace baseline. If score improves, the mutated copy becomes the new baseline for the next experiment. Target baseline 60-80% (>90% = evals too easy). **Mutation types:** add, modify, OR delete. After every 2-3 additive mutations, try one subtractive mutation — remove instructions and measure if performance improves. Shorter skills often outperform bloated ones. Formats: `references.md > Results & Changelog Schemas`.
 
 **Confidence-weighted scoring:** Weight each eval by its judge's validated TPR/TNR. Code evals = 1.0. Agent evals = (TPR+TNR)/2. Experiment score = weighted sum / sum of weights.
 
@@ -285,14 +397,16 @@ The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + 
 
 ## Loop-Back Prompt
 
-After Phase 7, if session-log has ≥2 `judge_gap` entries:
+Phase 7 ends when: budget exhausted, all evals pass, user stops, OR circuit breaker fires and user chose stop. All exit paths trigger this check.
+
+If session-log has ≥2 `judge_gap` entries:
 
 > "You overrode N experiment verdicts, suggesting judge blind spots:
 > - [reason 1]
 > - [reason 2]
 > Loop back to Phase 5 to refine judges, then re-run Phase 7? Or accept current results?"
 
-If user loops back: Phase 5 enters append mode (`locked_judges` prevents modifying approved judges). Phase 6 validates only new judges. Phase 7 re-runs with expanded suite. Score may drop — this is more accurate measurement, not regression. Explain this to the user. Max 2 loop-backs per session. Increment `loop_iteration` in state.json.
+If user loops back: Phase 5 enters append mode (`locked_judges` prevents modifying approved judges). Phase 6 validates only new judges. Phase 7 re-runs with expanded suite — reset `consecutive_discards = 0` in state.json on re-entry (scoring changed, old counter is invalid). Score may drop — this is more accurate measurement, not regression. Explain this to the user. Max 2 loop-backs per session. Increment `loop_iteration` in state.json.
 
 ---
 
@@ -300,10 +414,12 @@ If user loops back: Phase 5 enters append mode (`locked_judges` prevents modifyi
 
 Runs after Phase 7, when user stops mid-pipeline, or when user explicitly pauses. Minimum: session-log must have ≥3 entries for learning summary.
 
+0. **Apply back gate** — If any mutations were kept: first sync the best kept mutation into the working copy (`cp [workspace]/<skill>-optimized.md [workspace]/skill-under-test/SKILL.md`) so the working copy reflects the latest improvements. Then ask: "Apply the improved SKILL.md back to the original location ([original-skill-path])? (y/n)". If yes: `cp [workspace]/skill-under-test/SKILL.md [original-skill-path]/SKILL.md`. If no: tell the user where the improved version lives. Log the decision to session-log.json: `{"type":"apply_back","applied":true/false,"source":"[workspace]/skill-under-test/SKILL.md","target":"[original-skill-path]/SKILL.md"}`. **If the copy fails** (e.g., sandbox restriction): don't retry. Print the full path and tell the user to copy manually: `cp [workspace]/skill-under-test/SKILL.md [original-skill-path]/SKILL.md`.
+0b. **Clean up temporary files** — Remove `[workspace]/eval-tasks/` directory if it exists (debugging artifacts from Phase 7 verification isolation).
 1. **Save checkpoint** — update `state.json.checkpoint` with current state and write `resume-prompt.txt` to workspace root. See `references.md > Checkpoint Schema`. Append to session-log: `{"type":"checkpoint",...}`.
 2. **Synthesize** session-log.json into 3-5 bullet learning summary (what worked, what was overridden, patterns emerged)
 3. **User curates** — present summary, ask for edits or approval
-4. **Persist** to agent memory system (path from `state.json.memory_path`, or ask on first run and record). If no memory system exists, write to `autoresearch-<skill>/learnings.md` as fallback.
+4. **Persist** to agent memory system (path from `state.json.memory_path`, or ask on first run and record). If no memory system exists, write to `[workspace]/learnings.md` as fallback.
 5. **Present resume prompt** — "You can resume anytime. Paste this into a new session:" followed by the resume prompt from `resume-prompt.txt`.
 6. **Archive** — rename session-log.json to `session-log-<timestamp>.json`
 
@@ -324,6 +440,10 @@ See `references.md > Gotchas` for the full list. Critical ones:
 5. **"Invoke" means "read and follow."** Not all agents support direct skill invocation.
 6. **Quick Start is a preview, not validation.** Bootstrap evals are directional, not calibrated. Quick Start does NOT satisfy Gulf 1 or Gulf 2. Run Standard to validate results.
 7. **Critical state lives in files, not conversation.** Keep mutation rationale, eval scores, and pipeline state in workspace files (state.json, results.json). Auto-compact at ~85% context erases conversation history — only the skill file (loaded via system prompt) survives.
+8. **Never write to the original skill path during the pipeline.** All work happens on the workspace copy at `[workspace]/skill-under-test/`. The original is only touched during Session Close "Apply back gate" with explicit user approval.
+9. **Sandbox environments block cross-directory access.** If Preflight Step 0 fails on read/write, use `/tmp/` as workspace and copy the skill in. Don't spend time debugging sandbox paths — use the workaround.
+10. **Agent-as-judge evals should not see mutation reasoning.** The agent that hypothesized a mutation is biased toward finding it improved. Tier 1 (subagent dispatch) achieves real isolation — the judge has no mutation context. Tier 2 (behavioral instruction) reduces but does not eliminate bias — the agent still has mutation context in conversation history. Tier 2 is a heuristic, not a guarantee. If scoring feels unreliable, loop back to Phase 5-6 to add more code-based evals (which are immune to this bias).
+11. **Workspace location must be confirmed, never assumed.** The agent must NEVER create a workspace directory without asking the user where. Default recommendation is `/tmp/autorefine-[skill-name]/` (safest). Creating inside a repo risks breaking git state, CI, or other tools.
 
 ---
 
