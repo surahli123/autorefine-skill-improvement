@@ -10,12 +10,16 @@ Read when: Initialize Workspace or resuming a session.
 
 ### state.json
 ```json
-{"schema_version":4,"skill_name":"<name>","skill_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null}
+{"schema_version":4,"skill_name":"<name>","skill_path":"<path>","original_skill_path":"<path>","workspace_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null,"consecutive_discards":0,"circuit_breaker":null}
 ```
 - `schema_version`: 4 for v2.3 workspaces. Legacy: 2 = Standard/Deep (v2.1), 3 = Quick Start (v2.2). New fields default to null when reading v2/v3 workspaces.
 - `loop_iteration`: tracks Phase 7→5 loop-backs (0 = first run)
 - `locked_judges`: judge IDs approved in prior loops — don't re-validate
 - `checkpoint`: resume state — see `Checkpoint Schema` section. null when no checkpoint active.
+- `original_skill_path`: full path to the user's original skill directory (set in Preflight Step 0.6). Used by Session Close Apply Back gate and ambient learning on resume.
+- `workspace_path`: full path to the AutoRefine workspace (set in Preflight Step 0.6).
+- `consecutive_discards`: integer (0). Circuit breaker counter — incremented on discard, reset on keep. See SKILL.md Phase 7.
+- `circuit_breaker`: null, or `{triggered_count: N, last_experiment: N, diagnosis: "..."}`. Set when circuit breaker fires.
 
 ### results.json
 ```json
@@ -45,6 +49,10 @@ Entry types:
 - Mini observation (Quick Start): `{"phase":"quick_start","step":"observation","type":"mini_observation","detail":"Reviewed 5 traces: 3 pass, 2 fail"}`
 - Checkpoint: `{"phase":"3","type":"checkpoint","detail":"Saved checkpoint at Phase 3 boundary. Resume prompt written."}`
 - Regression: `{"phase":"7","type":"regression","experiment":3,"detail":"E2 regressed: was pass (exp 1), now fail. Gotcha section removed by mutation.","user_action":"discard"}`
+- Circuit breaker: `{"phase":"7","type":"circuit_breaker","diagnosis":"content_ceiling|strategy_review","consecutive_discards":3,"experiments":[3,4,5]}`
+- Circuit breaker override: `{"phase":"7","type":"circuit_breaker_override","reason":"user chose to continue"}`
+- Apply back: `{"type":"apply_back","applied":true,"source":"[workspace]/skill-under-test/SKILL.md","target":"[original-skill-path]/SKILL.md"}`
+- Ambient learning: `{"type":"ambient_learning","rules_extracted":2,"diff_size":12}` or `{"type":"ambient_learning","skipped":true,"reason":"full_rewrite","diff_size":180}`
 
 ---
 
@@ -158,6 +166,8 @@ Read when: Quick Start QS Step 5 (state update) or Initialize Workspace.
   "schema_version": 4,
   "skill_name": "<name>",
   "skill_path": "<path>",
+  "original_skill_path": "<path>",
+  "workspace_path": "<path>",
   "started": "<today>",
   "current_phase": 0,
   "current_gulf": 1,
@@ -167,6 +177,9 @@ Read when: Quick Start QS Step 5 (state update) or Initialize Workspace.
   "loop_iteration": 0,
   "locked_judges": [],
   "memory_path": null,
+  "checkpoint": null,
+  "consecutive_discards": 0,
+  "circuit_breaker": null,
   "quick_start": {
     "completed": true,
     "mini_phase_3_traces": 5,
@@ -427,6 +440,49 @@ To run an agent-as-judge eval:
 
 Dispatch as a subagent or evaluate in main context. Run judges sequentially (not parallel) to avoid context contamination.
 
+### Eval-Task File Format (Phase 7 Tier 1 Verification Isolation)
+
+Read when: Phase 7 step 2b, Tier 1 subagent dispatch.
+
+Write to `[workspace]/eval-tasks/exp{N}-E{M}.md`:
+```markdown
+# Eval Task: E{M} — {eval name}
+
+## Judge Prompt
+{contents of judges/judge-E{M}-{name}.md}
+
+## Fixture Input
+{fixture content}
+
+## Skill Output to Evaluate
+{the mutated skill's output for this fixture}
+
+## Instructions
+Evaluate the Skill Output above against the Judge Prompt criteria.
+Output: Critique: [reasoning] then Result: Pass or Fail
+```
+
+Do NOT include: baseline output, mutation hypothesis, Phase 1-3 findings, or any reasoning about why changes were made. The subagent receiving this file should have zero context about the mutation intent.
+
+### Preferences File Format (Ambient Learning)
+
+Read when: Ambient learning check on resume, or Phase 7 step 2a.
+
+`[workspace]/preferences.md`:
+```markdown
+# User Preferences (ambient learning)
+
+## Preference 1 (captured: YYYY-MM-DD)
+RULE: [one-sentence preference]
+EVIDENCE: [removed text] → [added text]
+CONFIDENCE: high | medium
+
+## Preference 2 (captured: YYYY-MM-DD)
+...
+```
+
+Phase 7 reads this file before hypothesizing mutations — do NOT propose changes that contradict learned preferences.
+
 ---
 
 ## Judge Validation Report Format
@@ -453,7 +509,7 @@ Read when: updating state.json after a phase.
 | 4 | `fixture_count, pass_count, fail_count, split_sizes` |
 | 5 | `code_eval_count, judge_eval_count` |
 | 6 | `validation_results` (TPR/TNR per judge) |
-| 7 | `current_experiment, best_score` |
+| 7 | `current_experiment, best_score, consecutive_discards, circuit_breaker` |
 
 ---
 
@@ -673,7 +729,7 @@ The `checkpoint` field in state.json stores resume state. Set to null when no ch
     "next_action": "Continue Phase 7: AutoResearch Loop — resume from experiment 4",
     "files_to_read_on_resume": ["state.json", "results.json", "eval-suite.md", "changelog.md"],
     "files_modified": ["results.json", "results.tsv", "changelog.md"],
-    "resume_prompt": "Continue autorefine on [skill]. Workspace at [path]. Phase 7 in progress: 3 experiments complete (kept 1,3; discarded 2). Best score: 0.82. Budget remaining: 2. Resume from experiment 4.",
+    "resume_prompt": "Continue autorefine on [skill]. Workspace at [path]. Phase 7 in progress: 3 experiments complete (kept 1,3; discarded 2). Best score: 0.82. Consecutive discards: 1. Budget remaining: 2. Resume from experiment 4.",
     "timestamp": "2026-03-23T21:15:00Z"
   }
 }
