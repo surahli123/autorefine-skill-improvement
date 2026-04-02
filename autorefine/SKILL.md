@@ -174,7 +174,7 @@ Present all evals in a numbered list. User responds: "approved", "drop N", "chan
 ### QS Step 4: Mini Phase 7 — Targeted Mutations (10 min)
 Generate 5-10 **fresh** scoring inputs — NOT the same as Mini Phase 3 traces (reusing = overfitting). Use the diversity spread from `references.md > Quick Start > Mini Phase 3 Template`, but target different Phase 1 gaps or different complexity levels than QS Step 2. Ensure zero overlap with the 5 QS Step 2 inputs. Save scoring inputs to `traces/qs-scoring-S01.md` through `traces/qs-scoring-S10.md`.
 
-Run 2-3 mutations targeting the top Phase 1 + Mini Phase 3 findings. Score with bootstrap evals using simplified weighting: code evals = 1.0, agent-as-judge = 0.5 (flat discount, not empirical TPR/TNR).
+Run 2-3 mutations targeting the top Phase 1 + Mini Phase 3 findings. Score with bootstrap evals using simplified weighting: code evals = 1.0, agent-as-judge = 0.5 (flat discount, not empirical TPR/TNR). **Mini mode skips verification isolation** (Phase 7 step 2b) — bootstrap evals are already labeled "directional" and the overhead isn't justified for 2-3 experiments.
 
 Present each mutation to the user (diff, score change, proposed keep/discard). User confirms or overrides. Record in results.json + session-log.json.
 
