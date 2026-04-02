@@ -27,10 +27,11 @@ Read when: Initialize Workspace or resuming a session.
 ```
 Each experiment in `experiments[]`:
 ```json
-{"id":N,"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}],"eval_results":[{"eval":"E1","result":"pass"},{"eval":"E2","result":"fail"}],"regression_check":null}
+{"id":N,"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}],"eval_results":[{"eval":"E1","result":"pass"},{"eval":"E2","result":"fail"}],"regression_check":null,"discard_autopsy":null}
 ```
 - `eval_results`: per-eval Pass/Fail for this experiment. Used by regression checks to compare across experiments.
 - `regression_check`: null (no check run), or `{"passed":true,"details":"..."}`, or `{"passed":false,"regressions":[{"experiment":1,"eval":"E2","was":"pass","now":"fail","detail":"..."}]}`
+- `discard_autopsy`: null (experiment kept or baseline), or `{"classification":"wrong_target|wrong_params|wrong_type","reasoning":"1-sentence explanation"}`. Set after discard in Phase 7 step 2f. See `Discard Autopsy Heuristics` section.
 
 ### results.tsv
 Header: `experiment\tscore\tmax_score\tpass_rate\tstatus\tdescription`
@@ -51,6 +52,9 @@ Entry types:
 - Regression: `{"phase":"7","type":"regression","experiment":3,"detail":"E2 regressed: was pass (exp 1), now fail. Gotcha section removed by mutation.","user_action":"discard"}`
 - Circuit breaker: `{"phase":"7","type":"circuit_breaker","diagnosis":"content_ceiling|strategy_review","consecutive_discards":3,"experiments":[3,4,5]}`
 - Circuit breaker override: `{"phase":"7","type":"circuit_breaker_override","reason":"user chose to continue"}`
+- Discard autopsy: `{"phase":"7","type":"discard_autopsy","experiment":N,"classification":"wrong_target|wrong_params|wrong_type","reasoning":"1-sentence explanation"}`
+- Canonical headings: `{"phase":"7","type":"canonical_headings","sections":["section1","section2","..."]}`
+- Derived registry snapshot: `{"phase":"7","type":"derived_registry_snapshot","experiment":N,"sections_explored":{"section1":{"count":2,"best_delta":0.12,"last_tried":3,"autopsy_pattern":"wrong_target"},...},"mutation_types":{"add":3,"modify":2,"delete":1},"diversity_score":0.6}`
 - Apply back: `{"type":"apply_back","applied":true,"source":"[workspace]/skill-under-test/SKILL.md","target":"[original-skill-path]/SKILL.md"}`
 - Ambient learning: `{"type":"ambient_learning","rules_extracted":2,"diff_size":12}` or `{"type":"ambient_learning","skipped":true,"reason":"full_rewrite","diff_size":180}`
 
@@ -389,8 +393,112 @@ Read when: Phase 7 active.
 
 ### Results.json experiment record
 ```json
-{"id":N,"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}]}
+{"id":N,"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}],"eval_results":[{"eval":"E1","result":"pass"}],"regression_check":null,"discard_autopsy":null}
 ```
+
+---
+
+## Discard Autopsy Heuristics
+
+Read when: Phase 7 step 2f, after a discard decision.
+
+After each discard, classify WHY the mutation failed. This directs the next hypothesis instead of blindly trying again. Source: AutoKaggle's U4 rule ("Was this truly exhausted or just tried with wrong params?").
+
+### 3-Way Classification
+
+| Classification | When to use | Signal for next iteration |
+|---|---|---|
+| `wrong_target` | This section was tried 2+ times with negative or flat deltas. Evidence: multiple experiments targeting the same `changes[].location` with no improvement. | Explore a different, untried section. Check derived mutation registry for unexplored sections. |
+| `wrong_params` | The section responded positively before (in a prior experiment) but this specific mutation regressed or was flat. The section is viable, the approach was wrong. | Retry the same section with a fundamentally different approach (e.g., rewrite vs. tweak, different examples, different framing). |
+| `wrong_type` | The mutation was additive on an already-long section, or subtractive on a short/critical section, or modified when a full replacement was needed. The mutation direction (add/modify/delete) was the mismatch. | Try the opposite mutation type on the same section. If you added, try deleting. If you modified, try replacing entirely. |
+
+### Decision Process
+
+1. Read the discarded experiment's `changes[].location` and `changes[].type`
+2. Check experiment history: was this section targeted before? What were the results?
+3. If targeted 2+ times with negative/flat deltas → `wrong_target`
+4. If targeted before with positive delta but this attempt failed → `wrong_params`
+5. If first attempt on this section, check mutation type vs. section characteristics → `wrong_type` if mismatch is clear, `wrong_params` as default
+6. When uncertain between `wrong_params` and `wrong_type`, prefer `wrong_params` (it's more actionable)
+
+### Output Format
+
+Record in `experiments[].discard_autopsy`:
+```json
+{"classification": "wrong_target", "reasoning": "gotchas section targeted 3 times, all negative deltas — section is not responsive to mutations"}
+```
+
+### Mini Mode
+
+Discard autopsy runs in Mini mode. With only 2-3 experiments the history-based heuristics (rule 3-4) may not apply, but the type-based heuristic (rule 5) still helps direct the tiny budget.
+
+---
+
+## Derived Mutation Registry
+
+Read when: Circuit breaker diagnosis, before hypothesizing mutations (step 2a), or when computing search diversity.
+
+The mutation registry is a **derived view** computed on demand from `results.json experiments[]`. It is NOT stored as authoritative state. After each computation, log a snapshot to session-log for forensic purposes.
+
+### Computation Steps
+
+1. **Read canonical headings** from the session-log entry `type: "canonical_headings"` (logged at Experiment 0). This is the denominator — the full list of sections in the target skill.
+
+2. **Traverse experiments[]** in results.json. For each experiment with `status != "baseline"`:
+   - Extract `changes[].location` values
+   - Map each location to the nearest canonical heading (fuzzy match to the heading list)
+   - Record the experiment's score delta vs. baseline: `experiment.pass_rate - baseline.pass_rate`
+
+3. **Compute sections_explored:**
+   ```
+   For each canonical heading:
+     count: number of experiments that targeted this section
+     best_delta: highest score delta among experiments targeting this section
+     last_tried: most recent experiment ID targeting this section
+     autopsy_pattern: most common discard_autopsy classification (if any discards)
+   ```
+
+4. **Compute mutation_types:**
+   ```
+   Count of changes[].type across all experiments: {"add": N, "modify": N, "delete": N}
+   ```
+
+5. **Compute diversity_score:**
+   ```
+   diversity_score = (sections with count >= 1) / (total canonical headings)
+   ```
+   Range: 0.0 (all mutations on one section) to 1.0 (every section explored at least once).
+
+### Session-Log Snapshot
+
+After computing, write to session-log:
+```json
+{"phase":"7","type":"derived_registry_snapshot","experiment":N,
+ "sections_explored":{"gotchas":{"count":2,"best_delta":0.12,"last_tried":3},
+   "voice":{"count":1,"best_delta":-0.03,"last_tried":2}},
+ "mutation_types":{"add":3,"modify":2,"delete":1},
+ "diversity_score":0.6}
+```
+
+This snapshot is forensic only — nothing reads it as authoritative state. It captures what the agent computed at decision time for debugging.
+
+### Consumers
+
+- **Circuit breaker diagnosis** (SKILL.md): compute before presenting the `⚠ Circuit breaker` report. Shows `diversity_score` and `sections_explored` to help the user understand search coverage.
+- **Step 2a hypothesis** (SKILL.md): when diversity_score is low (<0.5), prioritize unexplored sections. When a section has `autopsy_pattern: "wrong_target"`, deprioritize it.
+- **Mutation Reviewer** (P2, future): fires on `diversity_score < 0.5 AND experiments >= 3`.
+
+### Mini Mode
+
+Derived registry computes in Mini mode. With 2-3 experiments, diversity_score will typically be low (1-2 sections out of many). The score is still useful as a diagnostic in the session-log snapshot but does not trigger the Mutation Reviewer (P2, not yet implemented) or the circuit breaker (disabled in Mini).
+
+### Heading Granularity
+
+Canonical headings are parsed at `##` level only. Skills with meaningful structure at `###` level will report higher `diversity_score` than warranted (e.g., a skill with 3 `##` headings each containing 5 `###` sub-sections shows diversity based on 3 sections, not 15). This is acceptable for v1 — `##` headings correspond to the sections the agent targets in mutations. If mutation granularity moves to `###` level, update the heading parse to match.
+
+### Multi-Section Mutations
+
+When a single experiment targets multiple sections (`changes[]` has 2+ entries with different `location` values), count the experiment toward ALL targeted sections. The `best_delta` for each section is the same (the experiment's overall delta), since per-section attribution is not possible with the current scoring model.
 
 ---
 

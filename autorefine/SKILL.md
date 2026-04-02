@@ -312,9 +312,9 @@ The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + 
 **Mini mode differences:** Fresh scoring corpus (5-10 generated inputs, NOT reusing Quick Start traces). Simplified weighting: code evals = 1.0, agent-as-judge = 0.5. All results labeled "directional." No confidence weighting from Phase 6 (evals aren't validated).
 
 **The Loop:**
-1. Run baseline on all fixtures, score against all evals → Experiment 0. Record `eval_results` per eval.
+1. Run baseline on all fixtures, score against all evals → Experiment 0. Record `eval_results` per eval. **Canonical heading parse:** parse the target skill's `##` headings into a list of section names. Log to session-log: `{"phase":"7","type":"canonical_headings","sections":["heading1","heading2",...]}`. This list is the denominator for `diversity_score` in the derived mutation registry (see `references.md > Derived Mutation Registry`).
 2. LOOP:
-   a. Analyze failures → hypothesize ONE change. If `[workspace]/preferences.md` exists, read it first — do NOT propose mutations that contradict learned user preferences. **Save backup** (`[workspace]/<skill>-optimized-prev.md`) → mutate a copy
+   a. Analyze failures → hypothesize ONE change. If `[workspace]/preferences.md` exists, read it first — do NOT propose mutations that contradict learned user preferences. **If recent experiments were discarded, read their `discard_autopsy` classification** — avoid same target if `wrong_target`, try different params if `wrong_params`, try different mutation type (add↔delete↔modify) if `wrong_type`. **Check search diversity:** compute the derived mutation registry (see `references.md > Derived Mutation Registry`). If `diversity_score < 0.5`, prioritize unexplored sections. Log the snapshot to session-log. **Save backup** (`[workspace]/<skill>-optimized-prev.md`) → mutate a copy
    b. **Score mutation (with bias reduction for agent-as-judge evals):**
       - For **code-based evals**: run directly (deterministic, no bias risk).
       - For **agent-as-judge evals**: the agent that hypothesized the mutation is biased toward finding it improved. Reduce this bias using the strongest available mechanism:
@@ -331,7 +331,7 @@ The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + 
    c. **Regression check:** Compare current `eval_results` against prior kept experiments. If any eval that previously passed now fails → regression detected. Details: `references.md > Regression Check Schema`. Skip on experiments 0 and 1 (baseline has no prior kept experiments to compare against).
    d. **Present to user** — show mutation diff, score change, regression status, proposed keep/discard. One decision point.
    e. User accepts or overrides → record in results.json (with `eval_results` + `regression_check`) + results.tsv + changelog.md
-   f. If discarded (regression or user choice): restore backup as current baseline
+   f. If discarded (regression or user choice): **discard autopsy first** (reads from `experiments[]` in results.json, not the skill file), then restore backup as current baseline. Classify why using `references.md > Discard Autopsy Heuristics` — `wrong_target` (section unlikely to respond), `wrong_params` (right section, wrong approach), or `wrong_type` (add/modify/delete mismatch). Record in `experiments[].discard_autopsy` and session-log: `{"phase":"7","type":"discard_autopsy","experiment":N,"classification":"...","reasoning":"1-sentence"}`. For kept experiments, `discard_autopsy` is null.
    g. **Circuit breaker check** — see below
 3. Repeat until all evals pass, budget exhausted, or circuit breaker stops the loop
 
@@ -340,7 +340,7 @@ Track `consecutive_discards` in state.json (integer, starts at 0). Update **afte
 - Experiment **kept** (by agent or user override) → reset `consecutive_discards = 0`
 - Experiment **discarded** (regression, low score, or user override to discard) → increment `consecutive_discards += 1`
 
-Disabled in Mini mode (`quick_start.completed = true` AND `gates.gulf_1 = "pending"`). Reset to 0 on Phase 7 re-entry after loop-back.
+Disabled in Mini mode (`quick_start.completed = true` AND `gates.gulf_1 = "pending"`). Discard autopsy (step 2f) runs in all modes including Mini. Reset to 0 on Phase 7 re-entry after loop-back.
 
 If `consecutive_discards >= 3`: STOP mutations and classify:
 
@@ -349,16 +349,23 @@ If `consecutive_discards >= 3`: STOP mutations and classify:
 
 2. **Strategy review needed** — all other cases. Present the raw data:
    → "3 consecutive discards. Here's the data for your review:"
-   - Last 3 experiments: scores, sections targeted (`changes[].location`), eval results, AND discard reason (regression / low score / user override)
-   - If < 5 total experiments have run: "Not enough data to pinpoint the cause. Consider: wrong mutation targets, evals that can't discriminate, or judge noise."
-   - If >= 5 total experiments: "Possible causes: mutation direction exhausted (check if all 3 targeted the same section), evals can't discriminate (check if scores are flat across experiments), or judge noise (check if scores swing >15pp between adjacent experiments)."
+   - Last 3 experiments: scores, sections targeted (`changes[].location`), eval results, discard reason (regression / low score / user override), AND `discard_autopsy` classification
+   - If all 3 autopsy classifications are `wrong_target`: "All 3 targeted unresponsive sections. Explore untried sections or add harder eval fixtures."
+   - If all 3 are `wrong_params`: "Right sections but wrong approach. Try fundamentally different mutation strategies (e.g., rewrite vs. tweak, subtractive vs. additive)."
+   - If all 3 are `wrong_type`: "Mutation type mismatch. Reverse direction: if adding, try deleting; if modifying, try replacing entirely."
+   - If mixed or < 5 total experiments: present the autopsy breakdown and note: "Mixed signals — review the pattern before continuing."
+   - If >= 5 total experiments with no clear autopsy pattern: "Possible causes: evals can't discriminate (scores flat across experiments), or judge noise (scores swing >15pp between adjacent experiments)."
    → "Recommendation: review eval-suite.md. Consider looping back to Phase 5-6, targeting different SKILL.md sections, or accepting current quality."
 
 Report format (only show "Continue?" if budget remains):
+Compute the derived mutation registry before presenting the diagnosis (see `references.md > Derived Mutation Registry`). Log the snapshot to session-log.
+
 ```
 ⚠ Circuit breaker: 3 consecutive discards
   Best score achieved: [X]% (Experiment [N])
   Diagnosis: [content ceiling | strategy review needed]
+  Search diversity: [diversity_score] ([N]/[M] sections explored)
+  Autopsy pattern: [summary of last 3 discard_autopsy classifications]
   Evidence: [raw data points including discard reasons]
   Recommendation: [specific action]
 
