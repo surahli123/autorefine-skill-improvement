@@ -298,7 +298,47 @@ The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + 
    d. **Present to user** — show mutation diff, score change, regression status, proposed keep/discard. One decision point.
    e. User accepts or overrides → record in results.json (with `eval_results` + `regression_check`) + results.tsv + changelog.md
    f. If discarded (regression or user choice): restore backup as current baseline
-3. Repeat until all evals pass or budget exhausted
+   g. **Circuit breaker check** — see below
+3. Repeat until all evals pass, budget exhausted, or circuit breaker stops the loop
+
+**Circuit breaker:**
+Track `consecutive_discards` in state.json (integer, starts at 0). Update **after step (e)**, using the final keep/discard outcome:
+- Experiment **kept** (by agent or user override) → reset `consecutive_discards = 0`
+- Experiment **discarded** (regression, low score, or user override to discard) → increment `consecutive_discards += 1`
+
+Disabled in Mini mode (`quick_start.completed = true` AND `gates.gulf_1 = "pending"`). Reset to 0 on Phase 7 re-entry after loop-back.
+
+If `consecutive_discards >= 3`: STOP mutations and classify:
+
+1. **Content ceiling** — if current baseline score > 80% AND all 3 discarded experiments scored within 5 percentage points of the current baseline:
+   → "Your skill scores [X]%. The last 3 mutations all scored [Y-Z]%, unable to push past baseline. Either the skill is done, or add harder eval fixtures targeting dimensions not yet covered."
+
+2. **Strategy review needed** — all other cases. Present the raw data:
+   → "3 consecutive discards. Here's the data for your review:"
+   - Last 3 experiments: scores, sections targeted (`changes[].location`), eval results, AND discard reason (regression / low score / user override)
+   - If < 5 total experiments have run: "Not enough data to pinpoint the cause. Consider: wrong mutation targets, evals that can't discriminate, or judge noise."
+   - If >= 5 total experiments: "Possible causes: mutation direction exhausted (check if all 3 targeted the same section), evals can't discriminate (check if scores are flat across experiments), or judge noise (check if scores swing >15pp between adjacent experiments)."
+   → "Recommendation: review eval-suite.md. Consider looping back to Phase 5-6, targeting different SKILL.md sections, or accepting current quality."
+
+Report format (only show "Continue?" if budget remains):
+```
+⚠ Circuit breaker: 3 consecutive discards
+  Best score achieved: [X]% (Experiment [N])
+  Diagnosis: [content ceiling | strategy review needed]
+  Evidence: [raw data points including discard reasons]
+  Recommendation: [specific action]
+
+  [If budget remains] Continue anyway? (not recommended) / Stop and address diagnosis?
+  [If budget exhausted] Budget exhausted. Review the diagnosis above.
+```
+
+If user continues: reset `consecutive_discards = 0` and resume the mutation loop (do NOT exit Phase 7). If breaker triggers again: "Circuit breaker triggered a second time (triggered_count: 2). The pattern of repeated discards suggests the current approach isn't working. Consider ending Phase 7." Still allow user to override.
+
+Record in state.json: `circuit_breaker: {triggered_count: N, last_experiment: N, diagnosis: "..."}`. Record in session-log.json: `{"phase":"7","type":"circuit_breaker","diagnosis":"...","consecutive_discards":3,"experiments":[...]}`.
+
+**After circuit breaker — two paths:**
+- If user chose **stop**: exit the mutation loop. Phase 7 is done (early termination). Proceed to Loop-Back Prompt check, then Session Close.
+- If user chose **continue**: reset counter, resume mutation loop at step (a). Do NOT proceed to Loop-Back Prompt yet — that only runs when the loop fully ends.
 
 **Key rules:** One mutation per experiment. Mutate a copy (`[workspace]/<skill>-optimized.md`), not the workspace baseline. If score improves, the mutated copy becomes the new baseline for the next experiment. Target baseline 60-80% (>90% = evals too easy). **Mutation types:** add, modify, OR delete. After every 2-3 additive mutations, try one subtractive mutation — remove instructions and measure if performance improves. Shorter skills often outperform bloated ones. Formats: `references.md > Results & Changelog Schemas`.
 
@@ -316,7 +356,9 @@ The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + 
 
 ## Loop-Back Prompt
 
-After Phase 7, if session-log has ≥2 `judge_gap` entries:
+Phase 7 ends when: budget exhausted, all evals pass, user stops, OR circuit breaker fires and user chose stop. All exit paths trigger this check.
+
+If session-log has ≥2 `judge_gap` entries:
 
 > "You overrode N experiment verdicts, suggesting judge blind spots:
 > - [reason 1]
