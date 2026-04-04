@@ -10,7 +10,7 @@ Read when: Initialize Workspace or resuming a session.
 
 ### state.json
 ```json
-{"schema_version":4,"skill_name":"<name>","skill_path":"<path>","original_skill_path":"<path>","workspace_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null,"consecutive_discards":0,"circuit_breaker":null}
+{"schema_version":4,"skill_name":"<name>","skill_path":"<path>","original_skill_path":"<path>","workspace_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null,"consecutive_discards":0,"circuit_breaker":null,"current_run_path":null}
 ```
 - `schema_version`: 4 for v2.3 workspaces. Legacy: 2 = Standard/Deep (v2.1), 3 = Quick Start (v2.2). New fields default to null when reading v2/v3 workspaces.
 - `loop_iteration`: tracks Phase 7→5 loop-backs (0 = first run)
@@ -20,6 +20,7 @@ Read when: Initialize Workspace or resuming a session.
 - `workspace_path`: full path to the AutoRefine workspace (set in Preflight Step 0.6).
 - `consecutive_discards`: integer (0). Circuit breaker counter — incremented on discard, reset on keep. See SKILL.md Phase 7.
 - `circuit_breaker`: null, or `{triggered_count: N, last_experiment: N, diagnosis: "..."}`. Set when circuit breaker fires.
+- `current_run_path`: null, or relative path to the current Phase 7 run directory (e.g., `runs/run_2026-04-03T14-30-00/`). Set at Phase 7 start, updated on loop-back. Used by resume to identify which run directory to read `decision.md` files from.
 
 ### results.json
 ```json
@@ -54,6 +55,7 @@ Entry types:
 - Circuit breaker override: `{"phase":"7","type":"circuit_breaker_override","reason":"user chose to continue"}`
 - Discard autopsy: `{"phase":"7","type":"discard_autopsy","experiment":N,"classification":"wrong_target|wrong_params|wrong_type","reasoning":"1-sentence explanation"}`
 - Canonical headings: `{"phase":"7","type":"canonical_headings","sections":["section1","section2","..."]}`
+- Iteration write: `{"phase":"7","type":"iteration_write","experiment":N,"path":"runs/run_.../iteration_NNN/"}`
 - Derived registry snapshot: `{"phase":"7","type":"derived_registry_snapshot","experiment":N,"sections_explored":{"section1":{"count":2,"best_delta":0.12,"last_tried":3,"autopsy_pattern":"wrong_target"},...},"mutation_types":{"add":3,"modify":2,"delete":1},"diversity_score":0.6}`
 - Apply back: `{"type":"apply_back","applied":true,"source":"[workspace]/skill-under-test/SKILL.md","target":"[original-skill-path]/SKILL.md"}`
 - Ambient learning: `{"type":"ambient_learning","rules_extracted":2,"diff_size":12}` or `{"type":"ambient_learning","skipped":true,"reason":"full_rewrite","diff_size":180}`
@@ -836,6 +838,7 @@ The `checkpoint` field in state.json stores resume state. Set to null when no ch
   "checkpoint": {
     "next_action": "Continue Phase 7: AutoResearch Loop — resume from experiment 4",
     "files_to_read_on_resume": ["state.json", "results.json", "eval-suite.md", "changelog.md"],
+    "iteration_decisions_on_resume": "Read all decision.md files from state.json.current_run_path (e.g., runs/run_.../iteration_*/decision.md)",
     "files_modified": ["results.json", "results.tsv", "changelog.md"],
     "resume_prompt": "Continue autorefine on [skill]. Workspace at [path]. Phase 7 in progress: 3 experiments complete (kept 1,3; discarded 2). Best score: 0.82. Consecutive discards: 1. Budget remaining: 2. Resume from experiment 4.",
     "timestamp": "2026-03-23T21:15:00Z"
@@ -912,3 +915,113 @@ The user can override (keep anyway). Log as: `{"phase":"7","type":"regression","
 - **Before each mutation:** save `<skill>-optimized-prev.md` as backup. Overwritten before each new mutation (single-level undo).
 - **On discard (regression or user choice):** restore backup as the current baseline. Do NOT record the discarded mutation as "keep" in results.json.
 - **On keep:** backup is no longer needed (next mutation will create a new one).
+
+---
+
+## Iteration Directory Schema
+
+Read when: Phase 7 active (after each experiment).
+
+The iteration directory provides filesystem-as-memory for Phase 7. Each experiment's full state is written to disk as individual files, making experiments independently inspectable and surviving context compaction.
+
+### Directory Structure
+
+```
+[workspace]/runs/
+  run_YYYY-MM-DDTHH-MM-SS/         # One Phase 7 execution
+    iteration_000/                   # Experiment 0 (baseline)
+      mutation.md
+      skill_before.md
+      skill_after.md
+      eval_results.json
+      decision.md
+    iteration_001/                   # Experiment 1
+      ...
+  run_YYYY-MM-DDTHH-MM-SS/         # After loop-back → new run
+    ...
+```
+
+A new `run_*` directory is created each time Phase 7 starts (including after loop-backs). The timestamp uses the format `YYYY-MM-DDTHH-MM-SS` (colons replaced with dashes for filesystem safety).
+
+### File Formats
+
+**mutation.md** — What was changed and why.
+```markdown
+# Experiment N — [mutation description]
+
+## Hypothesis
+[Why this change should improve the skill]
+
+## Changes
+- [type: added|modified|removed] [location/section]: [1-3 line snippet]
+
+## Mutation Type
+[add | modify | delete]
+```
+For baseline (iteration_000):
+~~~markdown
+# Experiment 0 — Baseline
+
+No mutation applied. This is the initial scoring run.
+~~~
+
+**skill_before.md** — Full skill content before mutation was applied.
+For baseline: content is `N/A — this is the baseline scoring run.`
+
+**skill_after.md** — Full skill content after mutation (or current skill for baseline).
+
+**eval_results.json** — Per-eval results for this experiment.
+```json
+{
+  "experiment_id": 0,
+  "pass_rate": 0.75,
+  "score": 6,
+  "max_score": 8,
+  "eval_results": [
+    {"eval": "E1", "result": "pass"},
+    {"eval": "E2", "result": "fail"}
+  ],
+  "regression_check": null,
+  "discard_autopsy": null
+}
+```
+Fields mirror the experiment record in results.json. `experiment_id` matches the iteration directory number (0 for baseline, 1+ for mutations). Include `regression_check` and `discard_autopsy` when applicable (null otherwise).
+
+**decision.md** — Keep/discard verdict with full reasoning.
+```markdown
+# Experiment N — [KEEP | DISCARD | BASELINE]
+
+## Score
+[X]/[Y] ([Z]%)  |  Delta: [+/-N]pp vs baseline
+
+## Verdict
+[KEEP | DISCARD | BASELINE]
+
+## Reasoning
+[Why this was kept or discarded — score delta, regression status, user override if any]
+
+## Discard Autopsy
+[Only for discards: wrong_target | wrong_params | wrong_type — with 1-sentence reasoning]
+[For keeps/baseline: N/A]
+```
+
+### When to Write
+
+- **Experiment 0 (baseline):** Write to `iteration_000/` immediately after baseline scoring (Phase 7 step 1).
+- **Kept experiments:** Write to `iteration_NNN/` at Phase 7 step 2e (verdict is final, no autopsy needed).
+- **Discarded experiments:** Write to `iteration_NNN/` at end of Phase 7 step 2f (after discard autopsy is recorded). This ensures `eval_results.json` and `decision.md` include the autopsy classification.
+
+### When to Read
+
+- **Step 2a (hypothesis):** Before proposing a new mutation, read `decision.md` files from all prior iterations in the current run. This provides full reasoning context (not just scores) for what was tried, why it was kept or discarded, and what autopsy classification was assigned. Especially valuable after context compaction or session resume.
+
+### Relationship to Other Artifacts
+
+| Artifact | Purpose | Iteration directory replaces it? |
+|---|---|---|
+| results.json | Machine-readable experiment scores for dashboard | No — iteration dir complements it |
+| session-log.json | Audit trail of all pipeline events | No — iteration dir logs a write event |
+| changelog.md | Human-readable experiment summaries | No — iteration dir has full detail |
+| `<skill>-optimized-prev.md` | Single-level undo backup | No — iteration dir archives all versions |
+
+The iteration directory is the **forensic record** — it has everything. The other artifacts remain the **operational interfaces** for the dashboard, session resume, and undo.
