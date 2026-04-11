@@ -91,15 +91,34 @@ Gulf 3: Generalization — Does it work on unseen inputs?
 
 Phase 3 (error analysis) is human-in-the-loop by design. You cannot automate comprehension.
 
-## v2.1 Features
+## Features
 
+### Core (v2.1)
 - **Pipeline tiering** — Quick/Standard/Deep depth selection at Preflight
 - **Feedback spine** — `session-log.json` tracks sampling decisions, gate approvals, overrides, and judge gaps across every phase
 - **Confidence-weighted scoring** — Phase 7 weights each eval by its judge's validated TPR/TNR. Code evals = 1.0, agent evals = (TPR+TNR)/2
 - **Judge gap detection** — When you override a Phase 7 verdict, it's logged as a judge blind spot
 - **Loop-back prompt** — If you override 2+ verdicts, autorefine offers to loop back to Phase 5 to fix the judges, then re-run Phase 7
 - **Session Close** — Synthesizes session-log into a 3-5 bullet learning summary, persisted to your agent's memory system
-- **Action script architecture** — SKILL.md (220 lines) is pure instructions. Templates, schemas, and rationale live in references.md (370 lines), loaded on demand
+- **Action script architecture** — SKILL.md is pure instructions. Templates, schemas, and rationale live in references.md, loaded on demand
+
+### Quick Start (v2.2)
+- **Context-aware routing** — Detects workspace state and routes to the right entry point (new, returning with bootstrap evals, returning with validated evals)
+- **Bootstrap eval generator** — Auto-generates lightweight evals from Phase 1 findings + observed failures
+- **Mini Phase 7** — 2-3 targeted mutations with simplified scoring (directional, not validated)
+
+### Harness Engineering (v2.3)
+- **Preflight workspace isolation** — Skill copied to workspace, original untouched until apply-back
+- **Judge confidence cards** — TPR/TNR with interpretation, evidence table, asymmetry warning (>20pt gap)
+- **Mutation regression check** — Per-eval breakdown, compares against prior kept experiments
+- **Gotcha detection precision** — 3-stage (taxonomy + static evidence + smoke probe)
+- **Checkpoint/resume** — Save and resume across session boundaries
+
+### AutoKaggle Patterns (v3)
+- **Discard autopsy** — 3-way classification (`wrong_target | wrong_params | wrong_type`) after each Phase 7 discard, directing the next hypothesis
+- **Derived mutation registry** — Computes `sections_explored`, `mutation_types`, `diversity_score` from results.json on demand
+- **Circuit breaker** — Stops after 3 consecutive discards with diagnosis (content ceiling vs strategy review)
+- **Filesystem-as-memory** — Per-experiment iteration directories (`runs/run_<timestamp>/iteration_<NNN>/`) with 5 artifact files surviving context compaction
 
 ## The Dashboard
 
@@ -116,12 +135,12 @@ Serve it: `cd autoresearch-<skill>/ && python3 -m http.server 8080`
 
 | File | Lines | Role |
 |------|-------|------|
-| `SKILL.md` | 220 | **Action script** — every line is an instruction the agent follows |
-| `references.md` | 370 | **Detail library** — templates, schemas, formulas, rubrics. Read on demand via `references.md > Section` pointers |
+| `SKILL.md` | ~460 | **Action script** — every line is an instruction the agent follows |
+| `references.md` | ~1020 | **Detail library** — templates, schemas, formulas, rubrics. Read on demand via `references.md > Section` pointers |
 | `dashboard.html` | — | Chart.js dashboard with Karpathy step graph, auto-refreshes every 10s |
 | `validate-host.sh` | — | Tests whether your agent supports `Read when:` progressive disclosure |
 
-The agent loads only the 220-line action script. When it needs a template or formula, the script tells it exactly which section of references.md to read.
+The agent loads the action script (~460 lines). When it needs a template or formula, the script tells it exactly which section of references.md to read.
 
 ## Requirements
 
