@@ -1,0 +1,229 @@
+# Ouroboros Seed: AutoRefine v4 — Skill Evaluation Platform
+# Generated from interview (12 questions) + research cross-reference (4 sources)
+# Updated: 2026-04-10 — includes 6 research-derived improvements
+
+goal: >
+  Evolve AutoRefine from a single-skill improvement pipeline into a one-stop
+  skill evaluation + autoresearch improvement platform. Supports both individual
+  users iterating skills systematically (like version control) and production
+  systems comparing skill versions to verify improvement. Transparent evaluation,
+  overfitting-resistant trust architecture, and cross-skill learning transfer.
+  Target agents: Claude Code and RovoDev (any SKILL.md-based agent).
+
+constraints:
+  - Must evolve from existing AutoRefine codebase (brownfield, not greenfield)
+  - Skill format is SKILL.md (shared by Claude Code and RovoDev)
+  - Comparison is version-to-version of the same skill (not cross-skill routing)
+  - No real-time routing at agent invocation time (offline evaluation only)
+  - Both individual and production scenarios supported from v1 architecture
+  - Must work with weak coding agents (RovoDev) not just Claude Code
+  - Existing AutoRefine features (7-phase pipeline, 3 gulfs, workspace isolation, filesystem-as-memory) are preserved as foundation
+  - SKILL.md must stay under ~600 lines (move details to references.md with Read-when pointers)
+  - Implementation is phased — v4.0 (Foundation) → v4.1 (Trust) → v4.2 (Research)
+
+acceptance_criteria:
+  # Eval Transparency (Problem 1) — v4.0
+  - "Judge verdicts include reasoning trace and evidence — human can see WHY each Pass/Fail was decided"
+  - "Score aggregation logic is visible and explainable — human understands how individual evals combine into keep/discard"
+  - "Version N vs N+1 comparison on same inputs is surfaced with clear before/after diff"
+
+  # Eval Precision (Research-derived) — v4.0
+  - "Skills are classified into one of 5 patterns (Tool Wrapper, Generator, Reviewer, Inversion, Pipeline) at Phase 1 start — classification shapes downstream eval strategy"
+  - "Phase 1 includes anti-railroading dimension — detects overspecificity that breaks edge cases (calibrated per pattern: pipelines exempt)"
+  - "Phase 1 includes description quality dimension — trigger precision is evaluated for production skill routing"
+
+  # Eval Trust / Anti-Overfitting (Problem 2) — v4.1
+  - "Adversarial holdout set exists that the mutation loop never sees — final score measured there"
+  - "Human spot-check calibration: system surfaces N samples for human review every 3rd experiment, calibrates against human judgment"
+  - "Cross-validation for evals: 3-fold CV on dev split extends current Phase 6 TPR/TNR with confidence ranges"
+  - "Multiple independent judges must agree — gaming one judge does not game all of them"
+  - "Baseline noise measurement: run baseline 3x before mutation loop, establish noise floor — mutations within noise floor are flagged as unreliable"
+
+  # Autoresearch (Problem 3) — v4.2
+  - "System studies external patterns, best practices, and high-performing skills to generate mutation hypotheses (Phase 6.5 Research Intake)"
+  - "Cross-skill learning: insights from improving one skill transfer to future campaigns via manually curated meta-learnings.md"
+  - "Autonomous iteration cycle runs eval+mutate+test without manual bridging between phases"
+  - "Mid-session preference detection: scan user overrides every 3rd experiment, extract style preferences mid-loop and apply immediately"
+
+  # Versioning — v4.0
+  - "Skill iterations are tracked in versions.json with version history — user can see progression from v0 to vN"
+  - "Each version is tied to its eval results, enabling rollback and comparison"
+
+  # Metrics — v4.0
+  - "Task completion rate measured per skill version (eval category tags: task-completion vs quality)"
+  - "Token efficiency estimated per skill version via character-count proxy (~4 chars/token)"
+
+  # Composability (optional) — v4.2
+  - "Optional composability analysis dimension in Phase 1 for multi-skill production systems — evaluates interfaces, script reuse, chaining, isolation"
+
+ontology_schema:
+  name: SkillEvalPlatform
+  description: >
+    Domain model for skill evaluation, versioning, and iterative improvement.
+    Covers the lifecycle from skill input through pattern classification,
+    evaluation, mutation, trust validation, and version comparison.
+  fields:
+    - name: skill_version
+      type: object
+      description: "A snapshot of a skill at a point in time — content, metadata, version number, parent version, token metrics"
+    - name: skill_pattern
+      type: string
+      description: "Classification of the target skill: tool_wrapper, generator, reviewer, inversion, pipeline, or composite (e.g., reviewer+generator)"
+    - name: eval_result
+      type: object
+      description: "Result of evaluating a skill version — per-judge verdicts with reasoning traces, aggregate score, confidence, noise-floor comparison"
+    - name: judge_verdict
+      type: object
+      description: "Single judge's Pass/Fail decision with evidence chain, reasoning trace, confidence score, and method (tier_1/tier_2/code)"
+    - name: trust_report
+      type: object
+      description: "Trust validation output — holdout score, spot-check calibration, cross-validation results, inter-judge agreement, noise floor"
+    - name: noise_floor
+      type: object
+      description: "Baseline measurement variance — mean, stdev, threshold (2 stdev). Mutations below threshold are flagged as unreliable."
+    - name: version_comparison
+      type: object
+      description: "Side-by-side comparison of two skill versions — same inputs, per-eval deltas, aggregate delta, regression flags, token delta"
+    - name: mutation_hypothesis
+      type: object
+      description: "Proposed change — source (internal analysis, external research, cross-skill learning, pattern-informed), target section, expected impact"
+    - name: campaign
+      type: object
+      description: "A full improvement run — sequence of versions, eval results, mutations applied, learnings extracted, noise floor, holdout gap"
+    - name: meta_learning
+      type: object
+      description: "Cross-campaign insight — rule, evidence, applicability tags, confidence, source campaigns"
+    - name: token_metrics
+      type: object
+      description: "Token consumption estimate — skill_chars, output_chars, estimated_tokens, measured via character-count proxy"
+    - name: research_intake
+      type: object
+      description: "External patterns extracted from reference skills, design docs, or best practice guides — feeds mutation hypotheses"
+    - name: mid_session_preference
+      type: object
+      description: "Style/direction preference detected from override patterns during Phase 7 — applied immediately to next mutation"
+
+evaluation_principles:
+  - name: transparency
+    description: "Every evaluation decision is explainable and verifiable by a human — reasoning traces, aggregation formulas, version diffs"
+    weight: 0.20
+  - name: overfitting_resistance
+    description: "Evaluation cannot be gamed — holdout, multi-judge, cross-validation, and noise floor provide defense in depth"
+    weight: 0.20
+  - name: pattern_awareness
+    description: "Eval strategy adapts to the skill's pattern (Tool Wrapper vs Pipeline vs Reviewer) — not one-size-fits-all"
+    weight: 0.15
+  - name: version_clarity
+    description: "Clear before/after comparison on same inputs — user immediately sees whether a change helped or hurt"
+    weight: 0.15
+  - name: research_depth
+    description: "Mutation hypotheses informed by external patterns, cross-campaign learning, and real-time user preferences"
+    weight: 0.15
+  - name: dual_scenario_fit
+    description: "Architecture serves both individual users (lightweight, human-in-the-loop) and production systems (automated, statistical rigor)"
+    weight: 0.15
+
+exit_conditions:
+  - name: v4_0_shipped
+    description: "v4.0 Foundation phase is implemented and tested"
+    criteria: "Transparency layer (verdict cards, aggregation explainer), pattern classification, 3 new Phase 1 dimensions, version registry, version comparison, token estimation, eval category tags — all working in a real campaign"
+  - name: v4_1_shipped
+    description: "v4.1 Trust phase is implemented and tested"
+    criteria: "Adversarial holdout, human spot-checks, cross-validation, multi-judge, noise measurement — all working. At least one campaign demonstrates holdout gap and noise floor reporting."
+  - name: v4_2_shipped
+    description: "v4.2 Research phase is implemented and tested"
+    criteria: "Research intake, meta-learnings, reference skill analysis, mid-session preferences, composability — all working. At least two campaigns demonstrate cross-campaign learning transfer."
+
+metadata:
+  version: "2.0"
+  created: "2026-04-10"
+  updated: "2026-04-10"
+  source: "ouroboros:interview (Path B) + research cross-reference (4 sources)"
+  interview_questions: 12
+  research_sources: "harness engineering (7 patterns), CC source (10 insights), Thariq principles (10 tips), Google 5 patterns"
+  ambiguity_score: 0.10
+  project: skill-improvement
+  branch: main
+  design_doc: "docs/design-autorefine-v4-skill-eval-platform.md"
+
+# Brownfield Context
+brownfield:
+  project_type: brownfield
+  context_references:
+    - path: "autorefine/SKILL.md"
+      role: primary
+      summary: "459-line action script — 7-phase pipeline across 3 gulfs (Comprehension, Specification, Generalization)"
+    - path: "autorefine/references.md"
+      role: primary
+      summary: "1021-line detail library — templates, schemas, rubrics, formulas loaded on demand"
+    - path: "docs/design-autorefine-v4-skill-eval-platform.md"
+      role: primary
+      summary: "1013-line v4 design doc — 5 layers, 3 phases, 21 components with interface contracts and data flow"
+    - path: "autorefine/README.md"
+      role: reference
+      summary: "Public README — Karpathy autoresearch + Hamel Three Gulfs for Claude Code skills"
+    - path: "docs/autorefine-v3-autokaggle-patterns-design.md"
+      role: reference
+      summary: "v3 design — AutoKaggle-inspired patterns (discard autopsy, derived registry, mutation reviewer)"
+    - path: "docs/design-notes-harness-engineering.md"
+      role: reference
+      summary: "10 harness engineering patterns from CC source deep dive — ambient improvement, fork economics, verification independence"
+    - path: "dev/references/google-5-skill-design-patterns.md"
+      role: reference
+      summary: "5 skill design patterns (Tool Wrapper, Generator, Reviewer, Inversion, Pipeline) — source for pattern classification"
+    - path: "dev/principles/thariq-skill-design-principles.md"
+      role: reference
+      summary: "10 skill-writing tips from Anthropic — source for anti-railroading, description quality, composability"
+  existing_patterns:
+    - "7-phase pipeline: Design Audit → Eval Audit → Error Analysis → Expand Inputs → Write Judges → Validate Judges → AutoResearch Loop"
+    - "3 gulfs with human gates: Gulf 1 (Comprehension) and Gulf 2 (Specification) require human approval before Gulf 3 (Generalization)"
+    - "Workspace isolation: skill copied to workspace, original untouched until apply-back"
+    - "State management: state.json (pipeline state), results.json (experiment results), session-log.json (audit trail)"
+    - "Filesystem-as-memory: per-experiment iteration directories with mutation/skill_before/skill_after/eval_results/decision files"
+    - "Confidence-weighted scoring: code evals = 1.0, agent evals = (TPR+TNR)/2"
+    - "Quick Start path: 30-min lightweight entry point with bootstrap evals"
+    - "Discard autopsy: 3-way classification (wrong_target | wrong_params | wrong_type) after each Phase 7 discard"
+    - "Derived mutation registry: computed from results.json on demand, not maintained as separate state"
+    - "Circuit breaker: stops after 3 consecutive failures with diagnosis"
+    - "Verification isolation: Tier 1 (subagent dispatch) or Tier 2 (behavioral instruction) for bias reduction"
+    - "Fork economics: fork subagents inherit cached prefix, ~80% savings on eval dispatch"
+  existing_dependencies:
+    - "Chart.js CDN for dashboard visualization"
+    - "Bash for workspace operations and atomic file writes"
+    - "Python3 for http.server (dashboard serving)"
+
+# Implementation Phasing
+phasing:
+  v4_0_foundation:
+    theme: "Transparent, pattern-aware, and versioned"
+    components:
+      - "1a: Verdict Explanation Cards — persist reasoning in eval_results[]"
+      - "1b: Aggregation Explainer — show full scoring breakdown per experiment"
+      - "1d: Skill Pattern Classification — classify into 5 patterns at Phase 1 start"
+      - "1e: Anti-Railroading Dimension — 5th Phase 1 audit dimension"
+      - "1f: Description Quality Eval — 6th Phase 1 audit dimension"
+      - "4a: Version Registry — versions.json tracking kept versions"
+      - "4b: Version Comparison — side-by-side any two versions"
+      - "5a: Eval Category Tags — task-completion vs quality"
+      - "5b: Token Estimation — character-count proxy"
+    estimated_lines: "+250 SKILL.md, +200 references.md"
+
+  v4_1_trust:
+    theme: "Overfitting-resistant evaluation"
+    components:
+      - "2a: Adversarial Holdout Set — 4-way split, holdout validation at Session Close"
+      - "2b: Human Spot-Check Calibration — every 3rd experiment"
+      - "2c: Cross-Validation — 3-fold CV on dev split in Phase 6"
+      - "2d: Multi-Judge Agreement — optional 2-judge for high-variance evals"
+      - "2e: Baseline Noise Measurement — 3 baseline runs, establish noise floor"
+    estimated_lines: "+180 SKILL.md, +250 references.md"
+
+  v4_2_research:
+    theme: "External research + cross-campaign learning + real-time preferences"
+    components:
+      - "3a: External Pattern Research — Phase 6.5 Research Intake"
+      - "3b: Meta-Learnings — manually curated cross-campaign rules"
+      - "3c: Reference Skill Analysis — extract patterns from gold-standard skills"
+      - "3d: Mid-Session Preference Detection — scan overrides every 3rd experiment"
+      - "3e: Composability Analysis — optional 7th Phase 1 dimension"
+    estimated_lines: "+140 SKILL.md, +140 references.md"
