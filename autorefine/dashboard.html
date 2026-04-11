@@ -53,9 +53,99 @@
   .change-type.removed { background: #f8d7da; color: #721c24; }
   .change-location { font-size: 12px; color: #636e72; margin-bottom: 2px; }
   .change-snippet { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; background: #f1f2f6; padding: 6px 10px; border-radius: 6px; border-left: 3px solid #00b894; white-space: pre-wrap; word-break: break-word; }
+  .detail-section { margin-top: 12px; }
+  .detail-section:first-child { margin-top: 0; }
+  .detail-heading { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #636e72; margin-bottom: 8px; }
+  .decision-report-layout { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; align-items: start; }
+  .decision-panel { background: #ffffff; border: 1px solid #dfe6e9; border-radius: 10px; padding: 12px; min-width: 0; }
+  .decision-call-card { border-radius: 10px; padding: 12px; border: 1px solid #dfe6e9; background: #f8f9fa; }
+  .decision-call-card.keep { background: #e8fbf3; border-color: #bfeeda; }
+  .decision-call-card.discard { background: #fff0f3; border-color: #f5c2d1; }
+  .decision-call-card.baseline { background: #e8f3ff; border-color: #c9e1ff; }
+  .decision-call-card.unknown { background: #f8f9fa; border-color: #dfe6e9; }
+  .decision-call-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px; }
+  .decision-call-badge.keep { background: #00b894; color: #ffffff; }
+  .decision-call-badge.discard { background: #fd79a8; color: #ffffff; }
+  .decision-call-badge.baseline { background: #74b9ff; color: #ffffff; }
+  .decision-call-badge.unknown { background: #dfe6e9; color: #636e72; }
+  .decision-call-title { font-size: 18px; font-weight: 700; color: #2d3436; margin-bottom: 6px; }
+  .decision-call-meta { display: grid; gap: 6px; font-size: 13px; color: #636e72; }
+  .aggregation-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; margin-bottom: 10px; }
+  .aggregation-card { background: #ffffff; border: 1px solid #dfe6e9; border-radius: 8px; padding: 8px 10px; }
+  .aggregation-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #b2bec3; margin-bottom: 4px; }
+  .aggregation-value { font-size: 14px; font-weight: 600; color: #2d3436; }
+  .aggregation-note { font-size: 12px; color: #636e72; margin-top: 4px; }
+  .aggregation-formula { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; background: #f8f9fa; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; white-space: pre-wrap; word-break: break-word; }
+  .explanation-rationale { font-size: 13px; line-height: 1.5; color: #2d3436; white-space: pre-wrap; word-break: break-word; }
+  .explanation-rationale.loading { color: #636e72; font-style: italic; }
+  .aggregation-card.explanation-state-loading { background: #f8f9fa; border-style: dashed; }
+  .aggregation-card.explanation-state-missing { background: #fff9e8; border-color: #f0d28a; }
+  .aggregation-card.explanation-state-fallback { background: #fff4ec; border-color: #f5c7a2; }
+  .explanation-state-note { font-size: 12px; color: #636e72; margin-top: 8px; }
+  .component-list { display: grid; gap: 8px; }
+  .component-item { background: #ffffff; border: 1px solid #dfe6e9; border-radius: 8px; padding: 8px 10px; }
+  .component-header { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; margin-bottom: 6px; }
+  .component-eval { font-weight: 600; }
+  .component-verdict { font-size: 12px; color: #636e72; text-transform: uppercase; letter-spacing: 0.04em; }
+  .component-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px; font-size: 12px; color: #636e72; }
+  .judge-verdict-list { display: grid; gap: 12px; list-style: none; margin: 0; padding: 0; }
+  .judge-verdict-item { background: #ffffff; border: 1px solid #dfe6e9; border-radius: 10px; padding: 12px; }
+  .judge-verdict-header { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 10px; }
+  .judge-verdict-summary { display: grid; gap: 4px; }
+  .judge-verdict-name { font-size: 14px; font-weight: 600; color: #2d3436; }
+  .judge-verdict-status { font-size: 12px; color: #636e72; text-transform: uppercase; letter-spacing: 0.04em; }
+  .judge-verdict-badge { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  .judge-verdict-badge.pass { background: #d4edda; color: #155724; }
+  .judge-verdict-badge.fail { background: #f8d7da; color: #721c24; }
+  .judge-verdict-badge.unknown { background: #dfe6e9; color: #636e72; }
+  .judge-verdict-inline-trace { display: grid; gap: 6px; margin-bottom: 10px; }
+  .judge-verdict-trace { font-size: 13px; line-height: 1.5; color: #2d3436; white-space: pre-wrap; word-break: break-word; }
+  .judge-subsection { margin-top: 10px; }
+  .judge-subsection:first-of-type { margin-top: 0; }
+  .judge-subheading { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #636e72; margin-bottom: 6px; }
+  .judge-verdict-support { display: grid; gap: 8px; }
+  .judge-verdict-support-summary { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .judge-verdict-support-caption { font-size: 12px; color: #636e72; }
+  .judge-evidence-list,
+  .judge-support-list { display: grid; gap: 8px; }
+  .judge-evidence-item,
+  .judge-support-item { background: #f8f9fa; border-radius: 8px; padding: 8px 10px; }
+  .judge-evidence-meta,
+  .judge-support-meta { font-size: 12px; color: #636e72; margin-bottom: 4px; }
+  .judge-evidence-excerpt,
+  .judge-support-decision { font-size: 13px; color: #2d3436; white-space: pre-wrap; word-break: break-word; }
+  .judge-evidence-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .judge-evidence-artifact-link { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: #e8f3ff; color: #0984e3; font-size: 12px; font-weight: 600; text-decoration: none; }
+  .judge-evidence-artifact-link:hover { text-decoration: underline; }
+  .judge-empty { color: #b2bec3; font-size: 12px; }
+  .comparison-status { font-size: 13px; color: #636e72; margin-bottom: 12px; }
+  .comparison-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .comparison-card { background: #ffffff; border: 1px solid #dfe6e9; border-radius: 8px; padding: 8px 10px; }
+  .comparison-card-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #b2bec3; margin-bottom: 4px; }
+  .comparison-card-value { font-size: 14px; font-weight: 600; color: #2d3436; }
+  .comparison-input-list { display: grid; gap: 12px; }
+  .comparison-input-item { background: #ffffff; border: 1px solid #dfe6e9; border-radius: 10px; padding: 12px; }
+  .comparison-input-header { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 10px; }
+  .comparison-input-id { font-size: 14px; font-weight: 600; color: #2d3436; }
+  .comparison-output-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-items: start; }
+  .comparison-output-card { background: #f8f9fa; border-radius: 8px; padding: 8px 10px; }
+  .comparison-output-card.before { border-left: 3px solid #74b9ff; }
+  .comparison-output-card.after { border-left: 3px solid #00b894; }
+  .comparison-output-title { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #636e72; margin-bottom: 6px; }
+  .comparison-output-meta { font-size: 12px; color: #636e72; margin-bottom: 4px; }
+  .comparison-output-excerpt { display: grid; gap: 6px; font-size: 13px; color: #2d3436; }
+  .comparison-output-section { white-space: pre-wrap; word-break: break-word; border-radius: 6px; }
+  .comparison-output-section.unchanged { padding: 0; }
+  .comparison-output-card.before .comparison-output-section.changed { background: #e8f3ff; border: 1px solid #c9e1ff; padding: 6px 8px; }
+  .comparison-output-card.after .comparison-output-section.changed { background: #e8fbf3; border: 1px solid #bfeeda; padding: 6px 8px; }
+  .comparison-change-list { display: grid; gap: 8px; }
+  .comparison-change-item { background: #f8f9fa; border-radius: 8px; padding: 8px 10px; }
+  .comparison-change-meta { font-size: 12px; color: #636e72; margin-bottom: 4px; }
+  .comparison-change-values { font-size: 13px; color: #2d3436; white-space: pre-wrap; word-break: break-word; }
   @media (max-width: 768px) {
     .cards { grid-template-columns: repeat(2, 1fr); }
     .charts { grid-template-columns: 1fr; }
+    .comparison-output-grid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -111,6 +201,12 @@
   </table>
 </div>
 
+<!-- Version Comparison -->
+<div class="chart-container full" style="margin-bottom: 24px;">
+  <h2>Version Comparison</h2>
+  <div id="versionComparison"></div>
+</div>
+
 <!-- Per-Eval Breakdown -->
 <div class="chart-container full">
   <h2>Per-Eval Breakdown</h2>
@@ -125,8 +221,544 @@ let barChart, stepChart;
 async function fetchData() {
   try {
     const res = await fetch('results.json?' + Date.now());
-    return await res.json();
+    const payload = await res.json();
+    return serializeResultsPayload(payload);
   } catch { return null; }
+}
+
+function serializeResultsPayload(payload) {
+  return {
+    ...payload,
+    completion_cadence: serializeCompletionCadence(payload.completion_cadence),
+    experiments: Array.isArray(payload.experiments) ? payload.experiments.map(serializeExperiment) : [],
+    eval_breakdown: Array.isArray(payload.eval_breakdown) ? payload.eval_breakdown : [],
+    version_comparison: serializeVersionComparison(payload.version_comparison)
+  };
+}
+
+function getStoredEvaluationResult(experiment) {
+  if (experiment.stored_evaluation_result && typeof experiment.stored_evaluation_result === 'object') {
+    return experiment.stored_evaluation_result;
+  }
+
+  if (experiment.evaluation_result && typeof experiment.evaluation_result === 'object') {
+    return experiment.evaluation_result;
+  }
+
+  return null;
+}
+
+function cloneStructuredValue(value) {
+  if (Array.isArray(value)) {
+    return value.map(cloneStructuredValue);
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nestedValue]) => [key, cloneStructuredValue(nestedValue)])
+    );
+  }
+
+  return value;
+}
+
+function serializeCompletionCadence(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  return cloneStructuredValue(value);
+}
+
+function getStoredEvaluationMetadata(experiment) {
+  if (experiment.evaluation_metadata && typeof experiment.evaluation_metadata === 'object') {
+    return experiment.evaluation_metadata;
+  }
+
+  const storedEvaluationResult = getStoredEvaluationResult(experiment);
+  if (
+    storedEvaluationResult &&
+    storedEvaluationResult.evaluation_metadata &&
+    typeof storedEvaluationResult.evaluation_metadata === 'object'
+  ) {
+    return storedEvaluationResult.evaluation_metadata;
+  }
+
+  return null;
+}
+
+function resolveHumanSpotCheckCalibrationTask(evaluationMetadata, options = {}) {
+  const defaultSampleCount = 2;
+  const config = evaluationMetadata && evaluationMetadata.config && typeof evaluationMetadata.config === 'object'
+    ? evaluationMetadata.config
+    : null;
+  const calibrationConfig = config &&
+    config.human_spot_check_calibration &&
+    typeof config.human_spot_check_calibration === 'object'
+      ? config.human_spot_check_calibration
+      : null;
+  const configuredSampleCount = Number.isInteger(calibrationConfig && calibrationConfig.sample_count) &&
+    calibrationConfig.sample_count >= 1
+      ? calibrationConfig.sample_count
+      : null;
+  const minimumSampleFloor = Number.isInteger(options.minimumSampleFloor) && options.minimumSampleFloor >= 1
+    ? options.minimumSampleFloor
+    : null;
+  const resolvedSampleCount = Math.max(
+    configuredSampleCount || defaultSampleCount,
+    minimumSampleFloor || 0
+  );
+
+  return {
+    sample_count: resolvedSampleCount,
+    sample_count_source: configuredSampleCount
+      ? 'evaluation_metadata.config.human_spot_check_calibration.sample_count'
+      : 'default_human_spot_check_calibration.sample_count',
+    minimum_sample_floor: minimumSampleFloor
+  };
+}
+
+function normalizeUniqueStringList(values) {
+  const uniqueValues = [];
+  const seen = new Set();
+
+  (Array.isArray(values) ? values : []).forEach((value) => {
+    if (typeof value !== 'string' || value.length === 0 || seen.has(value)) {
+      return;
+    }
+
+    seen.add(value);
+    uniqueValues.push(value);
+  });
+
+  return uniqueValues;
+}
+
+function buildEvaluationMetadataValidation(evaluationMetadata) {
+  if (!evaluationMetadata || typeof evaluationMetadata !== 'object') {
+    return null;
+  }
+
+  const dataset = evaluationMetadata.dataset && typeof evaluationMetadata.dataset === 'object'
+    ? evaluationMetadata.dataset
+    : null;
+  const splitMetadata = dataset && dataset.split_metadata && typeof dataset.split_metadata === 'object'
+    ? dataset.split_metadata
+    : null;
+
+  if (!dataset || !splitMetadata || splitMetadata.split_id !== 'adversarial_holdout') {
+    return null;
+  }
+
+  const holdoutInputIds = normalizeUniqueStringList(dataset.input_ids);
+  const holdoutInputIdSet = new Set(holdoutInputIds);
+  const separateFrom = new Set(normalizeUniqueStringList(splitMetadata.separate_from));
+  const config = evaluationMetadata.config && typeof evaluationMetadata.config === 'object'
+    ? evaluationMetadata.config
+    : null;
+  const comparedSplits = config && Array.isArray(config.mutation_refinement_split_datasets)
+    ? config.mutation_refinement_split_datasets
+    : [];
+
+  const checkedSplitIds = [];
+  const issues = [];
+
+  comparedSplits.forEach((splitDataset) => {
+    if (!splitDataset || typeof splitDataset !== 'object' || typeof splitDataset.split_id !== 'string') {
+      return;
+    }
+
+    const splitId = splitDataset.split_id;
+    if (!checkedSplitIds.includes(splitId)) {
+      checkedSplitIds.push(splitId);
+    }
+
+    if (!separateFrom.has(splitId)) {
+      issues.push({
+        code: 'missing_adversarial_holdout_separation',
+        split_id: splitId,
+        overlapping_input_ids: [],
+        message: `adversarial_holdout metadata must declare ${splitId} in separate_from because ${splitId} is used during mutation/refinement.`
+      });
+    }
+
+    const overlappingInputIds = normalizeUniqueStringList(splitDataset.input_ids)
+      .filter(inputId => holdoutInputIdSet.has(inputId));
+
+    if (overlappingInputIds.length > 0) {
+      issues.push({
+        code: 'adversarial_holdout_overlap',
+        split_id: splitId,
+        overlapping_input_ids: overlappingInputIds,
+        message: `adversarial_holdout overlaps with mutation/refinement split ${splitId}; holdout inputs must stay disjoint from every mutation/refinement split.`
+      });
+    }
+  });
+
+  return {
+    status: issues.length > 0 ? 'invalid' : 'valid',
+    checked_split_ids: checkedSplitIds,
+    overlap_count: issues.filter(issue => issue.code === 'adversarial_holdout_overlap').length,
+    issues
+  };
+}
+
+function getStoredCompletionCadence(experiment) {
+  if (experiment.completion_cadence && typeof experiment.completion_cadence === 'object') {
+    return experiment.completion_cadence;
+  }
+
+  const storedEvaluationResult = getStoredEvaluationResult(experiment);
+  if (
+    storedEvaluationResult &&
+    storedEvaluationResult.completion_cadence &&
+    typeof storedEvaluationResult.completion_cadence === 'object'
+  ) {
+    return storedEvaluationResult.completion_cadence;
+  }
+
+  return null;
+}
+
+function getStoredRequiresHumanSpotCheck(experiment) {
+  if (typeof experiment.requires_human_spot_check === 'boolean') {
+    return experiment.requires_human_spot_check;
+  }
+
+  const storedEvaluationResult = getStoredEvaluationResult(experiment);
+  if (
+    storedEvaluationResult &&
+    typeof storedEvaluationResult.requires_human_spot_check === 'boolean'
+  ) {
+    return storedEvaluationResult.requires_human_spot_check;
+  }
+
+  return null;
+}
+
+function getStoredDecisionBreakdown(experiment) {
+  if (experiment.decision_breakdown && typeof experiment.decision_breakdown === 'object') {
+    return experiment.decision_breakdown;
+  }
+
+  const storedEvaluationResult = getStoredEvaluationResult(experiment);
+  if (storedEvaluationResult && storedEvaluationResult.decision_breakdown && typeof storedEvaluationResult.decision_breakdown === 'object') {
+    return storedEvaluationResult.decision_breakdown;
+  }
+
+  return null;
+}
+
+function getStoredDecisionExplanation(experiment) {
+  if (experiment.decision_explanation && typeof experiment.decision_explanation === 'object') {
+    return experiment.decision_explanation;
+  }
+
+  const storedEvaluationResult = getStoredEvaluationResult(experiment);
+  if (storedEvaluationResult && storedEvaluationResult.decision_explanation && typeof storedEvaluationResult.decision_explanation === 'object') {
+    return storedEvaluationResult.decision_explanation;
+  }
+
+  return null;
+}
+
+function getStoredEvalResults(experiment) {
+  if (Array.isArray(experiment.eval_results)) {
+    return experiment.eval_results;
+  }
+
+  const storedEvaluationResult = getStoredEvaluationResult(experiment);
+  if (storedEvaluationResult && Array.isArray(storedEvaluationResult.eval_results)) {
+    return storedEvaluationResult.eval_results;
+  }
+
+  return [];
+}
+
+function serializeStoredJudgeVerdictReportEntry(verdict) {
+  return {
+    ...verdict,
+    evidence_block: verdict && verdict.evidence_block && Array.isArray(verdict.evidence_block.items)
+      ? {
+          ...verdict.evidence_block,
+          items: verdict.evidence_block.items.map(item => ({ ...item }))
+        }
+      : verdict && verdict.evidence_block && typeof verdict.evidence_block === 'object'
+        ? { ...verdict.evidence_block }
+        : { items: [] },
+    evidence_attachments: verdict && Array.isArray(verdict.evidence_attachments)
+      ? verdict.evidence_attachments.map(item => ({ ...item }))
+      : [],
+    supporting_items: verdict && Array.isArray(verdict.supporting_items)
+      ? verdict.supporting_items.map(item => ({ ...item }))
+      : []
+  };
+}
+
+function getStoredJudgeVerdictReportEntries(experiment) {
+  if (Array.isArray(experiment.judge_verdict_report_entries) && experiment.judge_verdict_report_entries.length > 0) {
+    return experiment.judge_verdict_report_entries.map(serializeStoredJudgeVerdictReportEntry);
+  }
+
+  const storedEvaluationResult = getStoredEvaluationResult(experiment);
+  if (
+    storedEvaluationResult &&
+    Array.isArray(storedEvaluationResult.judge_verdict_report_entries) &&
+    storedEvaluationResult.judge_verdict_report_entries.length > 0
+  ) {
+    return storedEvaluationResult.judge_verdict_report_entries.map(serializeStoredJudgeVerdictReportEntry);
+  }
+
+  return null;
+}
+
+function serializeJudgeVerdict(verdict) {
+  return {
+    ...verdict,
+    evidence: Array.isArray(verdict.evidence) ? verdict.evidence : [],
+    supporting_items: Array.isArray(verdict.supporting_items) ? verdict.supporting_items : []
+  };
+}
+
+function serializeJudgeEvidenceAttachment(item) {
+  return {
+    kind: item && item.kind ? item.kind : 'unknown evidence',
+    source: item && item.source ? item.source : 'unknown source',
+    reference: item && item.locator ? item.locator : 'locator unavailable',
+    snippet: item && item.excerpt ? item.excerpt : 'No excerpt recorded',
+    metric: item && item.metric && typeof item.metric === 'object' ? { ...item.metric } : null,
+    artifact_ref: item && item.artifact_ref && typeof item.artifact_ref === 'object' ? { ...item.artifact_ref } : null
+  };
+}
+
+function serializeJudgeEvidenceBlockItem(item) {
+  const artifactReference = item && item.artifact_ref && typeof item.artifact_ref === 'object'
+    ? { ...item.artifact_ref }
+    : null;
+
+  return {
+    kind: item && item.kind ? item.kind : 'unknown evidence',
+    source: item && item.source ? item.source : 'unknown source',
+    reference: item && item.locator ? item.locator : 'locator unavailable',
+    inline_content: artifactReference ? null : (item && item.excerpt ? item.excerpt : null),
+    artifact_reference: artifactReference,
+    metric: item && item.metric && typeof item.metric === 'object' ? { ...item.metric } : null
+  };
+}
+
+function serializeJudgeEvidenceBlock(evidence) {
+  return {
+    items: (Array.isArray(evidence) ? evidence : []).map(serializeJudgeEvidenceBlockItem)
+  };
+}
+
+function serializeJudgeVerdictEntry(verdict) {
+  const serializedVerdict = serializeJudgeVerdict(verdict);
+  const verdictDisplay = formatJudgeVerdict(serializedVerdict.pass_fail);
+
+  return {
+    ...serializedVerdict,
+    verdict_label: verdictDisplay.label,
+    verdict_class: verdictDisplay.className,
+    evidence_block: serializeJudgeEvidenceBlock(serializedVerdict.evidence),
+    evidence_attachments: serializedVerdict.evidence.map(serializeJudgeEvidenceAttachment)
+  };
+}
+
+function buildHumanSpotCheckTask(experiment, options) {
+  if (!options || options.requiresHumanSpotCheck !== true) {
+    return null;
+  }
+
+  const resolvedCalibrationTask = resolveHumanSpotCheckCalibrationTask(
+    options.evaluationMetadata,
+    {
+      minimumSampleFloor: options.minimumSampleFloor
+    }
+  );
+  const completionCadence = options && options.completionCadence && typeof options.completionCadence === 'object'
+    ? options.completionCadence
+    : null;
+
+  return {
+    task_type: 'human_spot_check_calibration',
+    trigger: options && typeof options.trigger === 'string' ? options.trigger : 'completion_cadence',
+    status: 'pending',
+    experiment_id: typeof experiment.id === 'number' ? experiment.id : null,
+    completed_experiment_slot: completionCadence && typeof completionCadence.completed_experiments === 'number'
+      ? completionCadence.completed_experiments
+      : null,
+    // Carry the resolved calibration sample-count into the queued task payload.
+    // Do not force downstream review queues to recompute N from cadence state or config defaults.
+    sample_count: resolvedCalibrationTask.sample_count,
+    sample_count_source: resolvedCalibrationTask.sample_count_source,
+    minimum_sample_floor: resolvedCalibrationTask.minimum_sample_floor
+  };
+}
+
+function buildReviewHandoff(experiment, options) {
+  const decisionExplanation = options && options.decisionExplanation && typeof options.decisionExplanation === 'object'
+    ? options.decisionExplanation
+    : null;
+  const finalDecision = decisionExplanation && typeof decisionExplanation.final_decision === 'string'
+    ? decisionExplanation.final_decision
+    : (typeof experiment.status === 'string' ? experiment.status : null);
+  const judgeVerdictReportEntries = options && Array.isArray(options.judgeVerdictReportEntries)
+    ? options.judgeVerdictReportEntries
+    : [];
+  const humanSpotCheckTask = buildHumanSpotCheckTask(experiment, {
+    requiresHumanSpotCheck: options ? options.requiresHumanSpotCheck : null,
+    completionCadence: options ? options.completionCadence : null,
+    evaluationMetadata: options ? options.evaluationMetadata : null,
+    trigger: 'completion_cadence'
+  });
+
+  return {
+    experiment_id: typeof experiment.id === 'number' ? experiment.id : null,
+    final_decision: finalDecision,
+    requires_human_spot_check: options ? options.requiresHumanSpotCheck : null,
+    human_spot_check_task: humanSpotCheckTask,
+    completion_cadence: options && options.completionCadence ? cloneStructuredValue(options.completionCadence) : null,
+    decision_breakdown: options && options.decisionBreakdown ? cloneStructuredValue(options.decisionBreakdown) : null,
+    decision_explanation: decisionExplanation ? cloneStructuredValue(decisionExplanation) : null,
+    judge_verdict_report_entries: judgeVerdictReportEntries.map(cloneStructuredValue)
+  };
+}
+
+function mergeComparisonChangeList(existing, incoming) {
+  return [
+    ...(Array.isArray(existing) ? existing : []),
+    ...(Array.isArray(incoming) ? incoming : [])
+  ];
+}
+
+function groupVersionComparisonRows(rows) {
+  const groupedRows = [];
+  const groupedByInputId = new Map();
+
+  (Array.isArray(rows) ? rows : []).forEach(row => {
+    const inputId = row && row.input_id ? row.input_id : null;
+    if (!inputId) {
+      return;
+    }
+
+    if (!groupedByInputId.has(inputId)) {
+      const groupedRow = {
+        ...row,
+        score_changes: Array.isArray(row.score_changes) ? row.score_changes : [],
+        metadata_changes: Array.isArray(row.metadata_changes) ? row.metadata_changes : []
+      };
+      groupedByInputId.set(inputId, groupedRow);
+      groupedRows.push(groupedRow);
+      return;
+    }
+
+    const groupedRow = groupedByInputId.get(inputId);
+    groupedRow.before_output = groupedRow.before_output || row.before_output || null;
+    groupedRow.after_output = groupedRow.after_output || row.after_output || null;
+    groupedRow.score_changes = mergeComparisonChangeList(groupedRow.score_changes, row.score_changes);
+    groupedRow.metadata_changes = mergeComparisonChangeList(groupedRow.metadata_changes, row.metadata_changes);
+  });
+
+  return groupedRows;
+}
+
+function classifyComparisonOutcome(row) {
+  const scoreChanges = Array.isArray(row.score_changes) ? row.score_changes : [];
+  const weightedPointChange = scoreChanges.find(change => change && change.field === 'weighted_points');
+  if (weightedPointChange && typeof weightedPointChange.before === 'number' && typeof weightedPointChange.after === 'number') {
+    if (weightedPointChange.after > weightedPointChange.before) return 'improved';
+    if (weightedPointChange.after < weightedPointChange.before) return 'regressed';
+  }
+
+  const passFailChange = scoreChanges.find(change => change && change.field === 'pass_fail');
+  if (passFailChange) {
+    const before = typeof passFailChange.before === 'string' ? passFailChange.before.toLowerCase() : '';
+    const after = typeof passFailChange.after === 'string' ? passFailChange.after.toLowerCase() : '';
+    if (before === 'fail' && after === 'pass') return 'improved';
+    if (before === 'pass' && after === 'fail') return 'regressed';
+  }
+
+  return 'unchanged';
+}
+
+function buildSharedInputSummary(perInputRows) {
+  const summary = {
+    total_shared_inputs: perInputRows.length,
+    improved: 0,
+    regressed: 0,
+    unchanged: 0
+  };
+
+  perInputRows.forEach(row => {
+    summary[classifyComparisonOutcome(row)] += 1;
+  });
+
+  return summary;
+}
+
+function serializeVersionComparison(versionComparison) {
+  if (!versionComparison || typeof versionComparison !== 'object') {
+    return null;
+  }
+
+  const perInput = groupVersionComparisonRows(versionComparison.per_input);
+  return {
+    ...versionComparison,
+    shared_input_summary: buildSharedInputSummary(perInput),
+    per_input: perInput
+  };
+}
+
+function serializeExperiment(experiment) {
+  const storedEvalResults = getStoredEvalResults(experiment);
+  const storedJudgeVerdictReportEntries = getStoredJudgeVerdictReportEntries(experiment);
+  const storedEvaluationMetadata = getStoredEvaluationMetadata(experiment);
+  const evaluationMetadataValidation = buildEvaluationMetadataValidation(storedEvaluationMetadata);
+  const storedCompletionCadence = getStoredCompletionCadence(experiment);
+  const storedRequiresHumanSpotCheck = getStoredRequiresHumanSpotCheck(experiment);
+  const storedDecisionBreakdown = getStoredDecisionBreakdown(experiment);
+  const storedDecisionExplanation = getStoredDecisionExplanation(experiment);
+  const reviewHandoffEntries = storedJudgeVerdictReportEntries || storedEvalResults.map(serializeJudgeVerdictEntry);
+  return {
+    ...experiment,
+    description: experiment.description || '',
+    changes: Array.isArray(experiment.changes) ? experiment.changes : [],
+    // Read the persisted completion cadence counter from stored payloads.
+    // Do not rebuild the finalized cadence position from experiment order on the retrieval path.
+    completion_cadence: serializeCompletionCadence(storedCompletionCadence),
+    // Read the persisted human spot-check requirement from stored payloads.
+    // Do not recompute the every-third cadence trigger on the retrieval path.
+    requires_human_spot_check: storedRequiresHumanSpotCheck,
+    // Read the persisted evaluation metadata from the stored evaluation result.
+    // Do not rebuild the dataset/config payload on the retrieval path.
+    evaluation_metadata: storedEvaluationMetadata ? cloneStructuredValue(storedEvaluationMetadata) : null,
+    // Validate adversarial_holdout against every mutation/refinement split snapshot.
+    // Flag any overlap without mutating the stored evaluation_metadata payload.
+    evaluation_metadata_validation: evaluationMetadataValidation,
+    // Read the persisted per-eval judge verdicts from the stored evaluation result.
+    // Do not rebuild them on the retrieval path or detach evidence from its owning verdict.
+    eval_results: storedEvalResults.map(serializeJudgeVerdict),
+    // Expose a report-facing verdict view with human-readable labels plus evidence references/snippets.
+    // Keep this derived field additive so the stored eval_results contract stays unchanged.
+    judge_verdict_report_entries: reviewHandoffEntries,
+    // Expose a review handoff payload that downstream review flows can consume directly.
+    // Carry the stored spot-check requirement through unchanged so human enforcement stays explicit.
+    review_handoff: buildReviewHandoff(experiment, {
+      requiresHumanSpotCheck: storedRequiresHumanSpotCheck,
+      completionCadence: storedCompletionCadence,
+      evaluationMetadata: storedEvaluationMetadata,
+      decisionBreakdown: storedDecisionBreakdown,
+      decisionExplanation: storedDecisionExplanation,
+      judgeVerdictReportEntries: reviewHandoffEntries
+    }),
+    // Read the persisted aggregation math from the stored evaluation result.
+    // Do not rebuild it on the retrieval path from eval_results or scoring helpers.
+    decision_breakdown: storedDecisionBreakdown,
+    // Read the persisted decision explanation from the stored evaluation result.
+    // Do not rebuild it on the retrieval path from decision_breakdown or eval_results.
+    decision_explanation: storedDecisionExplanation
+  };
 }
 
 function statusColor(s) {
@@ -160,9 +792,16 @@ function updateCards(data) {
   }
 }
 
+// Prefer weighted score from decision_breakdown, fall back to pass_rate for legacy data
+function weightedScore(e) {
+  const db = getStoredDecisionBreakdown(e);
+  if (db && typeof db.combined_score_pct === 'number') return db.combined_score_pct;
+  return e.pass_rate;
+}
+
 function updateBarChart(data) {
   const labels = data.experiments.map(e => 'Exp ' + e.id);
-  const scores = data.experiments.map(e => e.pass_rate);
+  const scores = data.experiments.map(e => weightedScore(e));
   const colors = data.experiments.map(e => statusColor(e.status));
 
   if (barChart) barChart.destroy();
@@ -187,8 +826,8 @@ function updateStepChart(data) {
   if (exps.length === 0) return;
 
   // All experiments as scatter points
-  const discarded = exps.filter(e => e.status === 'discard').map(e => ({ x: e.id, y: e.pass_rate }));
-  const kept = exps.filter(e => e.status !== 'discard').map(e => ({ x: e.id, y: e.pass_rate }));
+  const discarded = exps.filter(e => e.status === 'discard').map(e => ({ x: e.id, y: weightedScore(e) }));
+  const kept = exps.filter(e => e.status !== 'discard').map(e => ({ x: e.id, y: weightedScore(e) }));
 
   // Running maximum line (staircase) — only from kept/baseline experiments
   const keptSorted = [...kept].sort((a, b) => a.x - b.x);
@@ -244,7 +883,7 @@ function updateStepChart(data) {
           callbacks: {
             label: function(ctx) {
               const exp = exps.find(e => e.id === ctx.parsed.x);
-              return exp ? truncate(exp.description, 60) + ' (' + exp.pass_rate + '%)' : '';
+              return exp ? truncate(exp.description, 60) + ' (' + weightedScore(exp) + '%)' : '';
             }
           }
         }
@@ -268,25 +907,987 @@ function renderChanges(changes) {
   ).join('');
 }
 
+function renderDecisionBreakdown(decisionBreakdown) {
+  return renderDecisionBreakdownSection(decisionBreakdown);
+}
+
+function normalizeDecisionLabel(decision) {
+  return typeof decision === 'string' ? decision.toLowerCase() : 'decision';
+}
+
+function findOutcomeByImpact(strongestOutcomes, impact) {
+  if (!Array.isArray(strongestOutcomes) || strongestOutcomes.length === 0) {
+    return null;
+  }
+
+  return strongestOutcomes.find(outcome => outcome && outcome.impact === impact) || null;
+}
+
+function formatDecisionSignal(outcome) {
+  if (!outcome) {
+    return null;
+  }
+
+  const evalName = outcome.eval || 'The strongest signal';
+  const impactMagnitude = formatMaybePercent(outcome.impact_magnitude);
+  if (!impactMagnitude) {
+    return null;
+  }
+
+  if (outcome.impact === 'supports_keep') {
+    return `${evalName} added ${impactMagnitude} of the available score`;
+  }
+
+  if (outcome.impact === 'supports_discard') {
+    return `${evalName} withheld ${impactMagnitude} of the available score`;
+  }
+
+  return `${evalName} contributed ${impactMagnitude}`;
+}
+
+function formatDecisionExplanationCopy(decisionExplanation) {
+  if (!decisionExplanation || typeof decisionExplanation !== 'object') {
+    return {
+      outcome_label: 'Decision summary',
+      plain_language_summary: 'No decision summary recorded.'
+    };
+  }
+
+  const decision = normalizeDecisionLabel(decisionExplanation.final_decision);
+  const strongestOutcomes = Array.isArray(decisionExplanation.strongest_outcomes) ? decisionExplanation.strongest_outcomes : [];
+  const keepOutcome = findOutcomeByImpact(strongestOutcomes, 'supports_keep');
+  const discardOutcome = findOutcomeByImpact(strongestOutcomes, 'supports_discard');
+  const keepSignal = formatDecisionSignal(keepOutcome);
+  const discardSignal = formatDecisionSignal(discardOutcome);
+
+  if (decision === 'keep') {
+    return {
+      outcome_label: 'Clear keep',
+      plain_language_summary: keepSignal && discardSignal
+        ? `Keep this version. ${keepSignal}, while ${discardSignal}; the keep signal still cleared the threshold.`
+        : keepSignal
+          ? `Keep this version. ${keepSignal}, and no discard signal outweighed it.`
+          : 'Keep this version. The strongest recorded outcomes still supported the keep call.'
+    };
+  }
+
+  if (decision === 'discard') {
+    return {
+      outcome_label: 'Clear discard',
+      plain_language_summary: discardSignal && keepSignal
+        ? `Discard this version. ${discardSignal}, while ${keepSignal}; the keep signal still did not recover the threshold.`
+        : discardSignal
+          ? `Discard this version. ${discardSignal}, and the keep signals did not recover the threshold.`
+          : 'Discard this version. The strongest recorded outcomes still supported the discard call.'
+    };
+  }
+
+  if (decision === 'baseline') {
+    return {
+      outcome_label: 'Baseline reference',
+      plain_language_summary: 'This baseline run is the comparison point for later mutations.'
+    };
+  }
+
+  return {
+    outcome_label: 'Decision summary',
+    plain_language_summary: decisionExplanation.summary || 'No decision summary recorded.'
+  };
+}
+
+function formatExplanationBreakdownSummary(decisionBreakdown) {
+  if (!decisionBreakdown || typeof decisionBreakdown !== 'object') {
+    return 'No aggregation breakdown recorded.';
+  }
+
+  const combinedScore = formatScore(decisionBreakdown.combined_score, decisionBreakdown.combined_score_pct);
+  const threshold = formatMaybePercent(decisionBreakdown.threshold);
+
+  if (combinedScore !== 'n/a' && threshold !== 'n/a') {
+    return `Combined score ${combinedScore} vs threshold ${threshold}.`;
+  }
+
+  if (combinedScore !== 'n/a') {
+    return `Combined score ${combinedScore}.`;
+  }
+
+  if (threshold !== 'n/a') {
+    return `Threshold ${threshold}.`;
+  }
+
+  return 'No aggregation breakdown recorded.';
+}
+
+function hasStoredDecisionExplanationContent(decisionExplanation) {
+  if (!decisionExplanation || typeof decisionExplanation !== 'object') {
+    return false;
+  }
+
+  const strongestOutcomes = Array.isArray(decisionExplanation.strongest_outcomes) ? decisionExplanation.strongest_outcomes : [];
+  return (
+    (typeof decisionExplanation.summary === 'string' && decisionExplanation.summary.trim().length > 0) ||
+    (typeof decisionExplanation.final_decision === 'string' && decisionExplanation.final_decision.trim().length > 0) ||
+    strongestOutcomes.length > 0
+  );
+}
+
+function getDecisionBreakdownScoreValue(decisionBreakdown) {
+  if (!decisionBreakdown || typeof decisionBreakdown !== 'object') {
+    return null;
+  }
+
+  if (typeof decisionBreakdown.combined_score === 'number') {
+    return decisionBreakdown.combined_score;
+  }
+
+  if (typeof decisionBreakdown.combined_score_pct === 'number') {
+    return decisionBreakdown.combined_score_pct / 100;
+  }
+
+  return null;
+}
+
+function buildDecisionExplanationFallbackSummary(finalDecision, decisionBreakdown) {
+  const normalizedDecision = normalizeDecisionLabel(finalDecision);
+  if (normalizedDecision === 'baseline') {
+    return 'This baseline run is the comparison point for later mutations. Stored rationale was unavailable, so the dashboard falls back to the baseline label.';
+  }
+
+  const combinedScore = formatScore(decisionBreakdown && decisionBreakdown.combined_score, decisionBreakdown && decisionBreakdown.combined_score_pct);
+  const threshold = formatMaybePercent(decisionBreakdown && decisionBreakdown.threshold);
+  const combinedScoreValue = getDecisionBreakdownScoreValue(decisionBreakdown);
+  const thresholdValue = decisionBreakdown && typeof decisionBreakdown.threshold === 'number' ? decisionBreakdown.threshold : null;
+  const decisionTitle = formatFinalDecisionTitle(finalDecision);
+
+  if (combinedScore !== 'n/a' && threshold !== 'n/a' && combinedScoreValue != null && thresholdValue != null) {
+    const thresholdVerb = combinedScoreValue >= thresholdValue ? 'cleared' : 'missed';
+    return `${decisionTitle}. Stored rationale is unavailable, so this summary falls back to the aggregation math: combined score ${combinedScore} ${thresholdVerb} the threshold ${threshold}.`;
+  }
+
+  if (decisionBreakdown && typeof decisionBreakdown.proposed_decision === 'string') {
+    return `${decisionTitle}. Stored rationale is unavailable, so this summary falls back to the aggregation breakdown, which recommends ${decisionBreakdown.proposed_decision}.`;
+  }
+
+  if (normalizedDecision !== 'decision') {
+    return `${decisionTitle}. Stored rationale is unavailable, so only the final decision label is available.`;
+  }
+
+  return 'The final rationale is unavailable. Use the aggregation breakdown to understand the current decision state.';
+}
+
+function buildDecisionExplanationState(options = {}) {
+  const decisionExplanation = options.decisionExplanation;
+  const decisionBreakdown = options.decisionBreakdown;
+  const finalDecision = options.finalDecision || (decisionExplanation && decisionExplanation.final_decision) || null;
+  const breakdownSummary = formatExplanationBreakdownSummary(decisionBreakdown);
+  const fallbackSummary = buildDecisionExplanationFallbackSummary(finalDecision, decisionBreakdown);
+
+  if (options.isLoading && !decisionExplanation) {
+    return {
+      state: 'loading',
+      explanationCopy: {
+        outcome_label: 'Rationale pending',
+        plain_language_summary: 'The final rationale has not been stored yet. Auto-refresh will replace this placeholder once Phase 7 writes the explanation.'
+      },
+      breakdownSummary,
+      strongestOutcomes: [],
+      strongestOutcomeEmptyState: 'Loading strongest outcome records…',
+      note: 'Using the current decision label and aggregation breakdown as a temporary placeholder.'
+    };
+  }
+
+  if (!decisionExplanation) {
+    return {
+      state: 'missing',
+      explanationCopy: {
+        outcome_label: 'Stored rationale missing',
+        plain_language_summary: fallbackSummary
+      },
+      breakdownSummary,
+      strongestOutcomes: [],
+      strongestOutcomeEmptyState: 'No strongest outcome records were stored, so the report falls back to the aggregation breakdown.',
+      note: 'No decision_explanation block was stored for this experiment.'
+    };
+  }
+
+  if (typeof decisionExplanation !== 'object') {
+    return {
+      state: 'fallback',
+      explanationCopy: {
+        outcome_label: 'Fallback summary',
+        plain_language_summary: fallbackSummary
+      },
+      breakdownSummary,
+      strongestOutcomes: [],
+      strongestOutcomeEmptyState: 'The stored rationale could not be read, so no strongest outcome records are available.',
+      note: 'The stored rationale could not be read, so the report falls back to the aggregation breakdown.'
+    };
+  }
+
+  if (!hasStoredDecisionExplanationContent(decisionExplanation)) {
+    return {
+      state: 'fallback',
+      explanationCopy: {
+        outcome_label: 'Fallback summary',
+        plain_language_summary: fallbackSummary
+      },
+      breakdownSummary,
+      strongestOutcomes: [],
+      strongestOutcomeEmptyState: 'The stored rationale was empty, so the report falls back to the aggregation breakdown.',
+      note: 'The stored rationale object was present but empty.'
+    };
+  }
+
+  try {
+    return {
+      state: 'ready',
+      explanationCopy: formatDecisionExplanationCopy(decisionExplanation),
+      breakdownSummary,
+      strongestOutcomes: Array.isArray(decisionExplanation.strongest_outcomes) ? decisionExplanation.strongest_outcomes : [],
+      strongestOutcomeEmptyState: 'No strongest outcome records captured',
+      note: null
+    };
+  } catch (error) {
+    return {
+      state: 'fallback',
+      explanationCopy: {
+        outcome_label: 'Fallback summary',
+        plain_language_summary: fallbackSummary
+      },
+      breakdownSummary,
+      strongestOutcomes: [],
+      strongestOutcomeEmptyState: 'The stored rationale could not be rendered, so no strongest outcome records are available.',
+      note: 'The stored rationale could not be rendered, so the report falls back to the aggregation breakdown.'
+    };
+  }
+}
+
+function renderDecisionBreakdownSection(decisionBreakdown, options = {}) {
+  const wrapSection = options.wrapSection !== false;
+
+  if (!decisionBreakdown) {
+    return wrapSection
+      ? '<div style="color:#b2bec3;font-size:12px;">No aggregation breakdown recorded</div>'
+      : '<div style="color:#b2bec3;font-size:12px;">No aggregation breakdown recorded</div>';
+  }
+
+  const components = Array.isArray(decisionBreakdown.components) ? decisionBreakdown.components : [];
+  const componentMarkup = components.length === 0
+    ? '<div style="color:#b2bec3;font-size:12px;">No per-eval aggregation components recorded</div>'
+    : `<div class="component-list">${components.map(component => `
+        <div class="component-item">
+          <div class="component-header">
+            <div class="component-eval">${escapeHtml(component.eval || 'Unknown eval')}</div>
+            <div class="component-verdict">${escapeHtml(component.pass_fail || 'unknown')}</div>
+          </div>
+          <div class="component-metrics">
+            <div><strong>Weight:</strong> ${formatMaybeNumber(component.weight)}</div>
+            <div><strong>Source:</strong> ${escapeHtml(component.weight_source || 'n/a')}</div>
+            <div><strong>Weighted Points:</strong> ${formatMaybeNumber(component.weighted_points)}</div>
+            <div><strong>Contribution:</strong> ${formatMaybePercent(component.normalized_contribution)}</div>
+          </div>
+        </div>
+      `).join('')}</div>`;
+
+  const content = `
+    <div class="detail-heading">Aggregation Breakdown</div>
+    <div class="aggregation-summary">
+      <div class="aggregation-card">
+        <div class="aggregation-label">Weighted Points</div>
+        <div class="aggregation-value">${formatMaybeNumber(decisionBreakdown.weighted_points)}</div>
+      </div>
+      <div class="aggregation-card">
+        <div class="aggregation-label">Total Weight</div>
+        <div class="aggregation-value">${formatMaybeNumber(decisionBreakdown.total_weight)}</div>
+      </div>
+      <div class="aggregation-card">
+        <div class="aggregation-label">Combined Score</div>
+        <div class="aggregation-value">${formatScore(decisionBreakdown.combined_score, decisionBreakdown.combined_score_pct)}</div>
+      </div>
+      <div class="aggregation-card">
+        <div class="aggregation-label">Threshold</div>
+        <div class="aggregation-value">${formatMaybePercent(decisionBreakdown.threshold)}</div>
+      </div>
+      <div class="aggregation-card">
+        <div class="aggregation-label">Proposed Decision</div>
+        <div class="aggregation-value">${escapeHtml(decisionBreakdown.proposed_decision || 'n/a')}</div>
+      </div>
+    </div>
+    <div class="aggregation-formula">${escapeHtml(decisionBreakdown.formula || 'combined_score = weighted_points / total_weight')}</div>
+    ${componentMarkup}
+  `;
+
+  return wrapSection
+    ? `<div class="detail-section">${content}</div>`
+    : content;
+}
+
+function renderDecisionExplanation(decisionExplanation, options = {}) {
+  return renderDecisionExplanationSection(decisionExplanation, options);
+}
+
+function renderDecisionExplanationSection(decisionExplanation, options = {}) {
+  const wrapSection = options.wrapSection !== false;
+  const explanationDecision = options.finalDecision || (decisionExplanation && typeof decisionExplanation === 'object' ? decisionExplanation.final_decision : null) || null;
+  const explanationState = options.explanationState || buildDecisionExplanationState({
+    decisionExplanation,
+    decisionBreakdown: options.decisionBreakdown,
+    finalDecision: explanationDecision,
+    isLoading: options.isLoading
+  });
+  const strongestOutcomeMarkup = explanationState.strongestOutcomes.length === 0
+    ? `<div class="judge-empty">${escapeHtml(explanationState.strongestOutcomeEmptyState)}</div>`
+    : `<div class="component-list">${explanationState.strongestOutcomes.map((outcome, index) => `
+        <div class="component-item">
+          <div class="component-header">
+            <div class="component-eval">Strongest Outcome ${index + 1}: ${escapeHtml(outcome.eval || 'Unknown eval')}</div>
+            <div class="component-verdict">${escapeHtml(outcome.impact || 'unknown impact')}</div>
+          </div>
+          <div class="component-metrics">
+            <div><strong>Verdict:</strong> ${escapeHtml(outcome.pass_fail || 'unknown')}</div>
+            <div><strong>Impact Basis:</strong> ${escapeHtml(outcome.impact_basis || 'n/a')}</div>
+            <div><strong>Impact Magnitude:</strong> ${formatMaybePercent(outcome.impact_magnitude)}</div>
+          </div>
+          <div class="change-snippet">${escapeHtml(outcome.summary || 'No summary recorded')}</div>
+        </div>
+      `).join('')}</div>`;
+
+  const content = `
+    <div class="detail-heading">Explanation</div>
+    <div class="aggregation-card${explanationState.state === 'ready' ? '' : ` explanation-state-${explanationState.state}`}" style="margin-bottom:12px;">
+      <div class="aggregation-label">Plain-language rationale</div>
+      <div class="explanation-rationale${explanationState.state === 'ready' ? '' : ` ${explanationState.state}`}">${escapeHtml(explanationState.explanationCopy.plain_language_summary || 'No decision summary recorded')}</div>
+      ${explanationState.note ? `<div class="explanation-state-note">${escapeHtml(explanationState.note)}</div>` : ''}
+    </div>
+    <div class="aggregation-summary">
+      <div class="aggregation-card">
+        <div class="aggregation-label">Explains final decision</div>
+        <div class="aggregation-value">${escapeHtml(formatFinalDecisionTitle(explanationDecision))}</div>
+        <div class="aggregation-note">${escapeHtml(explanationState.explanationCopy.outcome_label || 'Decision summary')}</div>
+      </div>
+      <div class="aggregation-card">
+        <div class="aggregation-label">Grounded in aggregation breakdown</div>
+        <div class="aggregation-value">${escapeHtml(explanationState.breakdownSummary)}</div>
+      </div>
+    </div>
+    <div class="judge-subheading">Key signals from the breakdown</div>
+    ${strongestOutcomeMarkup}
+  `;
+
+  return wrapSection
+    ? `<div class="detail-section">${content}</div>`
+    : content;
+}
+
+function resolveFinalDecision(experiment) {
+  if (experiment && experiment.decision_explanation && typeof experiment.decision_explanation.final_decision === 'string') {
+    return experiment.decision_explanation.final_decision;
+  }
+
+  if (experiment && experiment.decision_breakdown && typeof experiment.decision_breakdown.proposed_decision === 'string') {
+    return experiment.decision_breakdown.proposed_decision;
+  }
+
+  if (experiment && typeof experiment.status === 'string') {
+    return experiment.status;
+  }
+
+  return null;
+}
+
+function formatFinalDecisionTitle(decision) {
+  const normalizedDecision = normalizeDecisionLabel(decision);
+
+  if (normalizedDecision === 'keep') {
+    return 'Keep this version';
+  }
+
+  if (normalizedDecision === 'discard') {
+    return 'Discard this version';
+  }
+
+  if (normalizedDecision === 'baseline') {
+    return 'Baseline reference';
+  }
+
+  return 'Decision pending';
+}
+
+function isDecisionExplanationPending(experiment, dashboardState = {}) {
+  if (!experiment || experiment.decision_explanation || !experiment.decision_breakdown) {
+    return false;
+  }
+
+  if (experiment.status === 'running' || experiment.status === 'pending') {
+    return true;
+  }
+
+  if (!dashboardState || dashboardState.status === 'complete') {
+    return false;
+  }
+
+  if (dashboardState.current_experiment == null || experiment.id == null) {
+    return false;
+  }
+
+  return String(experiment.id) === String(dashboardState.current_experiment);
+}
+
+function formatFinalDecisionMeta(decisionBreakdown) {
+  if (!decisionBreakdown) {
+    return [];
+  }
+
+  const meta = [];
+  const combinedScore = formatScore(decisionBreakdown.combined_score, decisionBreakdown.combined_score_pct);
+  const threshold = formatMaybePercent(decisionBreakdown.threshold);
+
+  if (combinedScore !== 'n/a') {
+    meta.push(`Combined score: ${combinedScore}`);
+  }
+
+  if (threshold !== 'n/a') {
+    meta.push(`Threshold: ${threshold}`);
+  }
+
+  if (combinedScore !== 'n/a' && threshold !== 'n/a') {
+    meta.push(`Recommendation source: ${combinedScore} vs ${threshold}`);
+  }
+
+  return meta;
+}
+
+function renderFinalDecisionSection(experiment, explanationState, finalDecision = resolveFinalDecision(experiment)) {
+  const decision = finalDecision;
+  const normalizedDecision = normalizeDecisionLabel(decision);
+  const badgeClass = ['keep', 'discard', 'baseline'].includes(normalizedDecision) ? normalizedDecision : 'unknown';
+  const resolvedExplanationState = explanationState || buildDecisionExplanationState({
+    decisionExplanation: experiment ? experiment.decision_explanation : null,
+    decisionBreakdown: experiment ? experiment.decision_breakdown : null,
+    finalDecision: decision
+  });
+  const decisionMeta = formatFinalDecisionMeta(experiment ? experiment.decision_breakdown : null);
+  const spotCheckMeta = experiment && experiment.requires_human_spot_check === true
+    ? ['Human spot-check required before continuing.']
+    : [];
+
+  return `
+    <div class="detail-heading">Final Decision</div>
+    <div class="decision-call-card ${badgeClass}">
+      <div class="decision-call-badge ${badgeClass}">${escapeHtml(normalizedDecision === 'decision' ? 'pending' : normalizedDecision)}</div>
+      <div class="decision-call-title">${escapeHtml(formatFinalDecisionTitle(decision))}</div>
+      <div class="decision-call-meta">
+        <div>${escapeHtml(resolvedExplanationState.explanationCopy.outcome_label || 'Decision summary')}</div>
+        ${decisionMeta.concat(spotCheckMeta).map(line => `<div>${escapeHtml(line)}</div>`).join('')}
+      </div>
+    </div>`;
+}
+
+function renderDecisionReport(experiment) {
+  const dashboardState = arguments[1] || {};
+  if (!experiment || (!experiment.decision_breakdown && !experiment.decision_explanation)) {
+    return '';
+  }
+
+  const finalDecision = resolveFinalDecision(experiment);
+  const explanationState = buildDecisionExplanationState({
+    decisionExplanation: experiment ? experiment.decision_explanation : null,
+    decisionBreakdown: experiment ? experiment.decision_breakdown : null,
+    finalDecision,
+    isLoading: isDecisionExplanationPending(experiment, dashboardState)
+  });
+
+  return `<div class="detail-section">
+    <div class="decision-report-layout">
+      <div class="decision-panel">
+        ${renderFinalDecisionSection(experiment, explanationState, finalDecision)}
+      </div>
+      <div class="decision-panel">${renderDecisionExplanationSection(experiment ? experiment.decision_explanation : null, {
+        wrapSection: false,
+        decisionBreakdown: experiment.decision_breakdown,
+        finalDecision,
+        isLoading: explanationState.state === 'loading',
+        explanationState
+      })}</div>
+      ${experiment.decision_breakdown ? `<div class="decision-panel">${renderDecisionBreakdownSection(experiment.decision_breakdown, { wrapSection: false })}</div>` : ''}
+    </div>
+  </div>`;
+}
+
+function formatJudgeVerdict(passFail) {
+  const normalized = typeof passFail === 'string' ? passFail.toLowerCase() : 'unknown';
+  return {
+    label: normalized === 'pass' ? 'PASS' : normalized === 'fail' ? 'FAIL' : 'UNKNOWN',
+    className: normalized === 'pass' || normalized === 'fail' ? normalized : 'unknown'
+  };
+}
+
+function formatJudgeVerdictSummary(passFail) {
+  const verdictDisplay = formatJudgeVerdict(passFail);
+  if (verdictDisplay.label === 'PASS') {
+    return 'Status: Pass';
+  }
+
+  if (verdictDisplay.label === 'FAIL') {
+    return 'Status: Fail';
+  }
+
+  return 'Status: Unknown';
+}
+
+function renderJudgeEvidence(evidence) {
+  if (!evidence || evidence.length === 0) {
+    return '<div class="judge-empty">No evidence recorded</div>';
+  }
+
+  return `<div class="judge-evidence-list">${evidence.map(item => {
+    const artifactRef = getJudgeArtifactReference(item);
+    const artifact = artifactRef
+      ? `${artifactRef.label || 'artifact'} (${artifactRef.path || 'path unavailable'})`
+      : '';
+    const metric = item.metric && typeof item.metric === 'object'
+      ? `${item.metric.name || 'metric'}=${item.metric.value}${item.metric.unit ? ' ' + item.metric.unit : ''}`
+      : '';
+    const meta = [
+      item.kind || 'unknown evidence',
+      item.source || 'unknown source',
+      item.reference || item.locator || 'locator unavailable',
+      metric,
+      artifact
+    ].filter(Boolean).join(' · ');
+    const content = item.inline_content || item.snippet || item.excerpt || artifact || 'No excerpt recorded';
+    const artifactLink = renderJudgeArtifactLink(artifactRef);
+
+    return `<div class="judge-evidence-item">
+      <div class="judge-evidence-meta">${escapeHtml(meta)}</div>
+      <div class="judge-evidence-excerpt">${escapeHtml(content)}</div>
+      ${artifactLink}
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function renderJudgeSupportingItems(items) {
+  if (!items || items.length === 0) {
+    return '';
+  }
+
+  return `<div class="judge-subsection">
+    <div class="judge-subheading">Supporting Items</div>
+    <div class="judge-support-list">${items.map(item => `
+      <div class="judge-support-item">
+        <div class="judge-support-meta">${escapeHtml([item.stage || 'unknown stage', item.outcome || 'unknown outcome', Array.isArray(item.evidence_refs) ? 'evidence refs: ' + item.evidence_refs.join(', ') : ''].filter(Boolean).join(' · '))}</div>
+        <div class="judge-support-decision">${escapeHtml(item.decision || 'No supporting decision recorded')}</div>
+      </div>
+    `).join('')}</div>
+  </div>`;
+}
+
+function getRenderableJudgeEvidence(verdict) {
+  const evidenceBlockItems = verdict && verdict.evidence_block && Array.isArray(verdict.evidence_block.items)
+    ? verdict.evidence_block.items
+    : [];
+  const evidenceAttachments = verdict && Array.isArray(verdict.evidence_attachments)
+    ? verdict.evidence_attachments
+    : [];
+
+  if (evidenceBlockItems.length > 0) {
+    return evidenceBlockItems.map((item, index) => {
+      const attachment = evidenceAttachments[index] && typeof evidenceAttachments[index] === 'object'
+        ? evidenceAttachments[index]
+        : null;
+
+      return {
+        ...item,
+        snippet: item.inline_content ? null : (attachment && attachment.snippet ? attachment.snippet : null)
+      };
+    });
+  }
+
+  if (evidenceAttachments.length > 0) {
+    return evidenceAttachments;
+  }
+
+  return verdict ? verdict.evidence : [];
+}
+
+function renderJudgeResultOutput(verdict) {
+  const verdictDisplay = {
+    label: verdict.verdict_label || formatJudgeVerdict(verdict.pass_fail).label,
+    className: verdict.verdict_class || formatJudgeVerdict(verdict.pass_fail).className
+  };
+  const verdictStatusSummary = formatJudgeVerdictSummary(verdict.pass_fail);
+  const attachedEvidence = getRenderableJudgeEvidence(verdict);
+  const evidenceCount = Array.isArray(attachedEvidence) ? attachedEvidence.length : 0;
+  const evidenceLabel = evidenceCount === 1 ? '1 evidence item attached' : `${evidenceCount} evidence items attached`;
+
+  return `<li class="judge-verdict-item">
+    <div class="judge-verdict-header">
+      <div class="judge-verdict-summary">
+        <div class="judge-verdict-name">${escapeHtml(verdict.eval || 'Unknown eval')}</div>
+        <div class="judge-verdict-status">${escapeHtml(verdictStatusSummary)}</div>
+      </div>
+      <span class="judge-verdict-badge ${verdictDisplay.className}">${verdictDisplay.label}</span>
+    </div>
+    <div class="judge-verdict-inline-trace">
+      <div class="judge-subheading">Reasoning Trace</div>
+      <div class="judge-verdict-trace">${escapeHtml(verdict.reasoning_trace || 'No reasoning trace recorded')}</div>
+    </div>
+    <div class="judge-subsection">
+      <div class="judge-subheading">Verdict + Evidence</div>
+      <div class="judge-verdict-support">
+        <div class="judge-verdict-support-summary">
+          <span class="judge-verdict-badge ${verdictDisplay.className}">${verdictDisplay.label}</span>
+          <span class="judge-verdict-support-caption">${escapeHtml(evidenceLabel)}</span>
+        </div>
+        ${renderJudgeEvidence(attachedEvidence)}
+      </div>
+    </div>
+    ${renderJudgeSupportingItems(verdict.supporting_items)}
+  </li>`;
+}
+
+function renderJudgeVerdicts(evalResults) {
+  if (!evalResults || evalResults.length === 0) {
+    return '';
+  }
+
+  return `<div class="detail-section">
+    <div class="detail-heading">Judge Verdicts</div>
+    <ul class="judge-verdict-list">${evalResults.map(renderJudgeResultOutput).join('')}</ul>
+  </div>`;
+}
+
+function renderExperimentDetails(experiment) {
+  const dashboardState = arguments[1] || {};
+  const details = [];
+
+  if ((experiment.changes || []).length > 0) {
+    details.push(`<div class="detail-section">
+      <div class="detail-heading">Changes</div>
+      ${renderChanges(experiment.changes)}
+    </div>`);
+  }
+
+  if ((experiment.judge_verdict_report_entries || experiment.eval_results || []).length > 0) {
+    details.push(renderJudgeVerdicts(experiment.judge_verdict_report_entries || experiment.eval_results));
+  }
+
+  if (experiment.decision_breakdown || experiment.decision_explanation) {
+    details.push(renderDecisionReport(experiment, dashboardState));
+  }
+
+  if (details.length === 0) {
+    return '<div style="color:#b2bec3;font-size:12px;">No experiment details recorded</div>';
+  }
+
+  return details.join('');
+}
+
 function escapeHtml(str) {
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(str == null ? '' : str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function escapeAttribute(str) {
+  return escapeHtml(str);
+}
+
+function getJudgeArtifactReference(item) {
+  if (item && item.artifact_reference && typeof item.artifact_reference === 'object') {
+    return item.artifact_reference;
+  }
+
+  if (item && item.artifact_ref && typeof item.artifact_ref === 'object') {
+    return item.artifact_ref;
+  }
+
+  return null;
+}
+
+function getJudgeArtifactHref(artifactRef) {
+  const path = artifactRef && typeof artifactRef.path === 'string'
+    ? artifactRef.path.trim()
+    : '';
+
+  if (!path) {
+    return null;
+  }
+
+  const normalizedPath = path.toLowerCase();
+  if (normalizedPath.startsWith('javascript:') || normalizedPath.startsWith('data:')) {
+    return null;
+  }
+
+  return encodeURI(path);
+}
+
+function renderJudgeArtifactLink(artifactRef) {
+  const href = getJudgeArtifactHref(artifactRef);
+  if (!href) {
+    return '';
+  }
+
+  const label = artifactRef && typeof artifactRef.label === 'string' && artifactRef.label.trim()
+    ? artifactRef.label.trim()
+    : 'artifact';
+  const title = artifactRef && typeof artifactRef.path === 'string' ? artifactRef.path : href;
+
+  return `<div class="judge-evidence-links">
+    <a class="judge-evidence-artifact-link" href="${escapeAttribute(href)}" target="_blank" rel="noopener noreferrer" title="${escapeAttribute(title)}">Open artifact: ${escapeHtml(label)}</a>
+  </div>`;
+}
+
+function formatMaybeNumber(value) {
+  return typeof value === 'number' ? value.toFixed(3).replace(/\.?0+$/, '') : 'n/a';
+}
+
+function formatMaybePercent(value) {
+  return typeof value === 'number' ? (value <= 1 ? (value * 100) : value).toFixed(1).replace(/\.0$/, '') + '%' : 'n/a';
+}
+
+function formatScore(score, scorePct) {
+  if (typeof scorePct === 'number') return scorePct.toFixed(1).replace(/\.0$/, '') + '%';
+  if (typeof score === 'number') return formatMaybePercent(score);
+  return 'n/a';
+}
+
+function formatComparisonOutputHeading(heading) {
+  const normalized = typeof heading === 'string' ? heading.toLowerCase() : 'output';
+  if (normalized === 'before') {
+    return { label: 'Before', className: 'before' };
+  }
+  if (normalized === 'after') {
+    return { label: 'After', className: 'after' };
+  }
+  return { label: String(heading || 'Output'), className: 'output' };
+}
+
+function getComparisonExcerpt(output) {
+  if (output && typeof output === 'object' && typeof output.excerpt === 'string' && output.excerpt.length > 0) {
+    return output.excerpt;
+  }
+
+  return 'No excerpt recorded';
+}
+
+function normalizeComparisonExcerptLines(text) {
+  return String(text || '').replace(/\r\n/g, '\n').split('\n');
+}
+
+function pushComparisonExcerptSection(sections, line, changed) {
+  const normalizedLine = typeof line === 'string' ? line : String(line ?? '');
+  const lastSection = sections[sections.length - 1];
+
+  if (lastSection && lastSection.changed === changed) {
+    lastSection.lines.push(normalizedLine);
+    return;
+  }
+
+  sections.push({
+    changed,
+    lines: [normalizedLine]
+  });
+}
+
+function createComparisonLcsMatrix(beforeLines, afterLines) {
+  const matrix = Array.from({ length: beforeLines.length + 1 }, () => Array(afterLines.length + 1).fill(0));
+
+  for (let beforeIndex = beforeLines.length - 1; beforeIndex >= 0; beforeIndex -= 1) {
+    for (let afterIndex = afterLines.length - 1; afterIndex >= 0; afterIndex -= 1) {
+      matrix[beforeIndex][afterIndex] = beforeLines[beforeIndex] === afterLines[afterIndex]
+        ? matrix[beforeIndex + 1][afterIndex + 1] + 1
+        : Math.max(matrix[beforeIndex + 1][afterIndex], matrix[beforeIndex][afterIndex + 1]);
+    }
+  }
+
+  return matrix;
+}
+
+function finalizeComparisonExcerptSections(sections) {
+  return sections.map(section => ({
+    changed: section.changed,
+    text: section.lines.join('\n')
+  }));
+}
+
+function buildComparisonExcerptDiff(beforeOutput, afterOutput) {
+  const beforeLines = normalizeComparisonExcerptLines(getComparisonExcerpt(beforeOutput));
+  const afterLines = normalizeComparisonExcerptLines(getComparisonExcerpt(afterOutput));
+  const lcsMatrix = createComparisonLcsMatrix(beforeLines, afterLines);
+  const beforeSections = [];
+  const afterSections = [];
+
+  let beforeIndex = 0;
+  let afterIndex = 0;
+
+  while (beforeIndex < beforeLines.length && afterIndex < afterLines.length) {
+    if (beforeLines[beforeIndex] === afterLines[afterIndex]) {
+      pushComparisonExcerptSection(beforeSections, beforeLines[beforeIndex], false);
+      pushComparisonExcerptSection(afterSections, afterLines[afterIndex], false);
+      beforeIndex += 1;
+      afterIndex += 1;
+      continue;
+    }
+
+    if (lcsMatrix[beforeIndex + 1][afterIndex] >= lcsMatrix[beforeIndex][afterIndex + 1]) {
+      pushComparisonExcerptSection(beforeSections, beforeLines[beforeIndex], true);
+      beforeIndex += 1;
+      continue;
+    }
+
+    pushComparisonExcerptSection(afterSections, afterLines[afterIndex], true);
+    afterIndex += 1;
+  }
+
+  while (beforeIndex < beforeLines.length) {
+    pushComparisonExcerptSection(beforeSections, beforeLines[beforeIndex], true);
+    beforeIndex += 1;
+  }
+
+  while (afterIndex < afterLines.length) {
+    pushComparisonExcerptSection(afterSections, afterLines[afterIndex], true);
+    afterIndex += 1;
+  }
+
+  return {
+    beforeSections: finalizeComparisonExcerptSections(beforeSections),
+    afterSections: finalizeComparisonExcerptSections(afterSections)
+  };
+}
+
+function renderComparisonExcerptSections(sections, fallbackText) {
+  const normalizedSections = Array.isArray(sections) && sections.length > 0
+    ? sections
+    : [{ changed: false, text: fallbackText }];
+
+  return normalizedSections.map(section => `<div class="comparison-output-section ${section.changed ? 'changed' : 'unchanged'}">${escapeHtml(section.text)}</div>`).join('');
+}
+
+function renderComparisonOutput(output, heading, excerptSections) {
+  const outputHeading = formatComparisonOutputHeading(heading);
+
+  if (!output || typeof output !== 'object') {
+    return `<div class="comparison-output-card ${outputHeading.className}">
+      <div class="comparison-output-title">${escapeHtml(outputHeading.label)}</div>
+      <div class="judge-empty">No output recorded</div>
+    </div>`;
+  }
+
+  const artifact = output.artifact_ref && typeof output.artifact_ref === 'object'
+    ? `${output.artifact_ref.label || 'artifact'} (${output.artifact_ref.path || 'path unavailable'})`
+    : '';
+
+  return `<div class="comparison-output-card ${outputHeading.className}">
+    <div class="comparison-output-title">${escapeHtml(outputHeading.label)}</div>
+    <div class="comparison-output-meta">${escapeHtml([output.locator || 'locator unavailable', artifact].filter(Boolean).join(' · '))}</div>
+    <div class="comparison-output-excerpt">${renderComparisonExcerptSections(excerptSections, getComparisonExcerpt(output))}</div>
+  </div>`;
+}
+
+function renderComparisonOutputPair(beforeOutput, afterOutput) {
+  if (!beforeOutput || typeof beforeOutput !== 'object' || !afterOutput || typeof afterOutput !== 'object') {
+    return `${renderComparisonOutput(beforeOutput, 'Before')}${renderComparisonOutput(afterOutput, 'After')}`;
+  }
+
+  const excerptDiff = buildComparisonExcerptDiff(beforeOutput, afterOutput);
+
+  return [
+    renderComparisonOutput(beforeOutput, 'Before', excerptDiff.beforeSections),
+    renderComparisonOutput(afterOutput, 'After', excerptDiff.afterSections)
+  ].join('');
+}
+
+function renderComparisonChanges(changes, heading) {
+  if (!changes || changes.length === 0) {
+    return `<div class="judge-subsection">
+      <div class="judge-subheading">${escapeHtml(String(heading || 'Changes'))}</div>
+      <div class="judge-empty">No changes recorded</div>
+    </div>`;
+  }
+
+  return `<div class="judge-subsection">
+    <div class="judge-subheading">${escapeHtml(String(heading || 'Changes'))}</div>
+    <div class="comparison-change-list">${changes.map(change => `
+      <div class="comparison-change-item">
+        <div class="comparison-change-meta">${escapeHtml([change.eval || change.field || 'change', change.field ? 'field: ' + change.field : ''].filter(Boolean).join(' · '))}</div>
+        <div class="comparison-change-values">${escapeHtml(`before: ${String(change.before)}\nafter: ${String(change.after)}`)}</div>
+      </div>
+    `).join('')}</div>
+  </div>`;
+}
+
+function renderVersionComparison(versionComparison) {
+  if (!versionComparison) {
+    return '<div style="color:#b2bec3;font-size:13px;">No version comparison data yet</div>';
+  }
+
+  if (versionComparison.status && versionComparison.status !== 'ok') {
+    return `<div class="comparison-status">${escapeHtml(String(versionComparison.status))}</div>`;
+  }
+
+  const summary = versionComparison.shared_input_summary || { total_shared_inputs: 0, improved: 0, regressed: 0, unchanged: 0 };
+  const perInput = Array.isArray(versionComparison.per_input) ? versionComparison.per_input : [];
+
+  return `<div>
+    <div class="comparison-status">Version Comparison: experiment ${escapeHtml(String(versionComparison.left_experiment_id || 'n/a'))} → experiment ${escapeHtml(String(versionComparison.right_experiment_id || 'n/a'))}</div>
+    <div class="comparison-summary">
+      <div class="comparison-card">
+        <div class="comparison-card-label">Shared Inputs</div>
+        <div class="comparison-card-value">${summary.total_shared_inputs}</div>
+      </div>
+      <div class="comparison-card">
+        <div class="comparison-card-label">Improved</div>
+        <div class="comparison-card-value">${summary.improved}</div>
+      </div>
+      <div class="comparison-card">
+        <div class="comparison-card-label">Regressed</div>
+        <div class="comparison-card-value">${summary.regressed}</div>
+      </div>
+      <div class="comparison-card">
+        <div class="comparison-card-label">Unchanged</div>
+        <div class="comparison-card-value">${summary.unchanged}</div>
+      </div>
+    </div>
+    <div class="comparison-status">Shared inputs ${summary.improved} improved / ${summary.regressed} regressed / ${summary.unchanged} unchanged</div>
+    <div class="comparison-input-list">${perInput.map(row => `
+      <div class="comparison-input-item">
+        <div class="comparison-input-header">
+          <div class="comparison-input-id">${escapeHtml(row.input_id || 'unknown input')}</div>
+        </div>
+        <div class="comparison-output-grid">
+          ${renderComparisonOutputPair(row.before_output, row.after_output)}
+        </div>
+        ${renderComparisonChanges(row.score_changes, 'Score Changes')}
+        ${renderComparisonChanges(row.metadata_changes, 'Metadata Changes')}
+      </div>
+    `).join('')}</div>
+  </div>`;
 }
 
 function updateTable(data) {
   const tbody = document.getElementById('expTable');
   tbody.innerHTML = data.experiments.map(e => {
-    const hasChanges = e.changes && e.changes.length > 0;
-    return `<tr class="exp-row${hasChanges ? '' : ' no-changes'}" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
+    const hasDetails = (e.changes && e.changes.length > 0) || (e.eval_results && e.eval_results.length > 0) || !!e.decision_breakdown || !!e.decision_explanation;
+    return `<tr class="exp-row${hasDetails ? '' : ' no-changes'}" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
       <td>${e.id}</td>
       <td>${e.score}/${e.max_score}</td>
-      <td>${e.pass_rate}%</td>
+      <td>${weightedScore(e)}%</td>
       <td><span class="${badgeClass(e.status)}">${e.status}</span></td>
       <td>${truncate(e.description, 80)}</td>
     </tr>
     <tr class="changes-row">
-      <td colspan="5">${renderChanges(e.changes)}</td>
+      <td colspan="5">${renderExperimentDetails(e, { status: data.status, current_experiment: data.current_experiment })}</td>
     </tr>`;
   }).join('');
+}
+
+function updateVersionComparison(data) {
+  const container = document.getElementById('versionComparison');
+  container.innerHTML = renderVersionComparison(data.version_comparison);
 }
 
 function updateEvals(data) {
@@ -312,6 +1913,7 @@ async function refresh() {
   updateBarChart(data);
   updateStepChart(data);
   updateTable(data);
+  updateVersionComparison(data);
   updateEvals(data);
 }
 

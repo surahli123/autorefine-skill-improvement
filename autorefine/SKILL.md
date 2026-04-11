@@ -18,7 +18,7 @@ Fast-fail checks. If ANY fail, STOP immediately with an actionable error message
 3. **Workspace location.** Ask the user (ONE question, wait for answer):
    ```
    Where should I create the AutoRefine workspace?
-     a) /tmp/autorefine-[skill-name]/  ← recommended (safe, no repo interference)
+     a) /tmp/autorefine-[skill-name]/  <- recommended (safe, no repo interference)
      b) Next to your skill: [skill-parent]/autorefine-[skill-name]/
      c) Custom path
    ```
@@ -29,7 +29,7 @@ Fast-fail checks. If ANY fail, STOP immediately with an actionable error message
 
 After Step 0 completes, print:
 ```
-✓ Preflight passed
+Preflight passed
   Target skill: [skill-path]/SKILL.md
   Workspace: [chosen-workspace]/
   Working copy: [chosen-workspace]/skill-under-test/SKILL.md
@@ -49,18 +49,18 @@ After Step 0 completes, print:
    **Quick tier routing (3 states):**
    ```
    State 1: No workspace exists
-     → Quick Start path (~30 min)
-     → "First time? Let's find what your skill actually does wrong."
+     -> Quick Start path (~30 min)
+     -> "First time? Let's find what your skill actually does wrong."
    State 1b: Workspace exists with schema_version 2 (legacy v2.1), no quick_start field
-     → Standard/Deep only (legacy workspace — Quick Start not available)
-     → "This workspace was created before Quick Start. Use Standard or Deep."
+     -> Standard/Deep only (legacy workspace -- Quick Start not available)
+     -> "This workspace was created before Quick Start. Use Standard or Deep."
    State 2: quick_start.completed = true, both gates still "pending"
-     → Quick Returning (~15 min): Run Phase 1 (design audit), then skip to Phase 7 in Mini mode. Show directional warning at start.
-     → Steps: (1) Run Phase 1 as normal. (2) Skip Phases 2-6. (3) Run Phase 7 — it auto-detects Mini mode from state. (4) Run Session Close.
-     → "Your evals haven't been validated — results are still directional."
+     -> Quick Returning (~15 min): Run Phase 1 (design audit), then skip to Phase 7 in Mini mode. Show directional warning at start.
+     -> Steps: (1) Run Phase 1 as normal. (2) Skip Phases 2-6. (3) Run Phase 7 -- it auto-detects Mini mode from state. (4) Run Session Close.
+     -> "Your evals haven't been validated -- results are still directional."
    State 3: Both gulf_1 and gulf_2 = "approved" in state.json
-     → Quick Returning (~15 min): Run Phase 1 (design audit), then skip to Phase 7 in Full mode.
-     → Steps: (1) Run Phase 1 as normal. (2) Skip Phases 2-6. (3) Run Phase 7 — it auto-detects Full mode from state. (4) Run Session Close.
+     -> Quick Returning (~15 min): Run Phase 1 (design audit), then skip to Phase 7 in Full mode.
+     -> Steps: (1) Run Phase 1 as normal. (2) Skip Phases 2-6. (3) Run Phase 7 -- it auto-detects Full mode from state. (4) Run Session Close.
    ```
 
    If workspace has approved gates: offer Quick as default. If quick_start_complete: offer Quick with directional note. Otherwise default to Standard (offer Quick Start as faster alternative).
@@ -77,10 +77,14 @@ If workspace `traces/`, `judges/`, and `runs/` subdirectories don't exist: creat
 - `changelog.md`, `eval-suite.md`, `error-analysis-traces.md` — empty, formatted in later phases
 - Copy `dashboard.html` from this skill's directory, replace `{{SKILL_NAME}}`
 
-If workspace exists **with** `state.json`: read it and print pipeline status.
+If workspace exists **with** `state.json`: read it, deserialize any persisted `phase1_context` (including `selected_skill_pattern` and `selected_eval_strategy_id`) plus any persisted `mutation_stage_split_access_policy` into the loaded run context, and print pipeline status.
 
 **Step A: Checkpoint recovery (runs FIRST on resume).**
-If `state.json.checkpoint` is not null and has `next_action`, enter resume mode — read all files in `checkpoint.files_to_read_on_resume` (skip any missing files and note which were missing), print "Resuming from checkpoint: {next_action}", clear the checkpoint (set to null). See `references.md > Checkpoint Schema > Resume Detection`. Rotate `session-log.json` (rename to `session-log-<session_start, colons→dashes>.json`, create fresh). If `session-log.json` missing (pre-v2 workspace), create it. Legacy workspaces (schema_version 2 or 3) are read-compatible — checkpoint fields default to null. If checkpoint has `next_action` pointing to a Phase 7 experiment, **skip ambient learning entirely** (workspace copy must match the in-progress experiment state) and proceed from `next_action`.
+If `state.json.checkpoint` is not null and has `next_action`, enter resume mode — read all files in `checkpoint.files_to_read_on_resume` (skip any missing files and note which were missing), deserialize `state.json.phase1_context` and `state.json.mutation_stage_split_access_policy` into the loaded run context before routing the resume path, and print "Resuming from checkpoint: {next_action}". Restore `phase1_context.selected_skill_pattern` and `phase1_context.selected_eval_strategy_id` unchanged so later phases can read the chosen pattern + resolved downstream strategy from the loaded context rather than recomputing them. If the restored run-context pattern and `state.json.skill_pattern` mismatch, stop and rerun Phase 1 Step 0 instead of continuing. If the restored `selected_eval_strategy_id` is missing or no longer maps back to the restored pattern through `references.md > Skill Pattern Eval Strategy > Pattern-to-Evaluation-Strategy Selector`, stop and rerun strategy selection before continuing. If split-scoped Phase 7 work is active and the restored `mutation_stage_split_access_policy` is missing, read the same policy from `fixtures-manifest.md` or a stored Phase 4 `evaluation_metadata.config.mutation_stage_split_access_policy` snapshot, hydrate the loaded run context, and stop if the sources disagree. Then clear the checkpoint (set to null) while preserving every other serialized state field, including `phase1_context` and `mutation_stage_split_access_policy`. See `references.md > Checkpoint Schema > Resume Detection`. Rotate `session-log.json` (rename to `session-log-<session_start, colons->dashes>.json`, create fresh). If `session-log.json` missing (pre-v2 workspace), create it. Legacy workspaces (schema_version 2 or 3) are read-compatible — checkpoint fields default to null. If checkpoint has `next_action` pointing to a Phase 7 experiment, **skip ambient learning entirely** (workspace copy must match the in-progress experiment state) and proceed from `next_action`.
+
+**Pattern-aware downstream entry:** When routing into any downstream phase or stage after Phase 1, initialize pattern-aware logic from the loaded `state.json.phase1_context.selected_skill_pattern`. Then restore `state.json.phase1_context.selected_eval_strategy_id` into that same loaded run context and treat the pair as the active downstream routing state for the current run. If the active context does not already hold them, read the same canonical IDs from the top-level `selected_skill_pattern` and `selected_eval_strategy_id` fields emitted in `design-audit.md`, hydrate the loaded run context, and continue. If the active context does not already hold it, read the same canonical ID from the top-level `selected_skill_pattern` field emitted in `design-audit.md`, hydrate the loaded run context, and continue. If only the pattern is available, resolve the missing strategy through `references.md > Skill Pattern Eval Strategy > Pattern-to-Evaluation-Strategy Selector` before continuing. After hydrating `selected_eval_strategy_id`, immediately open the matching row in `references.md > Skill Pattern Eval Strategy > Strategy Definitions` and route all downstream eval work through that strategy bundle. The selected strategy is the execution path for Quick Start bootstrap evals, Phase 2 eval audit, Phase 3/4 failure clustering and fixture expansion, Phase 5/6 judge design, and Phase 7 mutation analysis; do not fall back to the generic downstream path while a valid selector is present. Do not trigger Phase 1 pattern classification again during downstream phase/stage initialization; rerun Phase 1 Step 0 only if the persisted pattern is missing or inconsistent with `state.json.skill_pattern`.
+
+**Split-aware downstream entry:** When routing into Phase 7 or Session Close after Phase 4, initialize split-aware logic from the loaded `state.json.mutation_stage_split_access_policy`. If the active context does not already hold it, read the exact policy from `fixtures-manifest.md` or a stored Phase 4 `evaluation_metadata.config.mutation_stage_split_access_policy` snapshot, hydrate the loaded run context, and stop if those sources disagree. Treat the restored object as the active gate for any downstream step that may read split-scoped datasets, per-input outputs, or version-comparison joins. Do not start a Phase 7 dataset read until that policy is active.
 
 **Step B: Ambient learning (runs AFTER checkpoint recovery, only if NOT resuming mid-Phase-7).**
 
@@ -89,13 +93,13 @@ Guard: `state.json.original_skill_path` must exist and be readable. If unreadabl
 1. Run `diff [original-skill-path]/SKILL.md [workspace]/skill-under-test/SKILL.md`. If the `diff` command fails (sandbox restriction), skip ambient learning and continue.
 2. If no diff → skill unchanged. Continue.
 3. If diff exists → size gate:
-   - **Small diff (≤20 lines changed):** likely preference signal. Proceed to step 4.
-   - **Large diff (>20 lines, ≤50% of file):** warn: "Large diff detected (N lines). Treat as preference signal or new baseline?" If user says baseline → skip to step 5.
+   - **Small diff (<=20 lines changed):** likely preference signal. Proceed to step 4.
+   - **Large diff (>20 lines, <=50% of file):** warn: "Large diff detected (N lines). Treat as preference signal or new baseline?" If user says baseline → skip to step 5.
    - **Rewrite (>50% of file):** skip rule extraction. Log `{"type":"ambient_learning","skipped":true,"reason":"full_rewrite","diff_size":N}`. Go to step 5.
 4. **Extract preference rules.** Show the diff to the user. Ask: "Should I learn from these edits? (y/n)". If yes, extract rules using this format:
    ```
    RULE: [one-sentence preference]
-   EVIDENCE: [quote removed text] → [quote added text] (max 2 lines each)
+   EVIDENCE: [quote removed text] -> [quote added text] (max 2 lines each)
    CONFIDENCE: high (clear intent) | medium (inferred) | low (ambiguous)
    ```
    Only auto-log `high` and `medium` rules. Present `low` rules for user confirmation. Distinguish preference edits from bug fixes (if the user fixed a typo or corrected a factual error, that's a fix, not a preference — skip it). Log to `[workspace]/preferences.md` (separate from `learnings.md` used by Session Close) and session-log: `{"type":"ambient_learning","rules_extracted":N,"diff_size":N}`.
@@ -130,326 +134,49 @@ STATUS values: `not started`, `in progress`, `complete`, `skipped`. Read from `s
 
 ---
 
-## Quick Start Path
-
-Read when: Quick Start path active (State 1 from Preflight routing).
-
-> **Preview mode.** Quick Start gives you a taste of autorefine in ~30 min. It does NOT validate Gulf 1 or Gulf 2 — bootstrap evals are directional, not calibrated. Run Standard to get validated results.
-
-### QS Step 1: Phase 1 Design Audit (5 min)
-Run Phase 1 as normal (see below). No changes.
-
-*Why this step:* "This tells us what your skill *should* do based on best practices. But the real failures might be different — that's why Step 2 exists."
-
-### QS Step 2: Mini Phase 3 — Observation (10 min)
-Generate 5 inputs targeting the skill. Use Phase 1 findings as **focus areas** (not literal inputs — structural gaps like "missing gotchas" guide what scenarios to test, not what text to send). Sort findings by priority, take top 5 as focus areas, generate one diverse input per focus area that exercises the skill in a way where that gap would matter. If fewer than 5 gaps, fill remaining slots from the diversity spread (see `references.md > Quick Start > Mini Phase 3 Template`). For interactive or session-spanning skills, create synthetic output fixtures instead (same fallback as Standard Phase 3 Step 1).
-
-Run the skill on each input (read `[workspace]/skill-under-test/SKILL.md` and provide the input as if you were a user requesting the skill — capture the full output). If the skill errors on an input, record the trace as a Fail with note "skill execution error: [error message]" and continue to the next input. Present outputs one at a time for user judgment:
-```
---- Trace 1/5 ---
-Input: [summary]
-Output: [skill output]
-Pass or Fail? (one-line note if Fail)
-```
-
-Append to session-log.json: `{"phase":"quick_start","step":"observation","type":"mini_observation","detail":"Reviewed 5 traces: N pass, M fail"}`.
-
-*Why this step:* "You're reading actual outputs — not imagining what could go wrong. Evals built from observation catch real failures. Evals built from imagination catch hypothetical ones."
-
-**Graceful exit:** If Phase 1 found ≤1 issue AND all 5 traces pass: set `quick_start.completed = true` and `quick_start.graceful_exit = true` in state.json (prevents re-entry into Quick Start on next run). Tell the user: "Your skill looks clean on this sample. Quick Start needs failure signal to work. Try Standard for a deeper look, or skip autorefine." Stop here.
-
-### QS Step 3: Bootstrap Eval Generator (3 min)
-Auto-generate lightweight evals from Phase 1 findings (→ structural checks) + Mini Phase 3 failures (→ behavioral checks). Write each eval using the `references.md > Eval Suite Template` format (`EVAL N: [Name]...`). See `references.md > Quick Start > Bootstrap Eval Generator` for conversion rules and the simplified zero-shot judge template.
-
-**Eval types:** Code-based where possible (deterministic). Agent-as-judge only for subjective criteria — use the zero-shot bootstrap template (NO few-shot examples, NO train split).
-
-**Write judge files:** For each agent-as-judge eval, write the judge prompt to `judges/judge-E{N}-bootstrap-{name}.md` using the Bootstrap Judge Template from `references.md > Quick Start > Bootstrap Eval Generator`. For each code-based eval, write to `judges/code-E{N}-bootstrap-{name}.sh`. Phase 7 reads from `judges/` — if the files don't exist there, scoring will fail.
-
-**Minimum floor:** 3 evals. If Phase 1 + Mini Phase 3 yield fewer, supplement with additional Phase 1 pattern checks.
-
-**Labeling:** Tag every bootstrap eval in eval-suite.md with per-eval metadata: `Source: quick_start | Validated: false | Confidence: directional`. Apply this tag to EACH eval entry individually, not as a suite-level header.
-
-Present all evals in a numbered list. User responds: "approved", "drop N", "change N to [description]", or "add [new eval]". Single interaction, not a gate.
-
-*Why this step:* "These evals are rough — think of them as a first-draft relevance model. Useful for direction, not for production metrics. Run Standard to validate with TPR/TNR."
-
-### QS Step 4: Mini Phase 7 — Targeted Mutations (10 min)
-Generate 5-10 **fresh** scoring inputs — NOT the same as Mini Phase 3 traces (reusing = overfitting). Use the diversity spread from `references.md > Quick Start > Mini Phase 3 Template`, but target different Phase 1 gaps or different complexity levels than QS Step 2. Ensure zero overlap with the 5 QS Step 2 inputs. Save scoring inputs to `traces/qs-scoring-S01.md` through `traces/qs-scoring-S10.md`.
-
-Run 2-3 mutations targeting the top Phase 1 + Mini Phase 3 findings. Score with bootstrap evals using simplified weighting: code evals = 1.0, agent-as-judge = 0.5 (flat discount, not empirical TPR/TNR). **Mini mode skips verification isolation** (Phase 7 step 2b) — bootstrap evals are already labeled "directional" and the overhead isn't justified for 2-3 experiments.
-
-Present each mutation to the user (diff, score change, proposed keep/discard). User confirms or overrides. Record in results.json + session-log.json.
-
-**Time note:** Estimates assume skill execution < 30 sec per run. Slow skills may push total to ~35 min.
-
-*Why this step:* "You're seeing your skill get better. But bootstrap evals are rough — a passing mutation might miss subtle regressions. Standard mode builds evals you can trust."
-
-### QS Step 5: Results + Handoff (2 min)
-Show before/after comparison. All results labeled "directional improvement, not validated."
-
-**State update:** In state.json, set `quick_start.completed = true` with metadata (traces, evals, mutations, timestamp). Keep `gates.gulf_1` and `gates.gulf_2` as `"pending"`. Set `current_phase: 0` (integer — 0 means Quick Start complete; phases 1-7 use integers 1-7). Set `phases.design_audit: "complete"` (Phase 1 was run). Keep `schema_version` at 4 (do NOT downgrade).
-
-**Handoff:** "Your skill is better. Here's what Standard gives you: validated evals with TPR/TNR, a full failure taxonomy, and confidence-weighted optimization. Everything you just built carries forward — Standard extends this workspace."
-
-**Standard transition rules:** When Standard runs on a Quick Start workspace:
-- Phase 1: Re-run (skill may have changed from mutations). Overwrite `design-audit.md`.
-- Phase 2: Acknowledge existing bootstrap evals in eval-suite.md. Audit them alongside any other eval infrastructure.
-- Phase 3: Start fresh with full 20+ traces. Reference QS mini observations as prior context but don't skip reviews. Overwrite `error-analysis-traces.md`.
-- Phase 5: Keep bootstrap evals that align with the new failure taxonomy. Discard the rest. Write validated judges to replace bootstrap judges in `judges/`.
-- Phase 6: Validate all judges (including promoted bootstrap ones). Update per-eval metadata: `Source: standard | Validated: true`.
-
----
-
-## Phase 1: Design Audit
-
-Read the workspace copy of the target skill at `[workspace]/skill-under-test/SKILL.md` (established in Preflight Step 0). Score 4 dimensions: **Gotchas**, **Voice**, **Progressive Disclosure**, **Scripts** (if any). For each Partial/Missing: quote the problem, recommend a fix, assign priority.
-
-**Gotchas dimension — 3-stage detection:**
-1. **Taxonomy scan:** Check skill against 6 gotcha categories (shell execution, path handling, state mutation, concurrent access, auth/secrets, external APIs). Skills touching NONE → score "N/A." Full category list: `references.md > Gotcha Taxonomy`.
-2. **Static evidence:** For each matched category, cite the specific line(s) creating the risk. Example: "Line 47: `$B goto $URL` — no URL sanitization."
-3. **Smoke probe:** For the top 2 highest-risk findings, construct a minimal test input and run the target skill with it. Narrate before each probe. Record as `confirmed` or `not_confirmed`. For session-spanning skills, skip probes and record as `suspected`. Details: `references.md > Gotcha Taxonomy > Smoke Probe Instructions`.
-
-Remaining dimensions: `references.md > V2.0 Design Audit Rubric`.
-
-**Output:** `design-audit.md` (Gotchas section includes taxonomy, evidence, confidence levels, and probe results). Append to session-log.json: `{"phase":"1","type":"design_audit","detail":"Scored 4 dims: Gotchas=X (N categories matched, M confirmed), Voice=X, Disclosure=X, Scripts=X"}`. Phase 3 inherits `suspected` gotcha items as targeting input. **State:** advance to Phase 2.
-
----
-
-## Phase 2: Eval Audit
-
-Check for existing eval infrastructure (eval-suite.md, evals.json, test fixtures, results files). Audit against 6 categories: error analysis grounding, evaluator design, judge validation, train/test split, labeled data count, maintenance process. If no evals exist, document: "No eval infrastructure. Phase 3 builds the foundation."
-
-Detail on each category: `references.md > Eval Audit Categories`.
-
-**Output:** `eval-audit-report.md`. **State:** advance to Phase 3.
-
----
-
-## Phase 3: Error Analysis
-
-Close the Gulf of Comprehension. **Most important phase. CANNOT BE AUTOMATED.**
-
-**Step 1: Prepare fixtures.** If fewer than 15 diverse inputs exist, generate more covering different types, lengths, quality levels, edge cases, at least 2 with planted flaws. For session-spanning skills (tracing, monitoring), create synthetic output fixtures instead.
-
-**Step 2: Run the skill.** Invoke on each fixture (15-25). Save outputs to `traces/trace-T01.md` through `traces/trace-T25.md`.
-
-**Step 3: Smart sampling.** Select 8-10 traces using stratified sampling. On first run, infer dimensions from fixture properties (input length, source, planted flaw). On re-runs, use Phase 4 dimensions. Ensure every dimension value represented at least once. Show the user which traces were selected and why. Append to session-log.json: `{"phase":"3","type":"sampling","detail":"Selected N/M traces..."}`. Methodology: `references.md > Smart Sampling Methodology`.
-
-**Step 4: Preliminary clustering.** Assign each sampled trace a category ID (C1, C2, C3...) by surface patterns (adapt to skill type). Target 3-5 clusters. If <3, skip consistency checks. Write clusters to `error-analysis-traces.md` header.
-
-**Step 5: Human reviews.** Present sampled traces in batches of 5 using the worksheet format. For each trace, the user provides: Pass or Fail, and a note if Fail. Record in `error-analysis-traces.md` (columns: #, Fixture, Cluster, Pass/Fail, Notes). User can stop after ≥5 traces. Format details: `references.md > Batch Review Format`.
-
-**Consistency check (after ≥5 reviews):** If same-cluster traces got different verdicts, flag it. Append: `{"phase":"3","type":"consistency_flag","detail":"T03 and T07 match C2, judged differently"}`. If user confirms both verdicts, log resolution.
-
-**Mid-phase resume:** Track `traces_reviewed` and `sampled_trace_ids` in state.json.
-
-**Step 6: Build failure taxonomy.** Cluster failure notes into categories — let them EMERGE. If <3 failures in sample, review additional traces. Write `failure-taxonomy.md`.
-
-**Step 7: Generate eval suite.** Convert top failures into binary evals. Write `eval-suite.md`. Format: `references.md > Eval Suite Template`.
-
-### Gate: Gulf 1 Exit
-Generate `gate-report-gulf-1.md` with: sample stats, fail rate, categories, consistency flags, proposed evals. Append to session-log.json: `{"phase":"gate_1","type":"gate_decision","detail":"APPROVED"}` (or REJECTED). **Override logging:** if user removes evals or rejects categories, also append: `{"phase":"gate_1","type":"override","detail":"Removed E4","reason":"..."}`
-
-**STOP. Wait for user approval.**
-
-**State:** Mark Phase 3 complete. Record traces_reviewed, sampling_strategy, taxonomy.
-
----
-
-## Phase 4: Expand Inputs
-
-**Step 1:** Count labeled fixtures from Phase 3.
-**Step 2:** Define 3 failure-prone dimensions from the taxonomy. Format: `references.md > Dimension Template`.
-**Step 3:** Generate fixtures via dimension tuples. Draft 15-20 with user, LLM generates 10 more. Target 30-40 total.
-**Step 4:** Split into train (~15%) / dev (~42%) / test (~43%). Train = few-shot examples only. Dev = iteration. Test = final measurement, never peek. Write `fixtures-manifest.md`.
-
-**Output:** `fixtures-manifest.md`. **State:** advance to Phase 5.
-
----
-
-## Phase 5: Write Judges
-
-**Step 1: Classify evals** as code-based (counting, regex, field presence → bash/python) or agent-as-judge (semantic judgment → judge prompt file). Exhaust code options first. Write `eval-classification.md`.
-
-**Step 2: Build code-based evaluators.** One-liner or short script per eval. Test on 3 dev fixtures.
-
-**Step 3: Build agent-as-judge prompts.** Each judge has 4 components: task+criterion, Pass/Fail definitions, 3 few-shot examples (TRAIN split only — never dev/test), critique-before-verdict output format. The coding agent itself IS the judge — no external API needed. **Anti-rigidity rule:** Score on outcome achievement, not path matching. A judge that fails outputs for using different structure or wording than the reference is penalizing creativity, not catching errors. Full template: `references.md > Judge Prompt Template`.
-
-**Step 4: Write to workspace.** Save to `judges/judge-E{N}-{name}.md` and `judges/code-E{N}-{name}.sh`.
-
-**Output:** `eval-classification.md` + `judges/` directory. **State:** advance to Phase 6.
-
----
-
-## Phase 6: Validate Judges
-
-Calibrate agent-as-judge evaluators against human labels. Code-based evals skip (deterministic).
-
-**Steps 1-4 (dev split — human reviews):** Run each judge on dev split. Present judge verdicts vs human labels using batch review format (`references.md > Batch Review Format`). Compute TPR and TNR. Inspect disagreements — False Pass → strengthen Fail defs; False Fail → clarify Pass defs. Iterate until stable. Formulas: `references.md > TPR/TNR Reference`.
-
-**Step 5 (test split — automated, NO human review):** Final measurement on test split. Run once, record, do NOT iterate. The human does NOT see test examples — this preserves the holdout. Write `judge-validation-report.md`.
-
-**Step 6: Generate judge confidence cards.** For each agent-as-judge eval, generate a confidence card showing TPR/TNR with interpretation, evidence examples, and known blind spots. Template: `references.md > Judge Confidence Card Template`. Walk the human through each card with narration. If TPR-TNR gap > 20 points, flag the asymmetry explicitly.
-
-### Gate: Gulf 2 Exit
-Generate `gate-report-gulf-2.md` with: classification, TPR/TNR per judge, code eval results. Append to session-log.json: `{"phase":"gate_2","type":"gate_decision","detail":"APPROVED"}` (or REJECTED). **Override logging:** if user rejects judges, also append: `{"phase":"gate_2","type":"override","detail":"...","reason":"..."}`
-
-**STOP. Wait for user approval.**
-
-**State:** Mark Phase 6 complete.
-
----
-
-## Phase 7: AutoResearch Loop
-
-The Karpathy-style mutation-test-keep/discard cycle. Requires `eval-suite.md` + judges.
-
-**Mode detection (check in this order):**
-1. If both `gates.gulf_1` = "approved" AND `gates.gulf_2` = "approved" → **Full mode** (validated evals, confidence-weighted scoring). Budget: ask user — Quick (3), Standard (5), Deep (8-10).
-2. Else if `quick_start.completed` = true AND both gates = "pending" → **Mini mode** (bootstrap evals, simplified weighting, directional labeling). Budget: 2-3 experiments.
-3. Else → STOP and tell the user to run Standard pipeline first.
-
-**Mini mode differences:** Fresh scoring corpus (5-10 generated inputs, NOT reusing Quick Start traces). Simplified weighting: code evals = 1.0, agent-as-judge = 0.5. All results labeled "directional." No confidence weighting from Phase 6 (evals aren't validated).
-
-**The Loop:**
-
-**Iteration directory (filesystem-as-memory):** At Phase 7 start, create a run directory: `[workspace]/runs/run_<timestamp>/` (timestamp format: `YYYY-MM-DDTHH-MM-SS`). After EACH experiment (including baseline), write 5 artifact files to `[workspace]/runs/run_<timestamp>/iteration_<NNN>/` — see `references.md > Iteration Directory Schema` for file formats. These files survive context compaction and session boundaries, making each experiment independently inspectable on disk. Iteration directories are written in both Full and Mini mode. Store the run directory path in `state.json.current_run_path`. Log each write to session-log: `{"phase":"7","type":"iteration_write","experiment":N,"path":"runs/run_.../iteration_NNN/"}`.
-
-1. Run baseline on all fixtures, score against all evals → Experiment 0. Record `eval_results` per eval. **Canonical heading parse:** parse the target skill's `##` headings into a list of section names. Log to session-log: `{"phase":"7","type":"canonical_headings","sections":["heading1","heading2",...]}`. This list is the denominator for `diversity_score` in the derived mutation registry (see `references.md > Derived Mutation Registry`). **Write baseline iteration artifacts** to `iteration_000/`.
-2. LOOP:
-   a. Analyze failures → hypothesize ONE change. If `[workspace]/preferences.md` exists, read it first — do NOT propose mutations that contradict learned user preferences. **Read prior iteration decisions** from the current run directory (`decision.md` files in the current run directory — path from `state.json.current_run_path`) for full keep/discard reasoning that survives context compaction. **If recent experiments were discarded, read their `discard_autopsy` classification** — avoid same target if `wrong_target`, try different params if `wrong_params`, try different mutation type (add↔delete↔modify) if `wrong_type`. **Check search diversity:** compute the derived mutation registry (see `references.md > Derived Mutation Registry`). If `diversity_score < 0.5`, prioritize unexplored sections. Log the snapshot to session-log. **Save backup** (`[workspace]/<skill>-optimized-prev.md`) → mutate a copy
-   b. **Score mutation (with bias reduction for agent-as-judge evals):**
-      - For **code-based evals**: run directly (deterministic, no bias risk).
-      - For **agent-as-judge evals**: the agent that hypothesized the mutation is biased toward finding it improved. Reduce this bias using the strongest available mechanism:
-
-        **Tier 1 — Subagent dispatch (strong isolation, use when available):**
-        Write `[workspace]/eval-tasks/exp{N}-E{M}.md` containing ONLY: the judge prompt (from `judges/`), the fixture input, and the skill output to evaluate (the mutated output — judge scores ONE output per invocation, same format as Phase 6 validation). Do NOT include: baseline output, mutation hypothesis, or Phase 1-3 findings. Dispatch a subagent with ONLY this file as input. Subagent produces Critique + Pass/Fail. Parent reads the verdict.
-
-        **Fork economics (Tier 1 only):** When dispatching eval subagents, omit `subagent_type` to trigger a fork instead of a spawn. The fork inherits the parent's cached prompt prefix — judge prompts, fixtures, and workspace context are already loaded. Only the eval-task file content differs per experiment. This means each eval subagent pays cache price (1/10) for the shared prefix and full price only for the new eval-task content (~500 tokens). With 5 agent-as-judge evals across 5 experiments = 25 dispatches, fork saves ~80% vs spawn. If fork is unavailable (in-house agent), fall back to Tier 2.
-
-        **Tier 2 — Behavioral instruction (bias reduction, for Read/Write/Bash-only agents):**
-        If subagent dispatch is unavailable: score each agent-as-judge eval by reading ONLY the judge prompt file and the skill output. Before scoring, explicitly state: "I am now evaluating this output against the rubric only. I am disregarding my prior reasoning about why this mutation was made." This is a *heuristic* that reduces but does not eliminate self-certification bias.
-
-        Keep eval-task files in `[workspace]/eval-tasks/` for debugging (clean up at Session Close, not per-eval). Record `eval_results` per eval.
-   c. **Regression check:** Compare current `eval_results` against prior kept experiments. If any eval that previously passed now fails → regression detected. Details: `references.md > Regression Check Schema`. Skip on experiments 0 and 1 (baseline has no prior kept experiments to compare against).
-   d. **Present to user** — show mutation diff, score change, regression status, proposed keep/discard. One decision point.
-   e. User accepts or overrides → record in results.json (with `eval_results` + `regression_check`) + results.tsv + changelog.md. If **kept**: **write iteration artifacts** to `iteration_<NNN>/` now (verdict is final). If **discarded**: do NOT write yet — step 2f writes after autopsy.
-   f. If discarded (regression or user choice): **discard autopsy first** (reads from `experiments[]` in results.json, not the skill file), then restore backup as current baseline. Classify why using `references.md > Discard Autopsy Heuristics` — `wrong_target` (section unlikely to respond), `wrong_params` (right section, wrong approach), or `wrong_type` (add/modify/delete mismatch). Record in `experiments[].discard_autopsy` and session-log: `{"phase":"7","type":"discard_autopsy","experiment":N,"classification":"...","reasoning":"1-sentence"}`. For kept experiments, `discard_autopsy` is null. **Write iteration artifacts** to `iteration_<NNN>/` now (includes autopsy classification).
-   g. **Circuit breaker check** — see below
-3. Repeat until all evals pass, budget exhausted, or circuit breaker stops the loop
-
-**Circuit breaker:**
-Track `consecutive_discards` in state.json (integer, starts at 0). Update **after step (e)**, using the final keep/discard outcome:
-- Experiment **kept** (by agent or user override) → reset `consecutive_discards = 0`
-- Experiment **discarded** (regression, low score, or user override to discard) → increment `consecutive_discards += 1`
-
-Disabled in Mini mode (`quick_start.completed = true` AND `gates.gulf_1 = "pending"`). Discard autopsy (step 2f) runs in all modes including Mini. Reset to 0 on Phase 7 re-entry after loop-back.
-
-If `consecutive_discards >= 3`: STOP mutations and classify:
-
-1. **Content ceiling** — if current baseline score > 80% AND all 3 discarded experiments scored within 5 percentage points of the current baseline:
-   → "Your skill scores [X]%. The last 3 mutations all scored [Y-Z]%, unable to push past baseline. Either the skill is done, or add harder eval fixtures targeting dimensions not yet covered."
-
-2. **Strategy review needed** — all other cases. Present the raw data:
-   → "3 consecutive discards. Here's the data for your review:"
-   - Last 3 experiments: scores, sections targeted (`changes[].location`), eval results, discard reason (regression / low score / user override), AND `discard_autopsy` classification
-   - If all 3 autopsy classifications are `wrong_target`: "All 3 targeted unresponsive sections. Explore untried sections or add harder eval fixtures."
-   - If all 3 are `wrong_params`: "Right sections but wrong approach. Try fundamentally different mutation strategies (e.g., rewrite vs. tweak, subtractive vs. additive)."
-   - If all 3 are `wrong_type`: "Mutation type mismatch. Reverse direction: if adding, try deleting; if modifying, try replacing entirely."
-   - If mixed or < 5 total experiments: present the autopsy breakdown and note: "Mixed signals — review the pattern before continuing."
-   - If >= 5 total experiments with no clear autopsy pattern: "Possible causes: evals can't discriminate (scores flat across experiments), or judge noise (scores swing >15pp between adjacent experiments)."
-   → "Recommendation: review eval-suite.md. Consider looping back to Phase 5-6, targeting different SKILL.md sections, or accepting current quality."
-
-Report format (only show "Continue?" if budget remains):
-Compute the derived mutation registry before presenting the diagnosis (see `references.md > Derived Mutation Registry`). Log the snapshot to session-log.
-
-```
-⚠ Circuit breaker: 3 consecutive discards
-  Best score achieved: [X]% (Experiment [N])
-  Diagnosis: [content ceiling | strategy review needed]
-  Search diversity: [diversity_score] ([N]/[M] sections explored)
-  Autopsy pattern: [summary of last 3 discard_autopsy classifications]
-  Evidence: [raw data points including discard reasons]
-  Recommendation: [specific action]
-
-  [If budget remains] Continue anyway? (not recommended) / Stop and address diagnosis?
-  [If budget exhausted] Budget exhausted. Review the diagnosis above.
-```
-
-If user continues: reset `consecutive_discards = 0` and resume the mutation loop (do NOT exit Phase 7). If breaker triggers again: "Circuit breaker triggered a second time (triggered_count: 2). The pattern of repeated discards suggests the current approach isn't working. Consider ending Phase 7." Still allow user to override.
-
-Record in state.json: `circuit_breaker: {triggered_count: N, last_experiment: N, diagnosis: "..."}`. Record in session-log.json: `{"phase":"7","type":"circuit_breaker","diagnosis":"...","consecutive_discards":3,"experiments":[...]}`.
-
-**After circuit breaker — two paths:**
-- If user chose **stop**: exit the mutation loop. Phase 7 is done (early termination). Proceed to Loop-Back Prompt check, then Session Close.
-- If user chose **continue**: reset counter, resume mutation loop at step (a). Do NOT proceed to Loop-Back Prompt yet — that only runs when the loop fully ends.
-
-**Key rules:** One mutation per experiment. Mutate a copy (`[workspace]/<skill>-optimized.md`), not the workspace baseline. If score improves, the mutated copy becomes the new baseline for the next experiment. Target baseline 60-80% (>90% = evals too easy). **Mutation types:** add, modify, OR delete. After every 2-3 additive mutations, try one subtractive mutation — remove instructions and measure if performance improves. Shorter skills often outperform bloated ones. Formats: `references.md > Results & Changelog Schemas`.
-
-**Confidence-weighted scoring:** Weight each eval by its judge's validated TPR/TNR. Code evals = 1.0. Agent evals = (TPR+TNR)/2. Experiment score = weighted sum / sum of weights.
-
-**User verdict confirmation:** After each experiment, present the score change, regression status, and proposed keep/discard to the user. If the user overrides (e.g., keeps despite regression, or discards despite clean score), log as `type: "judge_gap"` in session-log.json: `{"phase":"7","type":"judge_gap","experiment":N,"agent_verdict":"keep","user_verdict":"discard","reason":"..."}`. These indicate judge blind spots and feed the loop-back prompt. Regression overrides also log: `{"phase":"7","type":"regression",...,"user_action":"keep_override"}`.
-
-**Eval dimension pruning:** After the loop completes, check results.json for evals that passed 100% across ALL experiments (baseline + mutations). Flag them: "E{N} passed every experiment. This eval may no longer discriminate — consider whether the model has outgrown it or the criterion is too lenient."
-
-**Mutation history:** Record discarded experiments with the same detail as kept ones — full `changes[]` diff, `eval_results`, and `regression_check`. Discarded mutations have diagnostic value: patterns in what fails reveal what the skill actually needs.
-
-**State:** Update after each experiment (include `eval_results` and `regression_check`). **Dashboard:** serve workspace with `python3 -m http.server 8080`.
-
----
-
-## Loop-Back Prompt
-
-Phase 7 ends when: budget exhausted, all evals pass, user stops, OR circuit breaker fires and user chose stop. All exit paths trigger this check.
-
-If session-log has ≥2 `judge_gap` entries:
-
-> "You overrode N experiment verdicts, suggesting judge blind spots:
-> - [reason 1]
-> - [reason 2]
-> Loop back to Phase 5 to refine judges, then re-run Phase 7? Or accept current results?"
-
-If user loops back: Phase 5 enters append mode (`locked_judges` prevents modifying approved judges). Phase 6 validates only new judges. Phase 7 re-runs with expanded suite — reset `consecutive_discards = 0` in state.json on re-entry (scoring changed, old counter is invalid). Score may drop — this is more accurate measurement, not regression. Explain this to the user. Max 2 loop-backs per session. Increment `loop_iteration` in state.json.
-
----
-
-## Session Close
-
-Runs after Phase 7, when user stops mid-pipeline, or when user explicitly pauses. Minimum: session-log must have ≥3 entries for learning summary.
-
-0. **Apply back gate** — If any mutations were kept: first sync the best kept mutation into the working copy (`cp [workspace]/<skill>-optimized.md [workspace]/skill-under-test/SKILL.md`) so the working copy reflects the latest improvements. Then ask: "Apply the improved SKILL.md back to the original location ([original-skill-path])? (y/n)". If yes: `cp [workspace]/skill-under-test/SKILL.md [original-skill-path]/SKILL.md`. If no: tell the user where the improved version lives. Log the decision to session-log.json: `{"type":"apply_back","applied":true/false,"source":"[workspace]/skill-under-test/SKILL.md","target":"[original-skill-path]/SKILL.md"}`. **If the copy fails** (e.g., sandbox restriction): don't retry. Print the full path and tell the user to copy manually: `cp [workspace]/skill-under-test/SKILL.md [original-skill-path]/SKILL.md`.
-0b. **Clean up temporary files** — Remove `[workspace]/eval-tasks/` directory if it exists (debugging artifacts from Phase 7 verification isolation). Do NOT remove `[workspace]/runs/` — iteration directories are the forensic record and are retained indefinitely.
-1. **Save checkpoint** — update `state.json.checkpoint` with current state and write `resume-prompt.txt` to workspace root. See `references.md > Checkpoint Schema`. Append to session-log: `{"type":"checkpoint",...}`.
-2. **Synthesize** session-log.json into 3-5 bullet learning summary (what worked, what was overridden, patterns emerged)
-3. **User curates** — present summary, ask for edits or approval
-4. **Persist** to agent memory system (path from `state.json.memory_path`, or ask on first run and record). If no memory system exists, write to `[workspace]/learnings.md` as fallback.
-5. **Present resume prompt** — "You can resume anytime. Paste this into a new session:" followed by the resume prompt from `resume-prompt.txt`.
-6. **Archive** — rename session-log.json to `session-log-<timestamp>.json`
-
-If <3 entries: still save checkpoint (step 1), skip learning summary. Say: "Not enough data for a learning summary yet. Checkpoint saved — you can resume later."
-
-**Phase boundary checkpoints:** At every phase completion (not just Session Close), update `state.json.checkpoint` and write `resume-prompt.txt`. This is automatic — no user interaction needed. Log to session-log.
+## Gulf Routing
+
+After Initialize Workspace and Pipeline Status, read the appropriate gulf file based on pipeline state. **Only read the gulf file relevant to the current phase. Do NOT preload all gulf files.**
+
+| Current Phase | Read | Contains |
+|---------------|------|----------|
+| Quick Start, Phase 1-3 | `SKILL-gulf1.md` | Quick Start Path, Phase 1 (Design Audit + Pattern Classification), Phase 2 (Eval Audit), Phase 3 (Error Analysis), Gulf 1 Gate |
+| Phase 4-6 | `SKILL-gulf2.md` | Phase 4 (Expand Inputs), Phase 5 (Write Judges + Eval Category Tags), Phase 6 (Validate Judges), Gulf 2 Gate |
+| Phase 7, Session Close | `SKILL-gulf3.md` | Phase 7 (AutoResearch Loop + Verdict Explanation Cards + Aggregation Explainer + Version Registry), Loop-Back Prompt, Session Close (+ Version Comparison) |
+
+**Routing rules:**
+- Starting fresh or resuming in Phases 1-3 → read `SKILL-gulf1.md`
+- Gulf 1 gate approved, entering Phases 4-6 → read `SKILL-gulf2.md`
+- Gulf 2 gate approved (or Quick Start returning) → read `SKILL-gulf3.md`
+- **Quick Start returning (State 2 or 3):** read `SKILL-gulf1.md` for Phase 1, then read `SKILL-gulf3.md` for Phase 7 + Session Close (two-file read)
+- Loop-back from Phase 7 to Phase 5 → re-read `SKILL-gulf2.md`
 
 ---
 
 ## Gotchas
 
-See `references.md > Gotchas` for the full list. Critical ones:
+Critical rules (full list in `references.md > Gotchas`):
 
 1. **Don't skip Gulf 1.** A 100% score on narrow evals is an artifact, not evidence.
 2. **Error analysis cannot be automated.** Phase 3 requires the human to read outputs.
 3. **session-log.json is best-effort.** If corrupted or missing, recreate and continue. Never blocks.
 4. **Never run two sessions on same skill.** state.json has no locking.
 5. **"Invoke" means "read and follow."** Not all agents support direct skill invocation.
-6. **Quick Start is a preview, not validation.** Bootstrap evals are directional, not calibrated. Quick Start does NOT satisfy Gulf 1 or Gulf 2. Run Standard to validate results.
-7. **Critical state lives in files, not conversation.** Keep mutation rationale, eval scores, and pipeline state in workspace files (state.json, results.json). Auto-compact at ~85% context erases conversation history — only the skill file (loaded via system prompt) survives.
-8. **Never write to the original skill path during the pipeline.** All work happens on the workspace copy at `[workspace]/skill-under-test/`. The original is only touched during Session Close "Apply back gate" with explicit user approval.
-9. **Sandbox environments block cross-directory access.** If Preflight Step 0 fails on read/write, use `/tmp/` as workspace and copy the skill in. Don't spend time debugging sandbox paths — use the workaround.
-10. **Agent-as-judge evals should not see mutation reasoning.** The agent that hypothesized a mutation is biased toward finding it improved. Tier 1 (subagent dispatch) achieves real isolation — the judge has no mutation context. Tier 2 (behavioral instruction) reduces but does not eliminate bias — the agent still has mutation context in conversation history. Tier 2 is a heuristic, not a guarantee. If scoring feels unreliable, loop back to Phase 5-6 to add more code-based evals (which are immune to this bias).
-11. **Workspace location must be confirmed, never assumed.** The agent must NEVER create a workspace directory without asking the user where. Default recommendation is `/tmp/autorefine-[skill-name]/` (safest). Creating inside a repo risks breaking git state, CI, or other tools.
+6. **Quick Start is a preview, not validation.** Bootstrap evals are directional, not calibrated.
+7. **Critical state lives in files, not conversation.** Auto-compact at ~85% context erases conversation history.
+8. **Never write to the original skill path during the pipeline.** All work on `[workspace]/skill-under-test/`.
+9. **Sandbox environments block cross-directory access.** Use `/tmp/` as workspace workaround.
+10. **Agent-as-judge evals should not see mutation reasoning.** Tier 1 (subagent) = real isolation. Tier 2 (behavioral) = heuristic only.
+11. **Workspace location must be confirmed, never assumed.** Never create without asking.
 
 ---
 
 ## References
 
 `references.md` — Templates, schemas, methodology rationale, detailed rubrics, gotchas.
+Read `references.md > Version Comparison Alignment` before surfacing version diffs or any per-input comparison payload.
+Version diffs must run the comparison preflight first, require the exact same set of stable `input_id`s, surface `missing_from_left`, `missing_from_right`, `extra_in_left`, or `extra_in_right` on mismatch, mark that state as `invalid-comparison`, and must not emit normal comparison results when preflight fails.
+After the preflight passes, surface the per-input comparison payload together with a shared-input outcome summary that reports `improved`, `regressed`, and `unchanged` counts across the joined `input_id` set.
+Read `references.md > Judge Verdict Evidence Schema` when Phase 7 stores verdicts: preserve a structured `evidence` array with required `kind, source, locator` fields for input excerpts, output excerpts, metrics, or artifact references.
+Phase 7 evidence storage uses a structured `evidence` array. Required fields: `kind, source, locator`. Supported evidence types: input excerpts, output excerpts, metrics, or artifact references.
+Read `references.md > Discard Autopsy Heuristics` when Phase 7 discards an experiment so the discard autopsy classification is written back to `results.json`.
