@@ -77,7 +77,7 @@ Three gulfs to cross, in order:
 
 ```
 Gulf 1: Comprehension — What does this skill actually do?
-  Phase 1: Design Audit        Score against v2.0 patterns (Gotchas, voice, disclosure)
+  Phase 1: Design Audit        Score against v2.0 patterns (Gotchas, voice, disclosure, anti-railroading, description quality)
   Phase 2: Eval Audit           Assess existing evals or document their absence
   Phase 3: Error Analysis       YOU read 20+ outputs and build a failure taxonomy
   >>> Human Gate <<<             Approve taxonomy before proceeding

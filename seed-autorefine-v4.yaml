@@ -29,8 +29,12 @@ acceptance_criteria:
 
   # Eval Precision (Research-derived) — v4.0
   - "Skills are classified into one of 5 patterns (Tool Wrapper, Generator, Reviewer, Inversion, Pipeline) at Phase 1 start — classification shapes downstream eval strategy"
-  - "Phase 1 includes anti-railroading dimension — detects overspecificity that breaks edge cases (calibrated per pattern: pipelines exempt)"
-  - "Phase 1 includes description quality dimension — trigger precision is evaluated for production skill routing"
+  - "Gate all downstream Phase 1 processing on the chosen pattern being captured so Phase 1 cannot continue without it"
+  - "Phase 1 structured audit payload emits the chosen pattern as a top-level field so downstream consumers can inspect the rubric context without reopening state.json"
+  - "Phase 1 includes anti-railroading dimension — flags overspecific instructions likely to fail edge cases while exempting true pipeline invariants"
+  - "Anti-railroading calibration profiles let each skill pattern declare thresholds and heuristic settings in configuration/schema"
+  - "Skill-pattern-to-calibration-profile resolution is explicit — every classified pattern selects exactly one anti-railroading profile for the current skill-under-test before scoring, and runtime scoring uses that resolved current-skill profile rather than generic or cross-skill calibration data so exempt/no-penalty profiles suppress penalties when their protected invariant is the only evidence; pipeline-pattern skills bypass the anti-railroading penalty branch entirely once that profile is resolved at runtime"
+  - "Phase 1 includes description_quality dimension with canonical Phase 1 placement and explicit score contract — trigger precision is visible in the audit schema"
 
   # Eval Trust / Anti-Overfitting (Problem 2) — v4.1
   - "Adversarial holdout set exists that the mutation loop never sees — final score measured there"
@@ -46,12 +50,12 @@ acceptance_criteria:
   - "Mid-session preference detection: scan user overrides every 3rd experiment, extract style preferences mid-loop and apply immediately"
 
   # Versioning — v4.0
-  - "Skill iterations are tracked in versions.json with version history — user can see progression from v0 to vN"
+  - "Skill iterations are tracked as a derived view from results.json — user can see progression from v0 to vN"
   - "Each version is tied to its eval results, enabling rollback and comparison"
 
   # Metrics — v4.0
   - "Task completion rate measured per skill version (eval category tags: task-completion vs quality)"
-  - "Token efficiency estimated per skill version via character-count proxy (~4 chars/token)"
+  # - "Token efficiency estimated per skill version via character-count proxy" — deferred to v4.2+ (RovoDev uses credits, not tokens)
 
   # Composability (optional) — v4.2
   - "Optional composability analysis dimension in Phase 1 for multi-skill production systems — evaluates interfaces, script reuse, chaining, isolation"
@@ -68,13 +72,21 @@ ontology_schema:
       description: "A snapshot of a skill at a point in time — content, metadata, version number, parent version, token metrics"
     - name: skill_pattern
       type: string
-      description: "Classification of the target skill: tool_wrapper, generator, reviewer, inversion, pipeline, or composite (e.g., reviewer+generator)"
+      description: "Classification of the target skill: exactly one of tool_wrapper, generator, reviewer, inversion, or pipeline"
+    - name: anti_railroading_profile
+      type: object
+      description: "Pattern-specific anti-railroading calibration profile — thresholds, heuristic settings, and evidence rules loaded for the current skill-under-test's classified pattern"
+    - name: anti_railroading_profile_resolution
+      type: object
+      description: "Resolved anti-railroading profile selection — explicit mapping from the current skill-under-test's skill_pattern to profile_id, including pipeline's exempt/no-penalty route"
+      # carried into runtime scoring so exempt stage-order invariants suppress penalties when they are the only evidence
+      # pipeline-pattern skills bypass the anti-railroading penalty branch entirely once that profile is resolved at runtime
     - name: eval_result
       type: object
       description: "Result of evaluating a skill version — per-judge verdicts with reasoning traces, aggregate score, confidence, noise-floor comparison"
     - name: judge_verdict
       type: object
-      description: "Single judge's Pass/Fail decision with evidence chain, reasoning trace, confidence score, and method (tier_1/tier_2/code)"
+      description: "Single judge's Pass/Fail decision with structured evidence objects, reasoning trace, scoring weight, and method metadata"
     - name: trust_report
       type: object
       description: "Trust validation output — holdout score, spot-check calibration, cross-validation results, inter-judge agreement, noise floor"
@@ -126,7 +138,7 @@ evaluation_principles:
 exit_conditions:
   - name: v4_0_shipped
     description: "v4.0 Foundation phase is implemented and tested"
-    criteria: "Transparency layer (verdict cards, aggregation explainer), pattern classification, 3 new Phase 1 dimensions, version registry, version comparison, token estimation, eval category tags — all working in a real campaign"
+    criteria: "Transparency layer (verdict cards, aggregation explainer), pattern classification, anti-railroading, description_quality, version registry, version comparison, token estimation, eval category tags — all working in a real campaign"
   - name: v4_1_shipped
     description: "v4.1 Trust phase is implemented and tested"
     criteria: "Adversarial holdout, human spot-checks, cross-validation, multi-judge, noise measurement — all working. At least one campaign demonstrates holdout gap and noise floor reporting."
@@ -137,7 +149,7 @@ exit_conditions:
 metadata:
   version: "2.0"
   created: "2026-04-10"
-  updated: "2026-04-10"
+  updated: "2026-04-11"
   source: "ouroboros:interview (Path B) + research cross-reference (4 sources)"
   interview_questions: 12
   research_sources: "harness engineering (7 patterns), CC source (10 insights), Thariq principles (10 tips), Google 5 patterns"
@@ -200,18 +212,19 @@ phasing:
       - "1a: Verdict Explanation Cards — persist reasoning in eval_results[]"
       - "1b: Aggregation Explainer — show full scoring breakdown per experiment"
       - "1d: Skill Pattern Classification — classify into 5 patterns at Phase 1 start"
-      - "1e: Anti-Railroading Dimension — 5th Phase 1 audit dimension"
-      - "1f: Description Quality Eval — 6th Phase 1 audit dimension"
-      - "4a: Version Registry — versions.json tracking kept versions"
+      - "1e: Anti-Railroading — Phase 1 flexibility audit for overspecific instructions with pattern-specific calibration profiles"
+      - "1f: Description Quality — Phase 1 trigger-precision audit with canonical description_quality scoring"
+      - "4a: Version Registry — derived view from results.json"
       - "4b: Version Comparison — side-by-side any two versions"
       - "5a: Eval Category Tags — task-completion vs quality"
-      - "5b: Token Estimation — character-count proxy"
-    estimated_lines: "+250 SKILL.md, +200 references.md"
+      # 5b: Token Estimation — deferred to v4.2+
+    estimated_lines: "+270 SKILL.md, +220 references.md"
 
   v4_1_trust:
     theme: "Overfitting-resistant evaluation"
     components:
       - "2a: Adversarial Holdout Set — 4-way split, holdout validation at Session Close"
+      - "2a1: Mutation-Stage Split Policy Propagation — persist and rehydrate the dev-only read gate across Phase 7 scoring, regression checks, version comparison, and resume"
       - "2b: Human Spot-Check Calibration — every 3rd experiment"
       - "2c: Cross-Validation — 3-fold CV on dev split in Phase 6"
       - "2d: Multi-Judge Agreement — optional 2-judge for high-variance evals"
