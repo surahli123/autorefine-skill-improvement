@@ -1011,7 +1011,34 @@ def load_meta_learnings_bundle(
             curator_version=None,
         )
 
-    markdown_text = resolved_path.read_text(encoding="utf-8")
+    if not resolved_path.is_file():
+        errors = [
+            f"meta_learnings_path must point to a readable markdown file: {resolved_path}"
+        ]
+        if strict:
+            raise MetaLearningsValidationError(errors)
+        bundle["load_status"] = "parse_failed"
+        bundle["validation_errors"] = errors
+        return _attach_reporting_metadata(
+            bundle,
+            meta_learnings_path=resolved_path,
+            target_context=normalized_target_context,
+            curator_version=None,
+        )
+
+    try:
+        markdown_text = resolved_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        if strict:
+            raise MetaLearningsValidationError([str(exc)]) from exc
+        bundle["load_status"] = "parse_failed"
+        bundle["validation_errors"] = [str(exc)]
+        return _attach_reporting_metadata(
+            bundle,
+            meta_learnings_path=resolved_path,
+            target_context=normalized_target_context,
+            curator_version=None,
+        )
     curator_version = _stable_sha256(markdown_text)
 
     try:
