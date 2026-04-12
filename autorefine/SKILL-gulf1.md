@@ -155,6 +155,8 @@ Close the Gulf of Comprehension. **Most important phase. CANNOT BE AUTOMATED.**
 
 **Consistency check (after >=5 reviews):** If same-cluster traces got different verdicts, flag it. Append: `{"phase":"3","type":"consistency_flag","detail":"T03 and T07 match C2, judged differently"}`. If user confirms both verdicts, log resolution.
 
+**Saturation check (after every 5th trace review, once >=5 reviews exist):** Ask whether a new failure type appeared in the last 5 traces. If no new failure type appeared, suggest that the user can continue sampling or finalize taxonomy-building with the current evidence. This is an advisory saturation prompt, not a hard stop.
+
 **Mid-phase resume:** Track `traces_reviewed` and `sampled_trace_ids` in state.json.
 
 **Step 6: Build failure taxonomy.** Cluster failure notes into categories — let them EMERGE. If <3 failures in sample, review additional traces. Write `failure-taxonomy.md`.
