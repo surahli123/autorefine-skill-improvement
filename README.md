@@ -37,6 +37,8 @@ The repo also includes `.claude-plugin/` and `.codex-plugin/` metadata for plugi
 
 AutoRefine creates a workspace, copies your target skill into it, and then guides you through the full refinement pipeline.
 
+Phase 1 audits the skill across gotchas, voice, progressive disclosure, anti-railroading, description quality, and scripts before later gulfs build evals from those findings.
+
 ## What you should read next
 
 - [docs/quickstart.md](docs/quickstart.md) for the fastest first run

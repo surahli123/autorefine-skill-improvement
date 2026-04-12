@@ -43,6 +43,9 @@ Workspace directories for new runs are `traces/`, `judges/`, `runs/`, and `skill
 - When serializing `state.json` for checkpoint writes, phase boundaries, or any other state rewrite, preserve `mid_session_preference_signals` and `mid_session_preference_signals_path` unchanged so detected style-preference signals survive resume.
 - When deserializing or loading `state.json` on startup/resume, restore `mid_session_preference_signals` and `mid_session_preference_signals_path` into the loaded run context before Phase 7 mutation analysis. If `mid_session_preference_signals.status` is `confirmed` or `applied`, treat its `signals[]` entries as the current run's machine-readable mid-session preference ledger and use the mirrored path to reopen `[workspace]/preferences.md` only when the human-readable file is needed.
 - After restoring `mid_session_preference_signals` and `mid_session_preference_signals_path`, immediately rebuild the normalized active-loop `style_preferences` payload using `Style Preferences Payload` and keep that envelope in the loaded run context across eval, mutate, test, and session_close. Mid-loop stages should read `style_preferences.active_signals` and `style_preferences.resolved_preferences_path` instead of reparsing raw state or rescanning override sources ad hoc.
+- When serializing `state.json` for phase boundaries, checkpoint writes, or any other state rewrite, preserve the full `phase1_context` object unchanged so the chosen pattern survives persistence.
+- When deserializing or loading `state.json` on startup/resume, restore `phase1_context` into the loaded run context before routing or resuming later phases.
+- `phase1_context`: null, or `{"selected_skill_pattern":"<pattern_id>","selection_scope":"current_run","source_skill_path":"skill-under-test/SKILL.md"}`. Minimal run-scoped Phase 1 context shape used by downstream pattern-state checks.
 - `phase1_context`: null, or `{"selected_skill_pattern":"<pattern_id>","selected_eval_strategy_id":"<strategy_id>","selection_scope":"current_run","source_skill_path":"skill-under-test/SKILL.md"}`. Run-scoped Phase 1 context persisted immediately after pattern classification + strategy selection and overwritten whenever Phase 1 reruns for the active workspace copy.
 - When serializing `state.json` for phase boundaries, checkpoint writes, or any other state rewrite, preserve the full `phase1_context` object unchanged so the chosen pattern and resolved evaluation strategy survive persistence.
 - When deserializing or loading `state.json` on startup/resume, restore `phase1_context` into the loaded run context before routing or resuming later phases. Later phases must read the chosen pattern and resolved evaluation strategy from the loaded context rather than recomputing classification ad hoc.
@@ -1622,6 +1625,8 @@ Any result retrieval response schema or serializer that returns experiment recor
 - `input_set_ref`: exact pointer back to the registered set entry in `input-sets.json`.
 - `input_ids`: exact stable inputs scored for this experiment, listed in finalized set order. Version comparisons are only valid when this matches across experiments.
 - `validation_results`: Phase 6 judge validation summaries. Store aggregate dev/test TPR/TNR mean/range fields on each row, mirror them inside `aggregated_tpr_tnr_summary`, include structured `tpr_confidence_range` / `tnr_confidence_range` interval objects in the dev summary, persist the aggregate `confusion_matrix` plus reviewer-readable `confusion_examples`, and keep fold-level TPR/TNR outputs in `phase6_dev_fold_metrics` instead of flattening them into the aggregate mean/range fields.
+- Return the stored verdict objects unchanged so each `pass_fail` decision stays attached to its own `evidence[]` and `supporting_items[]`.
+- return the stored verdict objects unchanged so each `pass_fail` decision stays attached to its own `evidence[]` and `supporting_items[]`
 
 ## Judge Verdict Evidence Schema
 
@@ -1652,6 +1657,8 @@ Usage rules:
 - Prefer stable locators (`input_id:...`, `output lines 12-18`, `decision_breakdown.total_weight`, `runs/.../eval_results.json`) over vague prose.
 - Store quoted inputs and outputs as `input_excerpt` or `output_excerpt`, numeric checks as `metric`, and replay/debug links as `artifact_ref`.
 - Do not store opaque strings like `"looks good"` or `"seems wrong"` inside `evidence[]`.
+- A Pass/Fail verdict without at least one concrete evidence item is invalid judge output.
+- If a verdict is missing evidence, it must be flagged and rejected from scoring/storage until the judge is rerun or fixed.
 
 ## Judge Decision Support Schema
 
@@ -3447,6 +3454,7 @@ Read when: updating state.json after a phase.
 
 | Phase | Fields to record |
 |-------|-----------------|
+| 1 | `design_audit: "complete"`, `skill_pattern`, `phase1_context.selected_skill_pattern` |
 | 1 | `design_audit: "complete"`, `skill_pattern`, `phase1_context.selected_skill_pattern`, `phase1_context.selected_eval_strategy_id` |
 | 2 | `eval_audit: "complete"` |
 | 3 | `traces_reviewed, sampled_trace_ids, sampling_strategy, taxonomy_summary` |
@@ -3747,8 +3755,10 @@ To resume, paste this prompt into a new autorefine session.
 When reading state.json on startup:
 1. If `checkpoint` is not null and `checkpoint.next_action` exists → resume mode
 2. Read all files listed in `checkpoint.files_to_read_on_resume`. If any file is missing, skip it and note: "Missing file: {filename} — may have been deleted between sessions."
-3. Deserialize `state.json.phase1_context`, `state.json.mutation_stage_split_access_policy`, and `state.json.iteration_state` into the loaded run context before routing or resuming later phases. If `phase1_context.selected_skill_pattern` and/or `phase1_context.selected_eval_strategy_id` exist, restore them unchanged so later phases can read the chosen pattern + resolved strategy from the loaded context. If the restored pattern and `state.json.skill_pattern` differ, treat it as state corruption and rerun Phase 1 Step 0 instead of continuing. If the restored strategy is missing or no longer maps back to the restored pattern through `Skill Pattern Eval Strategy > Pattern-to-Evaluation-Strategy Selector`, treat it as state corruption and rerun strategy selection before continuing. If split-scoped Phase 7 work is active and `mutation_stage_split_access_policy` is missing, read the same policy from `fixtures-manifest.md` or a stored Phase 4 `evaluation_metadata.config.mutation_stage_split_access_policy` snapshot, restore it into the loaded run context, and stop if the sources disagree. If `iteration_state` is present, resume from its persisted `next_action` and continue automatic eval->mutate->test->session_close progression until terminal success (`phase_status = "completed"`) or terminal failure (`phase_status = "blocked"`), without manual handoff.
+3. Deserialize `state.json.phase1_context` and `state.json.mutation_stage_split_access_policy` into the loaded run context before routing or resuming later phases.
+3. Deserialize `state.json.phase1_context`, `state.json.mutation_stage_split_access_policy`, and `state.json.iteration_state` into the loaded run context before routing or resuming later phases. If `phase1_context.selected_skill_pattern` and/or `phase1_context.selected_eval_strategy_id` exist, restore them unchanged so later phases can read the chosen pattern + resolved strategy from the loaded context. If `phase1_context.selected_skill_pattern` exists, restore it unchanged so later phases can read the chosen pattern from the loaded context. If the restored pattern and `state.json.skill_pattern` differ, treat it as state corruption and rerun Phase 1 Step 0 instead of continuing. If the restored strategy is missing or no longer maps back to the restored pattern through `Skill Pattern Eval Strategy > Pattern-to-Evaluation-Strategy Selector`, treat it as state corruption and rerun strategy selection before continuing. If split-scoped Phase 7 work is active and `mutation_stage_split_access_policy` is missing, read the same policy from `fixtures-manifest.md` or a stored Phase 4 `evaluation_metadata.config.mutation_stage_split_access_policy` snapshot, restore it into the loaded run context, and stop if the sources disagree. If `iteration_state` is present, resume from its persisted `next_action` and continue automatic eval->mutate->test->session_close progression until terminal success (`phase_status = "completed"`) or terminal failure (`phase_status = "blocked"`), without manual handoff.
 4. Print resume context: "Resuming from checkpoint: {next_action}"
+5. Set `checkpoint` to null (clear the checkpoint — it's been consumed). Preserve all non-checkpoint state, including `phase1_context`, when writing the updated `state.json`.
 5. Set `checkpoint` to null (clear the checkpoint — it's been consumed). Preserve all non-checkpoint state, including `phase1_context` and `mutation_stage_split_access_policy`, when writing the updated `state.json`.
 6. Proceed from `checkpoint.next_action`
 
@@ -5076,6 +5086,7 @@ Pattern-specific downstream rules:
 Valid values: `"tool_wrapper"`, `"generator"`, `"reviewer"`, `"inversion"`, or `"pipeline"`.
 Persist exactly one canonical pattern ID in `phase1_context.selected_skill_pattern` and exactly one canonical strategy ID in `phase1_context.selected_eval_strategy_id` for the active run. Do not write candidate arrays, hybrid labels, or secondary-pattern lists into the run-scoped Phase 1 context.
 Gate all downstream Phase 1 processing on `phase1_context.selected_skill_pattern` and `phase1_context.selected_eval_strategy_id` being captured for the active run.
+Gate all downstream Phase 1 processing on `phase1_context.selected_skill_pattern` being captured for the active run.
 If `phase1_context.selected_skill_pattern` is null, missing, empty, or mismatched with `state.json.skill_pattern`, stop Phase 1 immediately and rerun Step 0 before scoring any dimension.
 If `phase1_context.selected_eval_strategy_id` is null, missing, empty, or does not map back to the same `selected_skill_pattern` through `Pattern-to-Evaluation-Strategy Selector`, stop Phase 1 immediately and rerun strategy selection before scoring any dimension.
 When the classifier-orchestration boundary rejects a payload, emit a structured stop payload instead of silently repairing the result.

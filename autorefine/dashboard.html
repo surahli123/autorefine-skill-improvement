@@ -497,6 +497,7 @@ function serializeResultsPayload(payload) {
     ...restPayload,
     // completion_cadence: serializeCompletionCadence(payload.completion_cadence)
     completion_cadence: serializedCompletionCadence,
+    // iteration_state: serializeIterationState(iterationState)
     // Preserve the persisted Phase 7 eval-to-mutate runner handoff record.
     // Do not infer this state from experiment order when iteration_state is already stored.
     iteration_state: serializedIterationState,
