@@ -1831,10 +1831,477 @@ The scoring pass also emits `mutation_handoff` for baseline and every mutation. 
 - `failure_reasons[].source_eval_ref`: stable pointer back to the owning `eval_results[]` row.
 - `failure_reasons[].evidence_refs` and `failure_reasons[].supporting_item_refs`: stable pointers back to the exact stored evidence and sub-decisions that justified the failure reason.
 - `failure_reasons[].mapped_target_ids`: ordered link(s) to the mutation target entries this failure reason should feed.
-- `mutation_targets[]`: ordered candidate mutation list for Phase 7 step 2a. The mutate phase should start from the lowest `priority` value and carry `target_location`, `recommended_mutation_type`, `source_reason_ids`, and `strategy_alignment` forward unchanged into the one-change hypothesis.
+- `mutation_targets[]`: ordered candidate mutation list for Phase 7 step 2a. Each row is the machine-readable target contract the mutate phase acts on directly, so it must carry `target_id`, `target_location`, `recommended_mutation_type`, `priority`, `source_eval_ids`, `source_reason_ids`, `strategy_alignment`, `rationale`, and `expected_effect` without requiring prose reconstruction.
+- `mutation_targets[].target_id`: stable identifier for the target row. `failure_reasons[].mapped_target_ids` should point here so mutate can join reasons to targets without fuzzy matching.
 - `mutation_targets[].target_location`: use the same section/instruction naming convention as `changes[].location` so keeps, discards, and future autopsies can compare target history without fuzzy matching.
+- `mutation_targets[].recommended_mutation_type`: canonical mutation action for this target. Use the same mutation-type vocabulary the loop already understands (`add`, `modify`, `delete`) so the mutate phase can seed a one-change hypothesis directly from the row.
+- `mutation_targets[].priority`: ordered execution rank where lower numbers mean earlier mutation candidates. Phase 7 step 2a should start from the smallest priority value before consulting later targets.
+- `mutation_targets[].source_eval_ids`: ordered eval rows whose outcomes created this target. Preserve the exact eval IDs so mutate can reopen the right judge verdicts or evidence bundles without re-clustering failures.
+- `mutation_targets[].source_reason_ids`: ordered failure-reason rows that map into this target. Carry these forward unchanged into the one-change hypothesis so later autopsies can trace the mutation back to the exact blocker IDs.
+- `mutation_targets[].strategy_alignment`: the active `selected_eval_strategy_id` or compatible strategy tag that justified choosing this target. Mutate should treat this as the canonical pattern-aware route instead of falling back to a generic edit path.
+- `mutation_targets[].rationale`: concise target-local explanation for why this target is the next mutation candidate. This is the machine-readable summary mutate can display or copy into the hypothesis scaffold without mining free-form critique prose.
+- `mutation_targets[].expected_effect`: concise statement of the intended improvement if this target is mutated successfully. Mutate should propagate this unchanged into the candidate hypothesis and later compare the observed outcome against it.
 - Populate `mutation_handoff` immediately after `decision_explanation` is finalized so scoring, explanation, and mutation-target extraction all describe the same evaluation event.
 - Return the stored `mutation_handoff` field unchanged anywhere experiment payloads are serialized, fetched, or shown. Never recompute `mutation_handoff` on the retrieval path.
+
+### Mutation Candidate Evaluation Schema
+
+Before AutoRefine promotes a research-derived donor into a one-change hypothesis, emit a `mutation_candidate_evaluation` artifact that captures the extracted donor pattern, the exact source evidence, target-skill similarity, a transparent relevance rubric, and trust/overfitting signals. This keeps the research-to-mutation bridge explainable before any candidate revision is materialized.
+
+```json
+{
+  "schema_version": 1,
+  "artifact_role": "phase7_mutation_candidate_evaluation",
+  "candidate_source": {
+    "entry_id": "rc-pattern-read-when-001",
+    "entry_type": "pattern_observation",
+    "source_kind": "reference_skill",
+    "source_ref": {
+      "source_id": "source-ship-skill-001",
+      "canonical_location": "~/.claude/skills/ship/SKILL.md",
+      "content_hash": "sha256:source-ship-skill-001"
+    },
+    "source_pattern": {
+      "pattern_label": "progressive_disclosure_read_when",
+      "pattern_statement": "Use explicit Read when guards before optional reference expansion.",
+      "transfer_type": "positive_pattern",
+      "applicability_reason": "The target skill already has a Progressive Disclosure section that is missing a clear gate.",
+      "mutation_leverage": "Restore a short Read when guard ahead of deep reference sections."
+    },
+    "source_evidence_reference": {
+      "schema_version": 1,
+      "source_hash": "sha256:source-ship-skill-001",
+      "source_location": {
+        "locator": "## Progressive Disclosure",
+        "section_id": "progressive_disclosure",
+        "heading_path": [
+          "Progressive Disclosure"
+        ]
+      },
+      "quote": "Read when: before expanding the answer, inspect the linked reference section.",
+      "span": {
+        "line_start": 12,
+        "line_end": 12,
+        "char_start": 422,
+        "char_end": 491,
+        "byte_start": 422,
+        "byte_end": 491,
+        "offset_basis": "normalized_text_utf8"
+      },
+      "retrieval_fingerprint": "ri-2026-04-11-source-ship-001:progressive_disclosure"
+    },
+    "traceability": {
+      "research_artifact_ref": "research-intake.md#accepted-source-source-ship-skill-001",
+      "raw_artifact_refs": [
+        "research-sources/source-ship-skill-001/SKILL.md"
+      ],
+      "evidence_refs": [
+        "research-intake.md#pattern-progressive-disclosure"
+      ]
+    }
+  },
+  "target_skill_context": {
+    "skill_path": "skill-under-test/SKILL.md",
+    "skill_pattern": "pipeline",
+    "selected_eval_strategy_id": "pipeline_eval_strategy",
+    "target_section": "Progressive Disclosure",
+    "agent_target": "any_skill_md",
+    "scenario_target": "production"
+  },
+  "similarity_assessment": {
+    "overall_similarity": 0.82,
+    "similarity_label": "high",
+    "matched_dimensions": [
+      {
+        "dimension": "skill_pattern",
+        "source_value": "pipeline",
+        "target_value": "pipeline",
+        "match_status": "match",
+        "score": 1.0
+      },
+      {
+        "dimension": "target_section",
+        "source_value": "Progressive Disclosure",
+        "target_value": "Progressive Disclosure",
+        "match_status": "match",
+        "score": 0.9
+      }
+    ],
+    "rationale": "The donor pattern and target skill share the same structure, section focus, and delivery scenario."
+  },
+  "relevance_rubric": {
+    "schema_version": 1,
+    "aggregation_formula": "weighted_sum(dimension.score * dimension.weight)",
+    "dimensions": [
+      {
+        "dimension": "goal_alignment",
+        "weight": 0.45,
+        "criterion_description": "Does the donor pattern directly improve the same target job, failure mode, or mutation objective that the current skill version is trying to improve?",
+        "score": 0.9,
+        "score_label": "strong_match",
+        "evidence_summary": "Both the donor and target are trying to restore an explicit read-when disclosure gate in the same section."
+      },
+      {
+        "dimension": "structural_fit",
+        "weight": 0.35,
+        "criterion_description": "Can the donor pattern be transplanted into the target skill's pattern, section boundaries, and workflow shape without importing incompatible stage logic or hidden assumptions?",
+        "score": 0.85,
+        "score_label": "strong_match",
+        "evidence_summary": "Both source and target are pipeline-pattern skills and the change lands in the same Progressive Disclosure section."
+      },
+      {
+        "dimension": "domain_context_match",
+        "weight": 0.20,
+        "criterion_description": "Do the donor and target operate in a similar agent, domain, and scenario context so the terminology, constraints, and reference expectations still transfer cleanly?",
+        "score": 0.75,
+        "score_label": "usable_match",
+        "evidence_summary": "Both are SKILL.md-based agents for production-oriented workflows, even though they solve different concrete tasks."
+      }
+    ],
+    "weighted_score": 0.853,
+    "weighted_score_pct": 85.3
+  },
+  "trust_signals": {
+    "confidence": "high",
+    "status": "active",
+    "evidence_count": 1,
+    "provenance_complete": true,
+    "has_structured_evidence_reference": true,
+    "source_snapshot_pinned": true,
+    "retrieval_span_seconds": 2
+  },
+  "overfitting_signals": {
+    "same_skill_lineage": false,
+    "same_input_set_verified": null,
+    "evaluation_corpus_overlap_status": "disjoint",
+    "holdout_exposure_status": "not_exposed",
+    "noise_floor_dependency": "indirect_only",
+    "risk_flags": []
+  },
+  "recommendation": {
+    "status": "promote_to_mutation_hypothesis",
+    "target_section": "Progressive Disclosure",
+    "reason": "High structural similarity plus complete provenance make this donor pattern safe to try before scoring.",
+    "expected_effect": "Recover the missing disclosure gate without importing unrelated workflow steps."
+  }
+}
+```
+
+- `artifact_role`: always `phase7_mutation_candidate_evaluation`.
+- `candidate_source`: frozen donor-pattern payload copied from the normalized research corpus entry. Keep `source_pattern` separate from `source_evidence_reference` so humans can inspect the extracted claim independently from its supporting proof.
+- `target_skill_context`: the exact skill/version/pattern context that the donor is being compared against.
+- `similarity_assessment`: why the donor is structurally compatible with the target skill before mutation.
+- `relevance_rubric`: transparent donor-to-target relevance surface used before recommendation. Preserve the weighted dimensions, human-readable criterion descriptions, per-dimension evidence summaries, and the computed weighted score so humans can audit why a donor looked relevant.
+- `trust_signals`: provenance completeness checks derived from the corpus entry itself. This is the minimum trust surface before the donor can influence a mutation.
+- `overfitting_signals`: defense-in-depth checks that ensure a donor pattern is not being promoted from the same lineage, same scoring corpus, or exposed holdout material.
+- `recommendation`: the explicit promote / hold / reject decision that bridges research intake into mutation hypothesis generation.
+- `recommendation` must not bypass `relevance_rubric.weighted_score`; trust and overfitting signals may veto promotion, but the relevance score is the default explanatory surface for why a donor is considered on-target or off-target before mutation.
+
+### Mutation Candidate Relevance Rubric Schema
+
+Use this default rubric whenever `mutation_candidate_evaluation` compares a donor pattern against the current skill-under-test. The rubric is transparent by default: the weights are fixed, every dimension carries a human-readable criterion description, and the final relevance score is just the weighted sum of the visible dimension scores.
+
+```json
+{
+  "schema_version": 1,
+  "aggregation_formula": "weighted_sum(dimension.score * dimension.weight)",
+  "dimensions": [
+    {
+      "dimension": "goal_alignment",
+      "weight": 0.45,
+      "criterion_description": "Does the donor pattern directly improve the same target job, failure mode, or mutation objective that the current skill version is trying to improve?",
+      "score": 0.0,
+      "score_label": "weak_match|partial_match|strong_match",
+      "evidence_summary": "<why this donor does or does not help the target objective>"
+    },
+    {
+      "dimension": "structural_fit",
+      "weight": 0.35,
+      "criterion_description": "Can the donor pattern be transplanted into the target skill's pattern, section boundaries, and workflow shape without importing incompatible stage logic or hidden assumptions?",
+      "score": 0.0,
+      "score_label": "weak_match|partial_match|strong_match",
+      "evidence_summary": "<why the donor does or does not fit the target structure>"
+    },
+    {
+      "dimension": "domain_context_match",
+      "weight": 0.20,
+      "criterion_description": "Do the donor and target operate in a similar agent, domain, and scenario context so the terminology, constraints, and reference expectations still transfer cleanly?",
+      "score": 0.0,
+      "score_label": "weak_match|partial_match|strong_match",
+      "evidence_summary": "<why the donor does or does not transfer across context>"
+    }
+  ],
+  "weighted_score": 0.0,
+  "weighted_score_pct": 0.0
+}
+```
+
+- `goal_alignment` has default weight `0.45` because same-skill version improvement should privilege donor patterns that attack the target job-to-be-done or observed failure mode directly, not just generic writing overlap.
+- `structural_fit` has default weight `0.35` because a useful donor still has to fit the target skill's pattern, section boundaries, and workflow shape without importing brittle or incompatible mechanics.
+- `domain_context_match` has default weight `0.20` because transfer still depends on the donor living close enough to the target agent/domain/scenario context, but a strong target-objective match can still justify reuse across adjacent domains.
+- The three weights must sum to `1.0`. Do not add hidden bonus factors or opaque post-hoc multipliers on the recommendation path.
+- Score each dimension on a normalized `0.0-1.0` scale and keep the written `criterion_description` visible to human reviewers. If a later phase wants to tune thresholds, tune the downstream recommendation policy, not the rubric dimensions or their meaning.
+
+### Mutation Candidate Revision Artifact
+
+Once mutate selects the highest-priority target row, convert that structured eval-to-mutate handoff into exactly one candidate `SKILL.md` revision artifact. This is the stable machine-readable record of the candidate the mutation engine produced before scoring or user presentation.
+
+```json
+{
+  "schema_version": 1,
+  "artifact_role": "phase7_mutation_candidate_revision",
+  "source_artifact_role": "phase7_eval_to_mutate_handoff",
+  "source_artifact_schema_version": 1,
+  "lineage_metadata": {
+    "experiment_id": 3,
+    "version_label": "v3",
+    "experiment_status": "discard",
+    "input_set_id": "phase4-dev-7f3c91ad",
+    "input_set_ref": "input-sets.json#phase4-dev-7f3c91ad",
+    "input_ids": [
+      "phase4-dev-7f3c91ad-I03",
+      "phase4-dev-7f3c91ad-I05"
+    ],
+    "dataset_split_id": "dev",
+    "selected_eval_strategy_id": "pipeline_eval_strategy"
+  },
+  "selected_mutation_target": {
+    "target_id": "target-progressive-disclosure-read-when",
+    "target_location": "Progressive Disclosure",
+    "recommended_mutation_type": "modify",
+    "priority": 1,
+    "source_eval_ids": [
+      "E2"
+    ],
+    "source_reason_ids": [
+      "exp3-E2-missing-disclosure-guidance"
+    ],
+    "strategy_alignment": "pipeline_eval_strategy",
+    "rationale": "Restore explicit read-when guidance before later expansion.",
+    "expected_effect": "Recover the missed disclosure requirement without disturbing stage order."
+  },
+  "candidate_skill_revision": {
+    "format": "SKILL.md",
+    "content_type": "text/markdown",
+    "content": "# AutoRefine\n\nRead when: before expanding the answer, inspect the linked reference section.\n\n## Progressive Disclosure\n- Load references.md before writing the final response."
+  },
+  "version_artifact": {
+    "schema_version": 1,
+    "artifact_type": "skill_version_artifact",
+    "version_id": "skill_version__run_2026-04-11T09-00-00__exp_003",
+    "run_id": "run_2026-04-11T09-00-00",
+    "experiment_id": 3,
+    "lineage_label": null,
+    "parent_version_id": "skill_version__run_2026-04-11T09-00-00__exp_000",
+    "root_version_id": "skill_version__run_2026-04-11T09-00-00__exp_000",
+    "lineage_depth": 1,
+    "lineage_store_path": "skill-versions/lineage.json",
+    "artifact_path": "skill-versions/skill_version__run_2026-04-11T09-00-00__exp_003/",
+    "snapshot_path": "skill-versions/skill_version__run_2026-04-11T09-00-00__exp_003/SKILL.md",
+    "snapshot_sha256": "sha256:4b2859d8c0f1f1a9...",
+    "source_iteration_path": "runs/run_2026-04-11T09-00-00/iteration_003/",
+    "source_mutation_artifact_ref": "runs/run_2026-04-11T09-00-00/iteration_003/mutation.md#version_artifact",
+    "created_at": "2026-04-11T09:05:00Z"
+  }
+}
+```
+
+- `schema_version`: currently `1` for the mutation candidate revision artifact contract.
+- `artifact_role`: always `phase7_mutation_candidate_revision`.
+- `source_artifact_role`: always `phase7_eval_to_mutate_handoff`; this candidate artifact is produced from the structured eval-to-mutate input, not from free-form critique text.
+- `source_artifact_schema_version`: copy the `mutation_handoff.schema_version` that powered this candidate revision.
+- `lineage_metadata`: copy the same experiment/input-set/strategy lineage used to build the direct mutate input so downstream consumers can trace which scoring corpus and pattern-aware route produced the candidate.
+- `selected_mutation_target`: copy the selected `mutation_targets[]` row unchanged from `mutation_handoff`. Do not paraphrase or rebuild the target from prose.
+- `candidate_skill_revision`: the full candidate revision produced for this experiment.
+- `candidate_skill_revision.format`: always `SKILL.md`.
+- `candidate_skill_revision.content_type`: always `text/markdown`.
+- `candidate_skill_revision.content`: the full revised `SKILL.md` body. This field is required so the mutation artifact carries the candidate revision directly instead of forcing downstream readers to reopen sibling files.
+- `version_artifact`: immutable persisted version snapshot for this candidate revision. Use `Skill Version Artifact Schema`.
+- `skill_after.md` must exactly mirror `candidate_skill_revision.content` for the same experiment.
+- Persist this artifact in the `mutation.md` iteration artifact under `## Mutation Artifact` before scoring or user presentation.
+
+### Mutation Test Launch Payload
+
+When mutate finishes persisting the candidate revision, emit a dedicated test-launch payload from that finalized mutate output. This is the canonical mutate-to-test handoff that the test phase consumes before it advances `iteration_state` to `test/ready`.
+
+Persist the payload in `mutation.md` under `## Test Launch Payload`. Resume-time readers should reopen that stored payload through `last_mutation_results_ref`; do not reconstruct test launch inputs from directory scans, free-form prose, or split loaders.
+
+```json
+{
+  "schema_version": 1,
+  "artifact_role": "phase7_mutation_to_test_launch",
+  "source_artifact_role": "phase7_mutation_candidate_revision",
+  "source_artifact_schema_version": 1,
+  "candidate_version": {
+    "schema_version": 1,
+    "artifact_type": "skill_version_artifact",
+    "version_id": "skill_version__run_2026-04-11T09-00-00__exp_003",
+    "run_id": "run_2026-04-11T09-00-00",
+    "experiment_id": 3,
+    "lineage_label": null,
+    "parent_version_id": "skill_version__run_2026-04-11T09-00-00__exp_000",
+    "root_version_id": "skill_version__run_2026-04-11T09-00-00__exp_000",
+    "lineage_depth": 1,
+    "lineage_store_path": "skill-versions/lineage.json",
+    "artifact_path": "skill-versions/skill_version__run_2026-04-11T09-00-00__exp_003/",
+    "snapshot_path": "skill-versions/skill_version__run_2026-04-11T09-00-00__exp_003/SKILL.md",
+    "snapshot_sha256": "sha256:4b2859d8c0f1f1a9...",
+    "source_iteration_path": "runs/run_2026-04-11T09-00-00/iteration_003/",
+    "source_mutation_artifact_ref": "runs/run_2026-04-11T09-00-00/iteration_003/mutation.md#version_artifact",
+    "created_at": "2026-04-11T09:05:00Z"
+  },
+  "source_artifact_refs": {
+    "source_iteration_path": "runs/run_2026-04-11T09-00-00/iteration_003/",
+    "mutation_artifact_ref": "runs/run_2026-04-11T09-00-00/iteration_003/mutation.md#mutation_artifact",
+    "candidate_revision_artifact_ref": "runs/run_2026-04-11T09-00-00/iteration_003/mutation.md#candidate_skill_revision",
+    "version_artifact_ref": "runs/run_2026-04-11T09-00-00/iteration_003/mutation.md#version_artifact",
+    "skill_after_ref": "runs/run_2026-04-11T09-00-00/iteration_003/skill_after.md"
+  },
+  "eval_artifact_refs": {
+    "eval_results_ref": "runs/run_2026-04-11T09-00-00/iteration_003/eval_results.json",
+    "mutation_handoff_ref": "runs/run_2026-04-11T09-00-00/iteration_003/eval_results.json#mutation_handoff",
+    "decision_breakdown_ref": "runs/run_2026-04-11T09-00-00/iteration_003/eval_results.json#decision_breakdown",
+    "input_set_id": "phase4-dev-7f3c91ad",
+    "input_set_ref": "input-sets.json#phase4-dev-7f3c91ad",
+    "input_ids": [
+      "phase4-dev-7f3c91ad-I03",
+      "phase4-dev-7f3c91ad-I05"
+    ]
+  },
+  "test_bootstrap_metadata": {
+    "run_id": "run_2026-04-11T09-00-00",
+    "run_path": "runs/run_2026-04-11T09-00-00/",
+    "experiment_id": 3,
+    "dataset_split_id": "dev",
+    "selected_eval_strategy_id": "pipeline_eval_strategy",
+    "active_phase": "test",
+    "phase_status": "ready",
+    "next_action": "phase7_test_phase",
+    "bootstrap_generated_at": "2026-04-11T09:05:00Z"
+  }
+}
+```
+
+- `schema_version`: currently `1` for the mutate-to-test launch contract.
+- `artifact_role`: always `phase7_mutation_to_test_launch`.
+- `source_artifact_role`: always `phase7_mutation_candidate_revision`.
+- `source_artifact_schema_version`: copy the mutation candidate artifact schema version that produced this launch payload.
+- `candidate_version`: copy the immutable `version_artifact` object unchanged. Test must execute against this stored snapshot, not against the mutable working copy.
+- `source_artifact_refs`: stable references back to the mutate output artifacts that produced the candidate version. Preserve `source_iteration_path`, `mutation_artifact_ref`, `candidate_revision_artifact_ref`, `version_artifact_ref`, and `skill_after_ref`.
+- `eval_artifact_refs`: stable references back to the eval-phase artifact that selected the target and froze the replay corpus. Preserve `eval_results_ref`, `mutation_handoff_ref`, `decision_breakdown_ref`, `input_set_id`, `input_set_ref`, and the ordered `input_ids[]`.
+- `test_bootstrap_metadata`: explicit bootstrap state for the next phase. Preserve `run_id`, `run_path`, `experiment_id`, `dataset_split_id`, `selected_eval_strategy_id`, `active_phase = test`, `phase_status = ready`, `next_action = phase7_test_phase`, and `bootstrap_generated_at`.
+- Do not rebuild `input_ids[]`, `input_set_ref`, or the candidate snapshot path from split manifests, filesystem scans, or free-form mutation notes once this payload has been written.
+
+---
+
+## Skill Version Artifact Schema
+
+Read when: Phase 7 baseline finalization, Phase 7 step 2a candidate generation, version registry computation, rollback, version comparison, or evaluation-result-store retrieval.
+
+Persist every finalized baseline and every generated mutation candidate as an immutable version artifact under `[workspace]/skill-versions/<version_id>/`. This is the canonical stored `SKILL.md` snapshot for replayable version lineage. The iteration directory remains the forensic run log; `skill-versions/` is the stable per-version archive.
+
+### Storage Rules
+
+- `version_id` is the immutable identifier for one stored skill snapshot. Recommended format: `skill_version__<run_id>__exp_<NNN>`.
+- `artifact_path` is always `skill-versions/<version_id>/`.
+- `snapshot_path` is always `skill-versions/<version_id>/SKILL.md`.
+- `parent_version_id` is null for the Experiment 0 baseline artifact and otherwise points to the active carried-forward baseline artifact that the new candidate mutated from.
+- `root_version_id` is the stable lineage root for this snapshot. Experiment 0 points to itself; descendants inherit the root from the source version they mutated from.
+- `lineage_depth` is the distance from `root_version_id` in parent-child hops (`0` for the baseline root, `1` for its direct child, and so on).
+- `lineage_store_path` is always `skill-versions/lineage.json`. This store records `child_version_ids[]` on parent nodes so lineage history can be queried and traversed without mutating older version directories.
+- `snapshot_sha256` is computed from the exact bytes written to `snapshot_path`.
+- `created_at` is the write timestamp for the version artifact. Once written, do not mutate or overwrite the artifact directory.
+- If `artifact_path` already exists, stop with a collision error instead of rewriting the artifact.
+- For mutation experiments, `snapshot_path` must exactly mirror both `mutation.md > Mutation Artifact > candidate_skill_revision.content` and the sibling `skill_after.md` file for that experiment.
+- For mutation experiments, `mutation.md` must also persist `## Test Launch Payload` using `Mutation Test Launch Payload` so the test phase can reopen the same candidate version and eval corpus without reconstructing them from scans.
+- Carry the stored `version_artifact` object unchanged into `mutation.md`, iteration `eval_results.json`, and the finalized experiment record in `results.json.experiments[]`.
+- Update `skill-versions/lineage.json` in the same successful write as `version.json` so the new candidate is recorded as a child of `parent_version_id` and later retrieval can reopen the stored lineage graph directly.
+- Derived human-facing labels such as `v0`, `v1`, and `vN` are layered on top of this artifact. Do not use the derived label as the immutable storage key.
+
+### version.json
+
+```json
+{
+  "schema_version": 1,
+  "artifact_type": "skill_version_artifact",
+  "version_id": "skill_version__run_2026-04-11T09-00-00__exp_003",
+  "run_id": "run_2026-04-11T09-00-00",
+  "experiment_id": 3,
+  "lineage_label": null,
+  "parent_version_id": "skill_version__run_2026-04-11T09-00-00__exp_002",
+  "root_version_id": "skill_version__run_2026-04-11T09-00-00__exp_000",
+  "lineage_depth": 3,
+  "lineage_store_path": "skill-versions/lineage.json",
+  "artifact_path": "skill-versions/skill_version__run_2026-04-11T09-00-00__exp_003/",
+  "snapshot_path": "skill-versions/skill_version__run_2026-04-11T09-00-00__exp_003/SKILL.md",
+  "snapshot_sha256": "sha256:4b2859d8c0f1f1a9...",
+  "source_iteration_path": "runs/run_2026-04-11T09-00-00/iteration_003/",
+  "source_mutation_artifact_ref": "runs/run_2026-04-11T09-00-00/iteration_003/mutation.md#version_artifact",
+  "created_at": "2026-04-11T09:05:00Z"
+}
+```
+
+- `lineage_label`: optional human-facing label if the experiment is already finalized into the derived baseline/keep lineage (`v0`, `v1`, ...). Leave null for unresolved candidate snapshots.
+- `source_iteration_path`: iteration directory that produced the artifact.
+- `source_mutation_artifact_ref`: null for the Experiment 0 baseline artifact; otherwise points to the mutation artifact that first emitted the candidate revision.
+
+### Retrieval Rule
+
+Whenever a consumer can see both `version_artifact.snapshot_path` and a legacy `skill_snapshot` / `skill_after.md`, prefer `version_artifact.snapshot_path` as the canonical replay target and use the legacy path only as a backward-compatibility fallback for older runs.
+
+## Skill Version Lineage Store Schema
+
+Read when: skill-version persistence, version-history traversal, rollback ancestry checks, or version-to-version comparison tooling.
+
+`skill-versions/lineage.json` is the queryable parent-child index for immutable version artifacts. `version.json` remains immutable per snapshot; the lineage store is the only place that should accumulate `child_version_ids[]` over time.
+
+### lineage.json
+
+```json
+{
+  "schema_version": 1,
+  "artifact_type": "skill_version_lineage_store",
+  "artifact_path": "skill-versions/lineage.json",
+  "nodes": {
+    "skill_version__run_2026-04-11T09-00-00__exp_000": {
+      "version_id": "skill_version__run_2026-04-11T09-00-00__exp_000",
+      "run_id": "run_2026-04-11T09-00-00",
+      "experiment_id": 0,
+      "lineage_label": null,
+      "parent_version_id": null,
+      "child_version_ids": [
+        "skill_version__run_2026-04-11T09-00-00__exp_003"
+      ],
+      "root_version_id": "skill_version__run_2026-04-11T09-00-00__exp_000",
+      "lineage_depth": 0,
+      "artifact_path": "skill-versions/skill_version__run_2026-04-11T09-00-00__exp_000/",
+      "snapshot_path": "skill-versions/skill_version__run_2026-04-11T09-00-00__exp_000/SKILL.md",
+      "version_manifest_path": "skill-versions/skill_version__run_2026-04-11T09-00-00__exp_000/version.json",
+      "created_at": "2026-04-11T09:00:00Z"
+    },
+    "skill_version__run_2026-04-11T09-00-00__exp_003": {
+      "version_id": "skill_version__run_2026-04-11T09-00-00__exp_003",
+      "run_id": "run_2026-04-11T09-00-00",
+      "experiment_id": 3,
+      "lineage_label": null,
+      "parent_version_id": "skill_version__run_2026-04-11T09-00-00__exp_000",
+      "child_version_ids": [],
+      "root_version_id": "skill_version__run_2026-04-11T09-00-00__exp_000",
+      "lineage_depth": 1,
+      "artifact_path": "skill-versions/skill_version__run_2026-04-11T09-00-00__exp_003/",
+      "snapshot_path": "skill-versions/skill_version__run_2026-04-11T09-00-00__exp_003/SKILL.md",
+      "version_manifest_path": "skill-versions/skill_version__run_2026-04-11T09-00-00__exp_003/version.json",
+      "created_at": "2026-04-11T09:05:00Z"
+    }
+  }
+}
+```
+
+- Every node is keyed by `version_id`.
+- `child_version_ids[]` is the canonical traversal surface for descending the lineage tree.
+- `parent_version_id` remains the canonical upward pointer.
+- Consumers may compute `lineage_path`, `ancestor_version_ids`, and `descendant_version_ids` from this store instead of mutating older `version.json` files.
+- If `lineage.json` is missing, recover the current node from `version.json` and rebuild the missing traversal state before returning results to the user.
 
 ---
 
