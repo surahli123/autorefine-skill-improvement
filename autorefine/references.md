@@ -976,7 +976,10 @@ Use this canonical ordering whenever a Phase 1 audit is represented structurally
 
 ### Canonical structured payload
 
-When Phase 1 emits a structured audit payload, include the chosen primary pattern as a top-level `selected_skill_pattern` field and the resolved downstream selector as a top-level `selected_eval_strategy_id` field. Source both from the active run's `state.json.phase1_context` values rather than inferring them from prose or requiring downstream consumers to reopen state.
+When Phase 1 emits a structured audit payload, include the chosen primary pattern as a top-level `selected_skill_pattern` field.
+Include the resolved downstream selector as a top-level `selected_eval_strategy_id` field.
+Source it from `state.json.phase1_context.selected_skill_pattern` for the active run rather than inferring it from prose or rereading state later.
+Source both fields from the active run's `state.json.phase1_context` values rather than inferring them from prose or requiring downstream consumers to reopen state.
 If Phase 1 replays the production routing fixtures, aggregate the full ordered batch under top-level `phase1_routing_fixture_result_collection` so downstream comparisons can read one comparable collection keyed by `input_id`. That wrapper must also expose `per_skill_trigger_precision` so humans can inspect grouped trigger precision and every incorrect route decision by expected routed skill.
 `description_quality` should also expose per-skill trigger-precision reports with `score`, `evidence`, and `mismatches` when routing fixtures are replayed.
 
