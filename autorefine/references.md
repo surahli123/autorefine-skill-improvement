@@ -10,7 +10,7 @@ Read when: Initialize Workspace or resuming a session.
 
 ### state.json
 ```json
-{"schema_version":4,"skill_name":"<name>","skill_path":"<path>","original_skill_path":"<path>","workspace_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null,"consecutive_discards":0,"circuit_breaker":null,"current_run_path":null,"completion_cadence":null,"skill_pattern":null,"phase1_context":null,"mutation_stage_split_access_policy":null,"quick_start":null}
+{"schema_version":4,"skill_name":"<name>","skill_path":"<path>","original_skill_path":"<path>","workspace_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null,"consecutive_discards":0,"circuit_breaker":null,"current_run_id":null,"current_run_path":null,"current_experiment":null,"iteration_state":null,"completion_cadence":null,"skill_pattern":null,"phase1_context":null,"mutation_stage_split_access_policy":null,"meta_learnings_path":null,"research_intake":null,"research_intake_path":null,"final_only_evaluation":null,"quick_start":null}
 ```
 - `schema_version`: 4 for v2.3 workspaces. Legacy: 2 = Standard/Deep (v2.1), 3 = Quick Start (v2.2). New fields default to null when reading v2/v3 workspaces.
 - `loop_iteration`: tracks Phase 7→5 loop-backs (0 = first run)
@@ -20,7 +20,18 @@ Read when: Initialize Workspace or resuming a session.
 - `workspace_path`: full path to the AutoRefine workspace (set in Preflight Step 0.6).
 - `consecutive_discards`: integer (0). Circuit breaker counter — incremented on discard, reset on keep. See SKILL.md Phase 7.
 - `circuit_breaker`: null, or `{triggered_count: N, last_experiment: N, diagnosis: "..."}`. Set when circuit breaker fires.
+- `current_run_id`: null, or the unique iteration-run identifier for the active Phase 7 execution (for example `run_2026-04-03T14-30-00`). Set exactly once by the single iteration-start trigger at Phase 7 start. Resume/load should use this ID to reopen the matching run record in `results.json.iteration_runs[]` before reading iteration artifacts.
 - `current_run_path`: null, or relative path to the current Phase 7 run directory (e.g., `runs/run_2026-04-03T14-30-00/`). Set at Phase 7 start, updated on loop-back. Used by resume to identify which run directory to read `decision.md` files from.
+- `current_experiment`: null, or the active Phase 7 experiment slot. Set `current_experiment = 0` for the baseline-in-progress slot when a new iteration run starts, before any `iteration_000/` artifacts exist. Resume/checkpoint flows should use this field together with `current_run_path` to reopen the active baseline or mutation slot instead of guessing from directory scans.
+- `iteration_state`: null, or `{"run_id":"run_...","run_path":"runs/run_.../","experiment_id":0,"active_phase":"eval|mutate|test|session_close","phase_status":"running|ready|completed|blocked","last_eval_status":"completed|invalid|blocked|null","last_eval_results_ref":"runs/.../iteration_000/eval_results.json|null","last_mutation_status":"completed|invalid|blocked|null","last_mutation_results_ref":"runs/.../iteration_001/mutation.md|null","next_action":"phase7_baseline_eval|phase7_mutation_analysis|phase7_test_phase|phase7_session_close|null"}`. This is the canonical runner handoff record for the active Phase 7 run.
+- On the iteration-start write, initialize `iteration_state` with the new `run_id`, `run_path`, `experiment_id = 0`, `active_phase = "eval"`, `phase_status = "running"`, `last_eval_status = null`, `last_eval_results_ref = null`, and `next_action = "phase7_baseline_eval"`.
+- When the baseline eval finishes and `iteration_000/eval_results.json` exists, update the same `iteration_state` object to `active_phase = "mutate"`, `phase_status = "ready"`, `last_eval_status = "completed"`, `last_eval_results_ref = "runs/.../iteration_000/eval_results.json"`, and `next_action = "phase7_mutation_analysis"`. This is the explicit eval-to-mutate handoff for the same run; do not create a new `run_id`, `run_path`, or run record.
+- When later mutation evals finish, overwrite `iteration_state.experiment_id`, `last_eval_status`, and `last_eval_results_ref` for the current `iteration_<NNN>/eval_results.json` while keeping the same run identifiers. Resume/load should reopen the latest eval artifact from this object instead of rescanning directories.
+- When the mutate phase finishes for an experiment, record the mutation output/status on the same `iteration_state` object (`last_mutation_status = "completed"`, `last_mutation_results_ref = "runs/.../iteration_<NNN>/mutation.md"`), then automatically advance the same run into test by setting `active_phase = "test"`, `phase_status = "ready"`, and `next_action = "phase7_test_phase"`. Do not open a second run.
+- When the test phase finishes for an experiment, automatically advance the same run into Session Close by setting `active_phase = "session_close"`, `phase_status = "ready"`, and `next_action = "phase7_session_close"` on the same `iteration_state` object.
+- Session Close resolves the run to a terminal state on that same object: success writes `active_phase = "session_close"`, `phase_status = "completed"`, `next_action = null`; unrecoverable failure writes `active_phase = "session_close"`, `phase_status = "blocked"`, `next_action = null`.
+- When serializing `state.json` for checkpoint writes, phase boundaries, or any other persistence path, preserve `iteration_state` unchanged so the active eval->mutate->test->session_close handoff survives resume.
+- When loading or resuming a workspace, deserialize `iteration_state` into the active run context before Phase 7 routing. Treat it as authoritative over directory scans when deciding whether the current run is in eval, mutate, test, session_close-ready, or a terminal completed/blocked state.
 - `completion_cadence`: null, or `{"scope_type":"experiment_series|skill","scope_id":"<stable-scope-id>","completed_experiments":N,"last_finalized_experiment_id":N,"last_finalized_status":"baseline|keep|discard","incremented_at":"<ISO-timestamp>"}`. Default scope is the active Phase 7 run directory (`experiment_series` via `state.json.current_run_path`); use `skill` only when one cadence counter should span multiple Phase 7 runs for the same skill.
 - Increment `completion_cadence.completed_experiments` exactly once when an experiment reaches its finalized state. Finalized means: baseline after `iteration_000/` artifacts are written, keep after the user-confirmed keep verdict and iteration write, discard after discard autopsy plus iteration write. Do not increment for provisional scores, regression checks, or pre-autopsy discard proposals.
 - `phase1_context`: null, or `{"selected_skill_pattern":"<pattern_id>","selected_eval_strategy_id":"<strategy_id>","selection_scope":"current_run","source_skill_path":"skill-under-test/SKILL.md"}`. Run-scoped Phase 1 context persisted immediately after pattern classification + strategy selection and overwritten whenever Phase 1 reruns for the active workspace copy.
@@ -29,6 +40,18 @@ Read when: Initialize Workspace or resuming a session.
 - `mutation_stage_split_access_policy`: null, or the exact machine-readable object from `Mutation-Stage Split Access Policy`. Phase 4 writes it into `state.json` as the active Phase 7 dataset-read gate for this workspace/run.
 - When serializing `state.json` for phase boundaries, checkpoint writes, or any other state rewrite, preserve `mutation_stage_split_access_policy` unchanged so the active dataset-read policy survives persistence.
 - When deserializing or loading `state.json` on startup/resume, restore `mutation_stage_split_access_policy` into the loaded run context before routing into Phase 7 or Session Close. If split-scoped Phase 7 work is active and the field is missing, read the same policy from `fixtures-manifest.md` or a stored Phase 4 `evaluation_metadata.config.mutation_stage_split_access_policy` snapshot, hydrate the run context, and stop if those sources disagree.
+- `meta_learnings_path`: null, or an absolute path to the curated `meta-learnings.md` file for this run. When null, default to the AutoRefine skill directory copy. This field only points to the source document; do not persist parsed bundle contents here.
+- When a session may enter Phase 7 or Session Close, campaign bootstrap must resolve `meta_learnings_path`, normalize the current target context (`skill_pattern`, `agent_target`, `scenario_target`, `scope_type`, `scope_ref`), and hydrate the loaded run context with the `Campaign Bootstrap Meta-Learnings Context`. Rebuild that object on every start/resume instead of caching parsed entries in `state.json`.
+- `research_intake`: null, or `{"status":"not_requested|skipped|in_progress|completed|partial|failed","target_skill_path":"skill-under-test/SKILL.md","target_domain":"<one-sentence target job>","requested_sources":0,"accepted_sources":0,"rejected_sources":0,"completed_at":"<ISO-timestamp>|null","error_code":"none|target_skill_missing|target_domain_missing|missing_phase1_context|no_valid_sources|artifact_write_failed|invalid_research_intake_config"}`. Phase 6.5 stage ledger. `completed` and `partial` mean Phase 7 may read `research-intake.md`; `failed` is blocking and `skipped` means continue with internal-only mutation analysis.
+- `research_intake_path`: null, or `[workspace]/research-intake.md`. Set only when the current run wrote a readable research intake artifact for the current target skill/domain.
+- `final_only_evaluation`: null, or `{"run_path":"runs/run_2026-04-03T14-30-00/","stage_id":"session_close_holdout_validation","status":"completed|skipped|failed|aborted","triggered_after_loop":true,"triggered_from":"session_close_step_0c","evaluated_experiment_id":N|null,"evaluated_experiment_ids":[0,2,4],"variant_results_ref":"runs/run_2026-04-03T14-30-00/session_close_holdout/variant_results.json","reason":"<resolved-exit-reason|null>"}`. This is the idempotence guard for the post-loop final-only evaluation stage.
+- When a new Phase 7 run starts and the stored `final_only_evaluation.run_path` is absent or differs from the new `state.json.current_run_path`, clear it back to null as part of the same run-start write. Only the active run's holdout marker should remain live in top-level state.
+- Write `final_only_evaluation` exactly once after the mutation loop exits for the active `current_run_path`. Intermediate mutation iterations must never write or modify this field.
+- If Session Close resumes and `final_only_evaluation.run_path` already matches `state.json.current_run_path` with `status = completed` or `status = skipped`, reuse the stored outcome instead of rerunning the final-only evaluation stage.
+- `evaluated_experiment_id` is the selected final candidate. Reopen `state.json.final_only_evaluation.variant_results_ref` and read `selected_candidate_summary` for the authoritative holdout score. If you need dev-side tuning diagnostics such as the dev score or holdout gap, read the sibling `optimization_metrics` section from the same artifact. Do not mirror those numeric outputs into top-level state.
+- `evaluated_experiment_ids` records the completed variant lineage that the final evaluation runner actually scored on the holdout split.
+- `variant_results_ref` points at the ordered per-variant holdout results artifact written by `Final Holdout Variant Runner`.
+- All machine-readable Session Close holdout outputs live only in that dedicated artifact. Top-level state keeps the idempotence guard plus reopen/ref metadata, not a second copy of holdout scores or per-variant rows.
 - When initializing any downstream phase or stage after Phase 1, read the canonical pattern and resolved strategy from the loaded run context first (`state.json.phase1_context.selected_skill_pattern` + `state.json.phase1_context.selected_eval_strategy_id`). If only the persisted Phase 1 output is available in the current context, read the same canonical IDs from the top-level `selected_skill_pattern` and `selected_eval_strategy_id` fields in `design-audit.md` and hydrate the loaded run context from that artifact before continuing. If the artifact has only the pattern, resolve the missing strategy deterministically through `Skill Pattern Eval Strategy > Pattern-to-Evaluation-Strategy Selector` before any downstream phase work.
 - When initializing any downstream phase or stage after Phase 1, read the canonical pattern from the loaded run context first (`state.json.phase1_context.selected_skill_pattern`).
 - If only the persisted Phase 1 output is available in the current context, read the same canonical ID from the top-level `selected_skill_pattern` field in `design-audit.md` and hydrate the loaded run context from that artifact before continuing.
@@ -45,45 +68,95 @@ Read when: Initialize Workspace or resuming a session.
 
 ### results.json
 ```json
-{"skill_name":"<name>","status":"running","current_experiment":0,"baseline_score":null,"best_score":null,"completion_cadence":null,"experiments":[],"eval_breakdown":[]}
+{"skill_name":"<name>","status":"running","current_experiment":0,"iteration_state":null,"baseline_score":null,"noise_floor":null,"best_score":null,"completion_cadence":null,"iteration_runs":[],"meta_learning_outcomes":[],"meta_learning_audit_records":[],"experiments":[],"eval_breakdown":[]}
 ```
+Result retrieval consumers must also preserve the root-level `noise_floor` when they serialize or return this payload. Do not strip the derived session baseline-variance summary from the returned payload.
+If the payload already stores `noise_floor`, return the stored object unchanged. Otherwise derive it from the Experiment 0 `baseline_trials[]` collection and publish it alongside `baseline_score` as the baseline-run summary for the session output.
+`noise_floor` is a derived summary over Experiment 0 `baseline_trials[]`, not a second authoritative baseline artifact. Preserve the stored summary when present, but treat `baseline_trials[]` as the source record that produced it.
+Result retrieval consumers must also preserve the root-level `iteration_state` object unchanged. Do not rebuild the eval-vs-mutate runner state from `current_experiment`, directory scans, or dashboard timers when the persisted handoff record is already present.
+Result retrieval consumers must also preserve the root-level `iteration_runs[]` ledger unchanged. Do not collapse it into `current_run_path`, derive it from directory scans, or drop the run-start metadata needed by production systems.
+`iteration_runs[]` is the append-only run-start ledger written by the single iteration-start trigger at Phase 7 start. Each row uses `Iteration Run Record Schema` and links one unique `run_id` to the target skill/version snapshot that baseline scoring will evaluate.
+Result retrieval consumers must also preserve the root-level `meta_learning_bootstrap_context` when it is present in the stored run output. Do not strip `curator_source`, `curator_version`, `transfer_parameters`, or `transfer_traceability` from the returned payload.
+If an older run output only stores `meta_learnings_path`, `target_context`, and `parsed_meta_learnings` at the root, synthesize `meta_learning_bootstrap_context` on retrieval so exports and report renderers can read one stable envelope.
+Result retrieval consumers may additionally derive `meta_learning_filter_index` for export/filter flows. This additive index should expose deduplicated `curator_sources[]`, `curator_versions[]`, `transfer_signatures[]`, and `filter_refs[]` copied from `meta_learning_bootstrap_context.transfer_traceability` without mutating the stored run payload.
+Result retrieval consumers must also preserve the root-level `meta_learning_outcomes[]` ledger unchanged when present. Do not drop per-run meta-learning effectiveness rows or rebuild them heuristically from version deltas.
+Each `meta_learning_outcomes[]` row must follow `Meta-Learning Outcome Record Schema` and stay keyed to the original `run_id` plus `meta_learning_id`.
+Result retrieval consumers must also preserve the root-level `meta_learning_audit_records[]` ledger unchanged when present. Do not collapse skipped rows away, rebuild applied/skip status heuristically from prose, or strip the evidence/helpfulness fields that explain why a curated rule did or did not steer the run.
+Each `meta_learning_audit_records[]` row must follow `Meta-Learning Audit Record Schema` and stay keyed to the original `run_id` plus `meta_learning_id`.
+Dashboard and human-readable campaign report renderers should render a dedicated `Curated Meta-Learnings` section from `meta_learning_audit.entries[]`, listing each rule's applied/skip status, evidence metrics, and helpfulness verdict so reviewers can audit transfer decisions without reopening raw markdown or artifacts.
 Result retrieval consumers must preserve experiment-level `decision_breakdown` when they serialize or return this payload. Do not strip the stored aggregation breakdown field from the returned payload.
 If the retrieval layer reads a nested stored evaluation result (for example iteration `eval_results.json` copied into an experiment payload), lift `decision_breakdown` directly from that stored record and return it unchanged. Never recompute `decision_breakdown` on the retrieval path from `eval_results[]` or via the scoring module.
+Result retrieval consumers must also preserve experiment-level `final_score` when they serialize or return this payload. Do not strip the published experiment-level score output from the returned payload.
+Publish `final_score` only from the adversarial holdout result. If the retrieval layer reads a nested stored evaluation result (for example iteration `eval_results.json` copied into an experiment payload), lift `final_score` directly from that stored holdout record and return the stored `final_score` field unchanged. When the reporting payload also includes `session_close_holdout.selected_candidate_summary` and it matches the experiment being serialized, use `selected_candidate_summary.holdout_score` as the published `final_score` percentage without reopening scoring internals. For mutation-time-only experiments with no matching holdout result, leave `final_score` null instead of backfilling it from `decision_breakdown.combined_score_pct`, `pass_rate`, or any other non-holdout score field.
 Result retrieval consumers must also preserve experiment-level `evaluation_metadata` when they serialize or return this payload. Do not strip the stored dataset/config payload from the returned payload.
 If the retrieval layer reads a nested stored evaluation result (for example iteration `eval_results.json` copied into an experiment payload), lift `evaluation_metadata` directly from that stored record and return the stored dataset/config payload unchanged. Keep the `adversarial_holdout` split metadata attached to its dataset/config record so load/resume consumers can verify the split boundary without reopening other files.
 The `adversarial_holdout` split metadata stays attached to its dataset/config record.
 If the stored metadata includes `config.mutation_refinement_split_datasets[]` (`mutation_refinement_split_datasets[]`), retrieval consumers should derive `evaluation_metadata_validation` from that snapshot while keeping the stored `evaluation_metadata` payload unchanged. Flag invalid metadata whenever `adversarial_holdout` shares any `input_id` with a mutation/refinement split or omits one of those split IDs from `split_metadata.separate_from`.
 If the stored metadata includes `config.mutation_stage_split_access_policy`, load/resume consumers should hydrate that exact object into the active Phase 7 dataset-read gate instead of rebuilding a looser policy from prose or defaults.
-Result retrieval consumers must also preserve experiment-level `eval_results` when they serialize or return this payload. Do not strip `pass_fail`, `evidence`, or `supporting_items` from the returned verdicts.
-If the retrieval layer reads a nested stored evaluation result (for example iteration `eval_results.json` copied into an experiment payload), lift `eval_results` directly from that stored record and return the stored verdict objects unchanged so each `pass_fail` decision stays attached to its own `evidence[]` and `supporting_items[]` for downstream rendering.
+Result retrieval consumers must also preserve experiment-level `eval_results` when they serialize or return this payload. Do not strip `pass_fail`, `evidence`, `supporting_items`, or `multi_judge` from the returned verdicts.
+If the retrieval layer reads a nested stored evaluation result (for example iteration `eval_results.json` copied into an experiment payload), lift `eval_results` directly from that stored record and return the stored verdict objects unchanged so each `pass_fail` decision stays attached to its own `evidence[]`, `supporting_items[]`, and optional `multi_judge` consensus block for downstream rendering.
+Result retrieval consumers must also preserve experiment-level `validation_results` when they serialize or return this payload.
+If the retrieval layer reads a nested stored evaluation result (for example iteration `eval_results.json` copied into an experiment payload), lift `validation_results` directly from that stored record and return the stored `validation_results` field unchanged.
+Keep fold-level TPR/TNR outputs in `phase6_dev_fold_metrics` instead of flattening them into the aggregate mean/range fields.
+At the root of the serialized payload, keep `final_only_evaluation` as the idempotence/ref object only, and expose the dedicated `session_close_holdout` artifact whenever final-only holdout validation resolves, including failed or aborted runs with empty `variant_results[]`. `session_close_holdout.variant_results[]` carries one final-only adversarial holdout evaluation record per completed variant plus the ordered lineage ids and `selected_candidate_summary`. Emit intermediate dev-side tuning numbers in the sibling `session_close_holdout.optimization_metrics` section instead of mixing them into the authoritative final-candidate summary. If an older completion/reporting payload still stores those holdout rows via top-level `evaluated_experiment_ids`, `selected_variant_version`, `selected_experiment_id`, `selected_candidate_summary`, `variant_results`, or a failure-only `final_only_evaluation.reason` field, synthesize the same `session_close_holdout` object on retrieval instead of dropping the per-variant holdout lineage or its failure artifact. Do not mirror that machine-readable holdout detail back into `final_only_evaluation`; keep that object as the ref/idempotence surface only.
+Completion and report UIs should render a dedicated `Final Holdout Results` section from `session_close_holdout`, including selected-candidate summary cards plus one visible row/card per `variant_results[]` entry so every completed variant's holdout outcome is inspectable without reopening raw artifacts.
 Result retrieval consumers may additionally derive `judge_verdict_report_entries` for dashboards or review UIs, but that field is a report-facing view, not authoritative storage.
 Each `judge_verdict_report_entries[]` item must expose the same verdict through reviewer-readable fields: `verdict_label`, `reasoning_trace`, and `evidence_attachments[]` with a stable `reference` plus a human-readable `snippet`.
 Each `judge_verdict_report_entries[]` item should also expose an `evidence_block` object so every verdict carries a structured inspection payload. `evidence_block.items[]` must preserve the stable evidence `reference` plus either `inline_content` (for excerpts/metrics rendered directly in the payload) or `artifact_reference` (for direct artifact pointers that let a human inspect the supporting basis at the source).
+If a verdict was produced by multiple independent judges, preserve the stored `multi_judge` block on the report entry too. Do not collapse the panel into one opaque verdict string on the retrieval path.
 Dashboard and report renderers should render `reasoning_trace` inline in the report body for the same verdict item so reviewers can inspect the rationale without opening raw logs.
 Result retrieval consumers may also derive `review_handoff` for downstream review flows. This handoff payload is additive, not authoritative storage.
+When `requires_human_spot_check = true`, result retrieval consumers should also derive `pending_human_spot_check_task` on the serialized experiment payload. This is the linked pending calibration task for the flagged experiment and must carry the resolved queue-time `sample_count`.
+Result retrieval consumers must also preserve experiment-level `human_review_judgments` when they serialize or return this payload. Do not strip completed human review records from the returned payload.
+If the retrieval layer reads a nested stored evaluation result (for example iteration `eval_results.json` copied into an experiment payload), lift `human_review_judgments` directly from that stored record and return the stored judgments unchanged. Never recompute `agreement`, `decision_type`, reviewer identity, or review timestamps from session-log fragments on the retrieval path.
 `review_handoff` should package the finalized review inputs in one object: `experiment_id`, `final_decision`, the stored `judge_verdict_report_entries[]`, the stored `decision_breakdown`, the stored `decision_explanation`, the stored `completion_cadence`, the stored `requires_human_spot_check`, and a derived `human_spot_check_task` when the cadence gate is active.
 Carry `review_handoff.requires_human_spot_check` through from the finalized experiment record unchanged so downstream review flows can detect and enforce the required human spot-check without replaying cadence history.
 When `review_handoff.requires_human_spot_check = true`, derive `review_handoff.human_spot_check_task` from the stored `completion_cadence` plus the resolved calibration config. Copy the resolved `sample_count` onto the task payload instead of forcing downstream queues to recompute it from cadence state or config defaults. In other words, `review_handoff.human_spot_check_task.sample_count` is the authoritative queue-time value for `N`.
+Carry the same selected samples and eligibility snapshot onto `review_handoff.human_spot_check_task` that you expose on `pending_human_spot_check_task`. In particular, `review_handoff.human_spot_check_task.evaluation_samples` and `review_handoff.human_spot_check_task.evaluation_sample_eligibility` must mirror the experiment-level pending task so reviewer-facing queues can inspect the exact chosen `(eval, fixture)` set without reopening the experiment payload.
+Copy the same derived task into `pending_human_spot_check_task` on the serialized experiment payload. `review_handoff.human_spot_check_task` should mirror that linked experiment-level task instead of resolving a second copy with potentially different queue-time metadata.
 Result retrieval consumers must also preserve experiment-level `decision_explanation` when they serialize or return this payload. Do not strip the stored explanation field from the returned payload.
 If the retrieval layer reads a nested stored evaluation result (for example iteration `eval_results.json` copied into an experiment payload), lift `decision_explanation` directly from that stored record and return the stored `decision_explanation` field unchanged. Never recompute `decision_explanation` on the retrieval path from `decision_breakdown`, `eval_results[]`, or via the scoring module.
+Result retrieval consumers must also preserve experiment-level `mutation_handoff` when they serialize or return this payload. Do not strip the stored eval-to-mutate handoff block from the returned payload.
+If the retrieval layer reads a nested stored evaluation result (for example iteration `eval_results.json` copied into an experiment payload), lift `mutation_handoff` directly from that stored record and return the stored `mutation_handoff` field unchanged. Never recompute `mutation_handoff` on the retrieval path from `decision_breakdown`, `decision_explanation`, `eval_results[]`, or mutation-registry helpers.
 Result retrieval consumers must also preserve experiment-level `requires_human_spot_check` when they serialize or return this payload. Do not strip the stored trust-checkpoint flag from the returned payload.
 If the retrieval layer reads a nested stored evaluation result (for example iteration `eval_results.json` copied into an experiment payload), lift `requires_human_spot_check` directly from that stored record and return it unchanged. Never recompute `requires_human_spot_check` on the retrieval path from `completion_cadence` or experiment order.
 Result retrieval consumers must also preserve the persisted `completion_cadence` counter at both the root payload and experiment level. Do not rebuild cadence position from array order or recompute it from filtered experiment lists on the retrieval path.
 If the retrieval layer reads a nested stored evaluation result (for example iteration `eval_results.json` copied into an experiment payload), lift `completion_cadence` directly from that stored record and return it unchanged.
+Result retrieval consumers must also preserve experiment-level `baseline_trials` when they serialize or return this payload. Do not collapse the three unchanged-skill baseline executions into one summarized blob on the retrieval path.
+Treat `baseline_trials[]` as the baseline phase output collection for Experiment 0. Derived statistics such as mean baseline score, standard deviation, and noise floor are summaries computed from that collection, not replacements for it.
+If the retrieval layer reads a nested stored evaluation result (for example iteration `eval_results.json` copied into an experiment payload), lift `baseline_trials` directly from that stored record and return those rows unchanged apart from filling any missing `trial_index` / `trial_id` / `run_index` fallback identifiers.
 
 Each experiment in `experiments[]`:
 ```json
-{"id":N,"input_set_id":"phase4-dev-7f3c91ad","input_set_ref":"input-sets.json#phase4-dev-7f3c91ad","input_ids":["phase4-dev-7f3c91ad-I03","phase4-dev-7f3c91ad-I05","phase4-dev-7f3c91ad-I08"],"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}],"evaluation_metadata":{"dataset":{"input_set_id":"phase4-adversarial_holdout-91ab77ce","input_set_ref":"input-sets.json#phase4-adversarial_holdout-91ab77ce","input_ids":["phase4-adversarial_holdout-91ab77ce-I01"],"split_metadata":{"split_id":"adversarial_holdout","display_label":"Adversarial Holdout","evaluation_only":true,"hidden_until":"session_close","used_for":["session_close_holdout_validation"],"blocked_from":["phase5_judge_examples","phase6_judge_refinement","phase7_mutation_scoring","phase7_mutation_analysis"],"separate_from":["train","dev","test"]}},"config":{"scoring_scope":"session_close_holdout_validation","freeze_split_boundaries":true,"require_same_split_metadata_on_resume":true,"human_spot_check_calibration":{"sample_count":2},"mutation_refinement_split_datasets":[{"split_id":"train","input_set_id":"phase4-train-42be3101","input_ids":["phase4-train-42be3101-I01"]},{"split_id":"dev","input_set_id":"phase4-dev-7f3c91ad","input_ids":["phase4-dev-7f3c91ad-I03","phase4-dev-7f3c91ad-I05"]},{"split_id":"test","input_set_id":"phase4-test-6ca1b7d2","input_ids":["phase4-test-6ca1b7d2-I02"]}]}},"evaluation_metadata_validation":{"status":"valid","checked_split_ids":["train","dev","test"],"overlap_count":0,"issues":[]},"eval_results":[{"eval":"E1","pass_fail":"pass","reasoning_trace":"1. Criterion check: the required gotchas section is present. 2. Evidence: the output contains a gotchas heading and 3 specific warnings. 3. Verdict link: because the rubric requires a gotchas section with concrete warnings, this passes.","evidence":[{"kind":"output_excerpt","source":"skill_output","locator":"input_id:phase4-dev-7f3c91ad-I03 output lines 12-18","excerpt":"## Gotchas\\n- Never run rm -rf without checking the target path.","metric":null,"artifact_ref":null},{"kind":"metric","source":"scoring_metric","locator":"warnings_found","excerpt":"3 concrete warnings found in the gotchas section.","metric":{"name":"warnings_found","value":3,"unit":"count"},"artifact_ref":null}],"supporting_items":[{"stage":"criterion_check","decision":"required gotchas section is present","outcome":"met","evidence_refs":[0]},{"stage":"evidence_check","decision":"gotchas section includes 3 concrete warnings","outcome":"met","evidence_refs":[1]},{"stage":"verdict_link","decision":"the rubric passes when the gotchas section and concrete warnings are both present","outcome":"supports_pass","evidence_refs":[0,1]}],"weight":1.0,"weight_source":"code_eval_fixed","weighted_points":1.0,"normalized_contribution":0.25},{"eval":"E2","pass_fail":"fail","reasoning_trace":"1. Criterion check: the disclosure instruction is missing. 2. Evidence: no 'Read when:' pointer appears and the disclosure section is absent. 3. Verdict link: because the rubric requires explicit disclosure guidance, this fails.","evidence":[{"kind":"output_excerpt","source":"skill_output","locator":"input_id:phase4-dev-7f3c91ad-I03 output lines 1-9","excerpt":"No 'Read when:' pointer or disclosure section appears in the output.","metric":null,"artifact_ref":null},{"kind":"artifact_ref","source":"workspace_artifact","locator":"runs/run_2026-04-10T10-00-00/iteration_000/eval_results.json","excerpt":"Stored verdict artifact for replay and dashboard inspection.","metric":null,"artifact_ref":{"path":"runs/run_2026-04-10T10-00-00/iteration_000/eval_results.json","label":"baseline eval results"}}],"supporting_items":[{"stage":"criterion_check","decision":"disclosure guidance is missing","outcome":"not_met","evidence_refs":[0]},{"stage":"verdict_link","decision":"the rubric fails when disclosure guidance is absent","outcome":"supports_fail","evidence_refs":[0,1]}],"weight":0.9,"weight_source":"phase_6_validation_average","weighted_points":0.0,"normalized_contribution":0.0}],"decision_breakdown":{"components":[{"eval":"E1","pass_fail":"pass","weight":1.0,"weight_source":"code_eval_fixed","weighted_points":1.0,"normalized_contribution":0.213},{"eval":"E2","pass_fail":"fail","weight":0.9,"weight_source":"phase_6_validation_average","weighted_points":0.0,"normalized_contribution":0.0}],"formula":"combined_score = weighted_points / total_weight","weighted_points":3.7,"total_weight":4.7,"combined_score":0.787,"combined_score_pct":78.7,"threshold":0.8,"proposed_decision":"discard"},"decision_explanation":{"final_decision":"discard","summary":"E2 withheld 19.1% of the available score, while E1 added 21.3%; the mutation still finished below threshold.","strongest_outcomes":[{"eval":"E2","pass_fail":"fail","impact":"supports_discard","impact_magnitude":0.191,"impact_basis":"missed_weight_share","summary":"The failed high-weight eval withheld 19.1% of the available score."},{"eval":"E1","pass_fail":"pass","impact":"supports_keep","impact_magnitude":0.213,"impact_basis":"normalized_contribution","summary":"The strongest pass added 21.3% toward keep, but the experiment still missed threshold."}]},"regression_check":null,"discard_autopsy":null,"requires_human_spot_check":false}
+{"id":N,"input_set_id":"phase4-dev-7f3c91ad","input_set_ref":"input-sets.json#phase4-dev-7f3c91ad","input_ids":["phase4-dev-7f3c91ad-I03","phase4-dev-7f3c91ad-I05","phase4-dev-7f3c91ad-I08"],"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","final_score":78.7,"description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}],"baseline_trials":[],"evaluation_metadata":{"dataset":{"input_set_id":"phase4-adversarial_holdout-91ab77ce","input_set_ref":"input-sets.json#phase4-adversarial_holdout-91ab77ce","input_ids":["phase4-adversarial_holdout-91ab77ce-I01"],"split_metadata":{"split_id":"adversarial_holdout","display_label":"Adversarial Holdout","evaluation_only":true,"hidden_until":"session_close","used_for":["session_close_holdout_validation"],"blocked_from":["phase5_judge_examples","phase6_judge_refinement","phase7_mutation_scoring","phase7_mutation_analysis"],"separate_from":["train","dev","test"]}},"config":{"scoring_scope":"session_close_holdout_validation","freeze_split_boundaries":true,"require_same_split_metadata_on_resume":true,"human_spot_check_calibration":{"sample_count":2},"mutation_refinement_split_datasets":[{"split_id":"train","input_set_id":"phase4-train-42be3101","input_ids":["phase4-train-42be3101-I01"]},{"split_id":"dev","input_set_id":"phase4-dev-7f3c91ad","input_ids":["phase4-dev-7f3c91ad-I03","phase4-dev-7f3c91ad-I05"]},{"split_id":"test","input_set_id":"phase4-test-6ca1b7d2","input_ids":["phase4-test-6ca1b7d2-I02"]}]}},"evaluation_metadata_validation":{"status":"valid","checked_split_ids":["train","dev","test"],"overlap_count":0,"issues":[]},"eval_results":[{"eval":"E1","pass_fail":"pass","reasoning_trace":"1. Criterion check: the required gotchas section is present. 2. Evidence: the output contains a gotchas heading and 3 specific warnings. 3. Verdict link: because the rubric requires a gotchas section with concrete warnings, this passes.","evidence":[{"kind":"output_excerpt","source":"skill_output","locator":"input_id:phase4-dev-7f3c91ad-I03 output lines 12-18","excerpt":"## Gotchas\\n- Never run rm -rf without checking the target path.","metric":null,"artifact_ref":null},{"kind":"metric","source":"scoring_metric","locator":"warnings_found","excerpt":"3 concrete warnings found in the gotchas section.","metric":{"name":"warnings_found","value":3,"unit":"count"},"artifact_ref":null}],"supporting_items":[{"stage":"criterion_check","decision":"required gotchas section is present","outcome":"met","evidence_refs":[0]},{"stage":"evidence_check","decision":"gotchas section includes 3 concrete warnings","outcome":"met","evidence_refs":[1]},{"stage":"verdict_link","decision":"the rubric passes when the gotchas section and concrete warnings are both present","outcome":"supports_pass","evidence_refs":[0,1]}],"weight":1.0,"weight_source":"code_eval_fixed","weighted_points":1.0,"normalized_contribution":0.25},{"eval":"E2","pass_fail":"fail","reasoning_trace":"1. Criterion check: the disclosure instruction is missing. 2. Evidence: no 'Read when:' pointer appears and the disclosure section is absent. 3. Verdict link: because the rubric requires explicit disclosure guidance, this fails.","evidence":[{"kind":"output_excerpt","source":"skill_output","locator":"input_id:phase4-dev-7f3c91ad-I03 output lines 1-9","excerpt":"No 'Read when:' pointer or disclosure section appears in the output.","metric":null,"artifact_ref":null},{"kind":"artifact_ref","source":"workspace_artifact","locator":"runs/run_2026-04-10T10-00-00/iteration_000/eval_results.json","excerpt":"Stored verdict artifact for replay and dashboard inspection.","metric":null,"artifact_ref":{"path":"runs/run_2026-04-10T10-00-00/iteration_000/eval_results.json","label":"baseline eval results"}}],"supporting_items":[{"stage":"criterion_check","decision":"disclosure guidance is missing","outcome":"not_met","evidence_refs":[0]},{"stage":"verdict_link","decision":"the rubric fails when disclosure guidance is absent","outcome":"supports_fail","evidence_refs":[0,1]}],"weight":0.9,"weight_source":"phase_6_validation_average","weighted_points":0.0,"normalized_contribution":0.0}],"decision_breakdown":{"components":[{"eval":"E1","pass_fail":"pass","weight":1.0,"weight_source":"code_eval_fixed","weighted_points":1.0,"normalized_contribution":0.213},{"eval":"E2","pass_fail":"fail","weight":0.9,"weight_source":"phase_6_validation_average","weighted_points":0.0,"normalized_contribution":0.0}],"formula":"combined_score = weighted_points / total_weight","weighted_points":3.7,"total_weight":4.7,"combined_score":0.787,"combined_score_pct":78.7,"threshold":0.8,"proposed_decision":"discard"},"decision_explanation":{"final_decision":"discard","summary":"E2 withheld 19.1% of the available score, while E1 added 21.3%; the mutation still finished below threshold.","strongest_outcomes":[{"eval":"E2","pass_fail":"fail","impact":"supports_discard","impact_magnitude":0.191,"impact_basis":"missed_weight_share","summary":"The failed high-weight eval withheld 19.1% of the available score."},{"eval":"E1","pass_fail":"pass","impact":"supports_keep","impact_magnitude":0.213,"impact_basis":"normalized_contribution","summary":"The strongest pass added 21.3% toward keep, but the experiment still missed threshold."}]},"regression_check":null,"discard_autopsy":null,"requires_human_spot_check":false,"pending_human_spot_check_task":null}
 ```
+- For baseline noise measurement, persist the three unchanged-skill executions inside `baseline_trials[]` on Experiment 0 instead of overwriting one shared baseline slot.
+- Baseline trial row example: `{"trial_index":1,"trial_id":"baseline-trial-001","run_index":1,"score":72.3,"pass_rate":72.3,"timestamps":{"started_at":"2026-04-11T09:00:00Z","completed_at":"2026-04-11T09:00:08Z"},"raw_outputs":[{"input_id":"phase4-dev-7f3c91ad-I03","output_text":"Trial 1 output for fixture I03"}],"trial_metadata":{"requested_operation":"baseline_scoring","requested_split_id":"dev","input_set_id":"phase4-dev-7f3c91ad","input_set_ref":"input-sets.json#phase4-dev-7f3c91ad","input_ids":["phase4-dev-7f3c91ad-I03"]}}`.
+- When Phase 7 output is surfaced to a human or downstream consumer, expose `baseline_trials[]` as the primary baseline artifact and compute mean/noise-floor summaries from those rows instead of replacing them with one aggregated baseline record.
+- Session Close holdout outputs do not belong in `results.json.experiments[]` or duplicated top-level state score fields. That array stays mutation-time only (`baseline`, `keep`, `discard` on the dev-scored run corpus). Persist final holdout outputs separately in `session_close_holdout/variant_results.json` and reopen them through `state.json.final_only_evaluation.variant_results_ref`.
+- Serialized reporting payloads should expose those per-variant holdout results through root-level `session_close_holdout.variant_results[]`, not by copying them into `experiments[]` or re-expanding `final_only_evaluation`.
+- Mutation-time score cards, running-best selection, and same-run version comparisons must derive from the mutation-time `results.json.experiments[]` corpus only. Never compute those mutation-time summaries by reopening `session_close_holdout/variant_results.json`, `selected_candidate_summary`, or any other holdout-only result structure.
 - `evaluation_metadata`: stored dataset/config payload for this experiment's evaluation run. Preserve it unchanged on write and retrieval so split-aware consumers can inspect the scoring corpus and any split-boundary rules without reopening workspace files. When this payload records `adversarial_holdout`, keep the split metadata attached to the same record.
-- `human_spot_check_calibration.sample_count`: configurable calibration sample-count setting `N` stored inside `evaluation_metadata.config.human_spot_check_calibration.sample_count`. Default to `2` when the config is missing. Validation: `sample_count` must be a positive integer (`>= 1`). Every 3rd experiment surfaces `sample_count` random `(eval, fixture)` pairs from the most recent finalized experiment. Session Close uses `max(sample_count, 5)` so the independent closeout calibration never drops below the 5-sample minimum.
+- `human_spot_check_calibration.sample_count`: configurable calibration sample-count setting `N` stored inside `evaluation_metadata.config.human_spot_check_calibration.sample_count`. Default to `2` when the config is missing. Validation: `sample_count` must be a positive integer (`>= 1`). Every 3rd experiment surfaces up to `sample_count` reviewable `(eval, fixture)` pairs from the most recent finalized experiment. When the eligible pool is larger than `sample_count`, select deterministically by stable sample identity unless `evaluation_metadata.config.human_spot_check_calibration.selection_mode = randomized` explicitly opts into backend randomization without replacement. Session Close uses `max(sample_count, 5)` so the independent closeout calibration never drops below the 5-sample minimum.
 - `evaluation_metadata_validation`: derived retrieval-time validation summary for `adversarial_holdout` metadata. Surface `status`, `checked_split_ids`, `overlap_count`, and `issues[]` without mutating the stored `evaluation_metadata`. Any shared `input_id` between holdout and `config.mutation_refinement_split_datasets[]` is invalid metadata and must be flagged here.
 - `eval_results`: per-eval verdicts for this experiment. Each decision must include `eval`, `pass_fail`, `category` (from eval-suite.md: `structural`, `task-completion`, or `quality`), `reasoning_trace`, `evidence`, `supporting_items`, `weight`, `weight_source`, `weighted_points`, and `normalized_contribution`. `reasoning_trace` is always a concise ordered explanation: criterion check, evidence, then verdict link. `evidence` is an array of structured evidence objects, not free-form strings; use it to preserve cited inputs, output excerpts, metrics, and artifact references in a replayable form. `supporting_items` captures the concrete intermediate judgment calls and maps each one back to the exact `evidence[]` entries it used. Used by regression checks to compare across experiments.
 - `judge_verdict_report_entries`: derived report-facing view of `eval_results`. Each entry repeats the stored verdict data and adds `verdict_label`, an `evidence_block`, and `evidence_attachments[]`. `evidence_block.items[]` is the structured inspection surface for that verdict: every item keeps a stable evidence `reference` plus either `inline_content` or an `artifact_reference` that points directly to the supporting artifact. `evidence_attachments[]` remains the reviewer-friendly attachment list with stable `reference` plus readable `snippet`. Render the same entry's `reasoning_trace` inline in the report body so the verdict rationale stays inspectable without opening raw logs. Use this for dashboard cards, external reports, or production review surfaces; do not write it back as the source of truth.
+- `pending_human_spot_check_task`: derived experiment-level pending calibration task. Populate it when `requires_human_spot_check = true` using the Human Spot-Check Task Schema and the resolved queue-time `sample_count`; otherwise return `null`. This is the linked task object that downstream queueing or audit consumers can inspect without opening `review_handoff`.
+- `pending_human_spot_check_task.evaluation_samples`: selected pending calibration samples. Start from the filtered reviewable pool, then choose up to `sample_count` backend-selected samples for the queued task. By default the backend selection is deterministic over stable sample identity; when `evaluation_metadata.config.human_spot_check_calibration.selection_mode = randomized`, select without replacement from the eligible pool instead. Exclude verdicts that fail the reviewability checks instead of surfacing them for calibration.
+- `pending_human_spot_check_task.evaluation_sample_eligibility`: backend eligibility snapshot for the pending calibration pool. Record `status` (`ready`, `underfilled`, or `empty`), the requested vs eligible sample counts, and `excluded_samples[]` with reason codes so downstream review flows can explain why a queue is short or empty without re-running eligibility logic.
+- `human_review_judgments`: completed human reviews for surfaced calibration samples tied to this experiment. Each item uses `Human Review Judgment Schema`. Preserve the stored decision, reviewer identity, timestamps, and audit metadata unchanged on retrieval.
+- `human_judgment_comparison_dataset`: aligned system-vs-human judgment dataset keyed by stable judgment target. Preserve the matched `system_judgment`, `human_judgment`, and `comparison` summary per target so downstream trust consumers do not re-match review rows from scratch.
+- `human_judgment_calibration_result`: derived calibration summary for the aligned review set. Compute `human_judgment_calibration_result` from `human_judgment_comparison_dataset`.
+- `counted_reviews`: calibration denominator inside `human_judgment_calibration_result`. Count only paired targets whose `human_judgment.decision_type` is `confirm` or `override`.
+- `excluded_from_agreement_rate[]`: audit trail inside `human_judgment_calibration_result` for aligned targets that stayed out of the denominator. Preserve the target descriptor plus the exclusion reason instead of silently dropping `skip`, `not_reviewable`, or missing-system rows.
 - `review_handoff`: derived downstream-review payload. Package `experiment_id`, `final_decision`, `judge_verdict_report_entries`, `decision_breakdown`, `decision_explanation`, `completion_cadence`, the stored trust gate in `review_handoff.requires_human_spot_check`, and `review_handoff.human_spot_check_task` when a cadence-triggered calibration pause is pending. Use the task payload to queue the human spot-check without recomputing `sample_count` from config.
+- `review_handoff.human_spot_check_task.evaluation_samples`: selected pending calibration samples mirrored from `pending_human_spot_check_task`. Reviewer-facing queues should read this exact backend-selected list instead of deriving a second sample set.
+- `review_handoff.human_spot_check_task.evaluation_sample_eligibility`: mirrored eligibility snapshot for the reviewer-facing task payload. Preserve `status`, requested vs eligible sample counts, and `excluded_samples[]` unchanged so review consumers can explain underfilled or empty queues without replaying selection.
+- `final_score`: published experiment-level score output sourced only from the adversarial holdout result. Preserve the stored holdout `final_score` when present. If the selected candidate summary in `session_close_holdout` matches this experiment, publish `selected_candidate_summary.holdout_score` as a percentage. For mutation-time-only rows with no holdout match, leave `final_score` null instead of backfilling it from `decision_breakdown.combined_score_pct`, `pass_rate`, or any other non-holdout score.
 - `weight_source`: where the eval's weight came from. Use `code_eval_fixed`, `phase_6_validation_average`, `mini_mode_code_default`, or `mini_mode_agent_discount`.
 - `decision_breakdown`: aggregate scoring record used for keep/discard. `components[]` is the structured aggregation breakdown field: an ordered, self-contained copy of the exact eval inputs that rolled into the keep/discard math. `score` mirrors `weighted_points` and `max_score` mirrors `total_weight` for dashboard compatibility.
 - `decision_explanation`: structured explanation mapping derived from `decision_breakdown` plus the final keep/discard. Store `final_decision`, a short `summary`, and ordered `strongest_outcomes[]` entries that identify the strongest contributing eval outcomes and their impact on the final keep/discard.
+- `mutation_handoff`: canonical eval-to-mutate handoff block. Store `normalized_evaluation_scores`, `failure_reasons[]`, and ordered `mutation_targets[]` in the exact structure Phase 7 step 2a reads, so the mutate phase does not have to reverse-engineer target priorities from prose.
 - `requires_human_spot_check`: boolean finalized-only trust checkpoint flag. Set to `true` when the post-increment `completion_cadence.completed_experiments` value for this finalized experiment is divisible by 3 (3, 6, 9, ...); otherwise `false`.
 - `regression_check`: null (no check run), or `{"passed":true,"details":"..."}`, or `{"passed":false,"regressions":[{"experiment":1,"eval":"E2","was":"pass","now":"fail","detail":"..."}]}`
 - `discard_autopsy`: null (experiment kept or baseline), or `{"classification":"wrong_target|wrong_params|wrong_type","reasoning":"1-sentence explanation"}`. Set after discard in Phase 7 step 2f. See `Discard Autopsy Heuristics` section.
@@ -91,6 +164,74 @@ Each experiment in `experiments[]`:
 - `input_set_ref`: exact registry pointer for the scoring set. Format: `input-sets.json#<set_id>`.
 - `input_ids`: stable input IDs actually scored for this experiment, stored in finalized set order. Version comparisons are only valid when both `input_set_id` and the full `input_ids` list match across experiments.
 - `completion_cadence`: finalized snapshot of the cadence counter for this experiment. Copy the active root counter into the experiment record only after the experiment reaches its final state so production systems can tell which completed-experiment slot this version occupied without replaying the run.
+- `baseline_trials`: baseline-only array of unchanged-skill execution records. Preserve one row per baseline invocation with stable `trial_index` / `trial_id` / `run_index` identifiers so repeated baseline evaluations do not overwrite each other. Each row should also preserve `timestamps`, `raw_outputs[]`, and `trial_metadata` so later comparisons can inspect what the unchanged skill produced, when it ran, and which dev input set backed the sample.
+
+### Meta-Learning Outcome Record Schema
+
+Persist run-level meta-learning effectiveness rows in `results.json.meta_learning_outcomes[]` for same-skill version comparisons. This ledger is append-only per evaluated meta-learning event and is designed for both individual replay and production aggregation.
+
+```json
+{"schema_version":1,"outcome_id":"mlo-run_2026-04-11T09-00-00-ML-2026-04-11-001","run_id":"run_2026-04-11T09-00-00","meta_learning_id":"ML-2026-04-11-001","quality_signals":{"before":{"version_label":"v2","experiment_id":2,"signal_score":78.2,"signal_label":"directional_improvement"},"after":{"version_label":"v3","experiment_id":3,"signal_score":84.9,"signal_label":"validated_improvement"},"delta":6.7},"helpful":{"score":0.82,"label":"helpful"},"evaluation_criteria_snapshot":{"schema_version":1,"criteria_id":"meta_learning_effectiveness_v1","criteria_labels":["task_completion","quality","regression_safety"],"aggregation_formula":"weighted_delta_plus_regression_guard","weights":{"task_completion":0.4,"quality":0.4,"regression_safety":0.2}},"timestamps":{"evaluated_at":"2026-04-11T19:22:03Z","recorded_at":"2026-04-11T19:22:04Z"}}
+```
+
+- `schema_version`: starts at `1` for the canonical persisted outcome row contract. Future changes must be additive or version-bumped.
+- `outcome_id`: stable unique row ID. Recommended format: `mlo-<run_id>-<meta_learning_id>`.
+- `run_id`: Phase 7 iteration-run identifier that produced this outcome.
+- `meta_learning_id`: canonical curated rule ID from `meta-learnings.md` (`ML-YYYY-MM-DD-NNN`).
+- `quality_signals.before` and `quality_signals.after`: same-skill version quality snapshots used for this outcome judgment.
+- `quality_signals.delta`: scalar `after.signal_score - before.signal_score` in the same units as `signal_score`.
+- `quality_signals.*.version_label`: human-facing version tag (`v0`, `v1`, ... ) from the same lineage.
+- `quality_signals.*.experiment_id`: numeric experiment ID backing the version snapshot in this run.
+- `quality_signals.*.signal_score`: normalized quality signal used by this outcome evaluation (for example holdout final score or selected canonical quality metric).
+- `quality_signals.*.signal_label`: one of `validated_improvement`, `directional_improvement`, `flat`, `directional_regression`, or `validated_regression`.
+- `helpful.score`: normalized helpfulness score in `[0, 1]`.
+- `helpful.label`: one of `helpful`, `neutral`, or `not_helpful`.
+- `evaluation_criteria_snapshot`: frozen scoring criteria payload used to produce this row so historical rows remain replayable after later criteria changes.
+- `evaluation_criteria_snapshot.schema_version`: criteria snapshot contract version (starts at `1`).
+- `evaluation_criteria_snapshot.criteria_id`: stable criteria bundle identifier (for example `meta_learning_effectiveness_v1`).
+- `evaluation_criteria_snapshot.criteria_labels[]`: ordered criterion labels evaluated for this row.
+- `evaluation_criteria_snapshot.aggregation_formula`: deterministic aggregation formula identifier or expression.
+- `evaluation_criteria_snapshot.weights`: optional criterion weights keyed by `criteria_labels[]`.
+- `evaluation_criteria_snapshot.helpfulness_mode`: `binary` or `graded`; controls how captured signal deltas map onto helpfulness.
+- `evaluation_criteria_snapshot.helpfulness_thresholds`: delta thresholds (`helpful_min_delta`, `not_helpful_max_delta`, optional `noise_floor_threshold`) used by the helpfulness evaluator.
+- `evaluation_criteria_snapshot.label_score_bands`: score cutoffs (`helpful_min_score`, `not_helpful_max_score`) used to map graded scores to helpfulness labels.
+- `timestamps.evaluated_at`: when before/after comparison and helpfulness were computed.
+- `timestamps.recorded_at`: when this row was persisted to `results.json.meta_learning_outcomes[]`.
+- Capture timing: after an experiment is scored, if that experiment applied one or more actionable meta-learning IDs, append one row per applied ID for the active `run_id`.
+- Before/after attachment rule: for each appended row, set `quality_signals.before` from the previous experiment snapshot in the same run and `quality_signals.after` from the current experiment snapshot so every applied meta-learning carries an explicit within-run before/after trace.
+- Configured-criteria evaluator: convert `quality_signals.delta` into `helpful.score` + `helpful.label` using the frozen `evaluation_criteria_snapshot` so each meta-learning application is replayable under the exact binary/graded thresholds used at write time.
+
+### Meta-Learning Audit Record Schema
+
+Persist run-level curation audit rows in `results.json.meta_learning_audit_records[]` so dashboards, humans, and production systems can inspect every curated meta-learning considered in the current run, including rules that were skipped instead of applied. This ledger is one row per `(run_id, meta_learning_id)` and complements the per-application `meta_learning_outcomes[]` ledger instead of replacing it.
+
+```json
+{"schema_version":1,"audit_record_id":"mla-run_2026-04-11T09-00-00-ML-2026-04-11-001","run_id":"run_2026-04-11T09-00-00","meta_learning_id":"ML-2026-04-11-001","title":"Subtractive cleanup after additive streaks","consideration_status":"applied","consideration_bucket":"actionable","skip_reason":null,"evidence_metrics":{"supporting_evidence_count":2,"supporting_case_count":1,"source_kinds":["prior_campaign","reference_skill"],"confidence":"medium","precedence":"high"},"application_summary":{"application_count":2,"applied_experiment_ids":[2,3],"latest_outcome_id":"mlo-run_2026-04-11T09-00-00-ML-2026-04-11-001-exp3"},"helpfulness_verdict":{"status":"evaluated","score":0.82,"label":"helpful"}}
+```
+
+- `schema_version`: starts at `1` for the canonical persisted audit-row contract.
+- `audit_record_id`: stable unique row ID. Recommended format: `mla-<run_id>-<meta_learning_id>`.
+- `run_id`: Phase 7 iteration-run identifier whose curation pass considered this meta-learning.
+- `meta_learning_id`: canonical curated rule ID from `meta-learnings.md` (`ML-YYYY-MM-DD-NNN`).
+- `title`: human-facing rule title copied from the parsed curated entry when available.
+- `consideration_status`: `applied` when the run emitted one or more `meta_learning_outcomes[]` rows for this rule, otherwise `skipped`.
+- `consideration_bucket`: the parsed-bundle partition that exposed this rule to the run. Use `actionable`, `historical`, or `blocked`.
+- `skip_reason`: null when `consideration_status = applied`. Otherwise copy the parsed entry's `block_reason` when present, or use `not_selected_for_mutation` when an actionable rule stayed available but the run never applied it.
+- `evidence_metrics`: compact audit summary of the curated rule's evidence strength.
+- `evidence_metrics.supporting_evidence_count`: count of `supporting_evidence[]` rows on the parsed entry.
+- `evidence_metrics.supporting_case_count`: count of `supporting_case_ids[]` on the parsed entry.
+- `evidence_metrics.source_kinds[]`: unique sorted `supporting_evidence[].source_kind` values so humans can see whether the rule rests on prior campaigns, reference skills, or other sources.
+- `evidence_metrics.confidence`: curated confidence label copied from the parsed entry.
+- `evidence_metrics.precedence`: curated precedence label copied from the parsed entry.
+- `application_summary.application_count`: number of applied outcome rows for this `(run_id, meta_learning_id)` pair.
+- `application_summary.applied_experiment_ids[]`: unique sorted experiment IDs whose scored mutation applied this rule in the current run.
+- `application_summary.latest_outcome_id`: outcome row ID for the latest applied event in the current run, or null when skipped.
+- `helpfulness_verdict`: run-level helpfulness readout for this rule.
+- `helpfulness_verdict.status`: `evaluated` when at least one applied outcome row exists for this run/rule pair, otherwise `not_evaluated`.
+- `helpfulness_verdict.score`: latest applied outcome `helpful.score` when evaluated, otherwise null.
+- `helpfulness_verdict.label`: latest applied outcome `helpful.label` when evaluated, otherwise null.
+- Capture timing: after serializing `meta_learning_bootstrap_context` and `meta_learning_outcomes[]`, emit one audit row for every curated entry in the bootstrapped `parsed_meta_learnings.entries[]` list. Use the parsed bundle partition lists to determine `consideration_bucket`, then join against same-run `meta_learning_outcomes[]` rows to determine applied-vs-skipped status and helpfulness.
+- Brownfield fallback: if a stored run output preserves `meta_learning_outcomes[]` but not the parsed entry bundle, retrieval may emit minimal audit rows keyed from those stored outcomes so applied rules remain visible. When the parsed bundle is available, prefer it as the authoritative source for title, evidence metrics, and skip reasoning.
 
 ### Human Spot-Check Calibration Config Schema
 
@@ -103,7 +244,7 @@ Persist this config in `evaluation_metadata.config.human_spot_check_calibration`
 - `sample_count`: configurable calibration sample-count setting `N`.
 - Default to `2` when the config is missing.
 - Validation: `sample_count` must be a positive integer (`>= 1`).
-- Every 3rd completed experiment surfaces `sample_count` random `(eval, fixture)` pairs from the most recent finalized experiment.
+- Every 3rd completed experiment surfaces up to `sample_count` reviewable `(eval, fixture)` pairs from the most recent finalized experiment.
 - Session Close uses `max(sample_count, 5)` so the independent closeout calibration never drops below the 5-sample minimum.
 - When a cadence-triggered or Session Close calibration task is constructed, copy the resolved `sample_count` into that task payload immediately. Do not require downstream queues to recompute `N` from the config later.
 
@@ -112,7 +253,7 @@ Persist this config in `evaluation_metadata.config.human_spot_check_calibration`
 Construct this payload whenever completion cadence or Session Close queues human spot-check calibration.
 
 ```json
-{"task_type":"human_spot_check_calibration","trigger":"completion_cadence","status":"pending","experiment_id":3,"completed_experiment_slot":3,"sample_count":2,"sample_count_source":"evaluation_metadata.config.human_spot_check_calibration.sample_count","minimum_sample_floor":null}
+{"task_type":"human_spot_check_calibration","trigger":"completion_cadence","status":"pending","experiment_id":3,"completed_experiment_slot":3,"sample_count":2,"sample_count_source":"evaluation_metadata.config.human_spot_check_calibration.sample_count","minimum_sample_floor":null,"selection_strategy":"priority_order","selection_priority":["multi_judge_disagreement","quality_eval","near_threshold","deterministic_fallback"],"evaluation_sample_eligibility":{"status":"ready","requested_sample_count":2,"eligible_sample_count":2,"excluded_samples":[{"eval":"E3","reason_codes":["missing_reasoning_trace"]}]},"evaluation_samples":[{"eval":"E1","pass_fail":"pass","verdict_label":"PASS","reasoning_trace":"1. Criterion check: the output includes the required gotchas section. 2. Evidence: the output has a gotchas heading and 3 concrete warnings. 3. Verdict link: because the rubric requires that section and those warnings, this passes.","fixture_reference":"phase4-dev-7f3c91ad-I03","selection_reason":"multi_judge_disagreement","selection_rank":1,"evidence_reference":"input_id:phase4-dev-7f3c91ad-I03 output lines 12-18","evidence_preview":"## Gotchas\n- Never run rm -rf without checking the target path.","artifact_reference":null}]}
 ```
 
 - `task_type`: stable queue identifier. Use `human_spot_check_calibration`.
@@ -123,6 +264,69 @@ Construct this payload whenever completion cadence or Session Close queues human
 - `sample_count`: resolved calibration sample-count used for the task. For cadence-triggered tasks, use the validated config value or the default `2`. For Session Close, use `max(sample_count, 5)`.
 - `sample_count_source`: `evaluation_metadata.config.human_spot_check_calibration.sample_count` when the config supplied `N`, otherwise `default_human_spot_check_calibration.sample_count`.
 - `minimum_sample_floor`: null for cadence-triggered tasks. Set to `5` for Session Close tasks so the queue records the mandatory closeout floor explicitly.
+- `selection_strategy`: deterministic review-sample routing policy for the queued task. Use `priority_order` for the v4.1 trust contract.
+- `selection_priority[]`: ordered sampling reasons applied under `selection_strategy = priority_order`. Keep this order: `multi_judge_disagreement`, `quality_eval`, `near_threshold`, `deterministic_fallback`.
+- `evaluation_sample_eligibility`: backend eligibility snapshot for the pending calibration pool. `status = ready` when eligible samples meet or exceed `sample_count`, `underfilled` when at least one reviewable sample exists but the pool is smaller than `sample_count`, and `empty` when no reviewable samples survived filtering.
+- `evaluation_sample_eligibility.excluded_samples[]`: verdicts that were excluded from the pending calibration pool. Use `reason_codes` from this set: `missing_eval`, `missing_pass_fail`, `missing_reasoning_trace`, `missing_reviewable_evidence`.
+- `evaluation_samples[]`: backend-selected reviewable `(eval, fixture)` samples for human calibration. Choose up to `sample_count` from the eligible pool. When `selection_strategy = priority_order`, select from the eligible pool in this order: unresolved `multi_judge_disagreement`, then `quality_eval`, then `near_threshold`, then a deterministic fallback over the remaining reviewable pool. Default fallback ordering stays deterministic over stable sample identity (`fixture_reference`, then `eval`, then evidence locator); when `evaluation_metadata.config.human_spot_check_calibration.selection_mode = randomized`, randomize only inside the final eligible bucket and still sample without replacement.
+- `evaluation_samples[].fixture_reference`: fixture identifier for sampling and audit views. Derive it from the `input_id:` embedded in `evidence_reference` when present; otherwise fall back to the artifact path used for review.
+- `evaluation_samples[].selection_reason`: the specific priority bucket that caused this sample to be surfaced. Use one of `multi_judge_disagreement`, `quality_eval`, `near_threshold`, or `deterministic_fallback`.
+- `evaluation_samples[].selection_rank`: 1-based order position after the task-level selection strategy is applied.
+- `evaluation_samples[].evidence_reference`: stable reviewer-facing reference to the cited evidence. This must survive serialization unchanged.
+- `evaluation_samples[].evidence_preview`: inline preview snippet for the cited evidence when one exists. Leave null only when the human reviewer should inspect `artifact_reference` instead.
+- `evaluation_samples[].artifact_reference`: optional artifact pointer copied from the verdict evidence when the reviewable sample is backed by a stored artifact rather than inline content.
+- `evaluation_samples[].sample_identity`: stable join key for the surfaced sample. Use `exp<id>:<eval>:<fixture_reference>` when the sample is tied to one experiment; otherwise use the task-scoped equivalent.
+- `evaluation_samples[].source_results_ref`: authoritative pointer back to the stored machine verdict the human is reviewing. Preserve the stored reference unchanged instead of regenerating it from session logs.
+- `evaluation_samples[].source_task_sample_index`: zero-based position of this sample inside the queued calibration task artifact. Preserve it so replay tooling can reconstruct the exact reviewed row.
+- `evaluation_samples[].sample_payload_hash`: hash of the exact surfaced sample payload. If the payload changes, write a new human-review judgment instead of mutating the existing review record.
+- `evaluation_samples[].sample_surfaced_at`: when this sample entered the human-review queue. Preserve the stored timestamp unchanged on retrieval.
+- `evaluation_samples[].human_review_judgment`: optional linked completed review payload for this sample. When a matching entry exists in `human_review_judgments[]`, attach the exact stored `Human Review Judgment Schema` object here for reviewer-facing surfaces instead of rebuilding a second shape. Once this linked object is present, downstream sample renderers and submission/update consumers should read it directly instead of re-matching against `human_review_judgments[]`; otherwise stale experiment-level copies can overwrite the surfaced reviewer judgment.
+
+### Human Review Judgment Schema
+
+Use this schema once a surfaced calibration sample is actually reviewed by a human. Write one object per reviewed sample. If the review is tied to a specific experiment, append it to that experiment's `human_review_judgments[]` array. If the completed review is also stored in a task artifact, mirror the exact same object there instead of inventing a second review shape.
+
+```json
+{"judgment_id":"human-review-exp3-E1-phase4-dev-7f3c91ad-I03-2026-04-11T18:22:03Z","schema_version":1,"task_context":{"task_type":"human_spot_check_calibration","task_trigger":"completion_cadence","task_ref":"checkpoint-tasks/exp3-human-spot-check.json","task_status_before_review":"pending","task_status_after_review":"completed"},"sample_reference":{"experiment_id":3,"completed_experiment_slot":3,"eval":"E1","fixture_reference":"phase4-dev-7f3c91ad-I03","evidence_reference":"input_id:phase4-dev-7f3c91ad-I03 output lines 12-18","sample_identity":"exp3:E1:phase4-dev-7f3c91ad-I03"},"judge_decision":{"pass_fail":"pass","verdict_label":"PASS","reasoning_trace":"1. Criterion check: the output includes the required gotchas section. 2. Evidence: the output has a gotchas heading and 3 concrete warnings. 3. Verdict link: because the rubric requires that section and those warnings, this passes."},"human_decision":{"pass_fail":"fail","decision_type":"override","agreement":false,"rationale":"The section exists, but the rubric requires three concrete warnings and only one is present.","reviewer_notes":"Judge over-weighted section presence over rubric completeness."},"reviewer_identity":{"reviewer_id":"human:sarahli","display_name":"Sarah Li","reviewer_role":"skill_author"},"timestamps":{"sample_surfaced_at":"2026-04-11T18:20:00Z","review_started_at":"2026-04-11T18:21:10Z","review_completed_at":"2026-04-11T18:22:03Z"},"audit_metadata":{"source_results_ref":"results.json#experiments[3].eval_results[E1]","source_task_sample_index":0,"sample_payload_hash":"sha256:2d57d74eb7f1...","artifact_reference":null,"session_log_ref":"session-log-2026-04-11T18-20-00.json#spot_check-exp3-E1","supersedes_judgment_id":null}}
+```
+
+- `judgment_id`: stable unique ID for this completed human review. If the same sample is reviewed again, write a new judgment object and link the older one through `audit_metadata.supersedes_judgment_id`.
+- `schema_version`: starts at `1` for the canonical human-review storage contract.
+- `task_context.task_type`: use `human_spot_check_calibration`.
+- `task_context.task_trigger`: `completion_cadence` or `session_close`.
+- `task_context.task_ref`: exact task artifact or queue record that surfaced the sample.
+- `task_context.task_status_before_review` / `task_context.task_status_after_review`: preserve the queue state transition around the review so audit tooling can prove the human action closed a pending task.
+- `sample_reference.experiment_id`: triggering experiment ID when the review is tied to one experiment. Null only for Session Close reviews that intentionally span multiple experiment sources.
+- `sample_reference.completed_experiment_slot`: copy the finalized cadence slot when the source task came from completion cadence. Null is allowed for Session Close bundles without one slot anchor.
+- `sample_reference.eval`: eval ID for the surfaced verdict (`E1`, `E2`, ...).
+- `sample_reference.fixture_reference`: stable fixture or input ID surfaced for review.
+- `sample_reference.evidence_reference`: stable pointer to the exact cited evidence shown to the human reviewer.
+- `sample_reference.sample_identity`: stable join key for this surfaced sample. Format: `exp<id>:<eval>:<fixture_reference>` when `experiment_id` exists; otherwise use the task-scoped equivalent.
+- `judge_decision`: immutable snapshot of the machine verdict as surfaced to the human reviewer. Preserve the original `pass_fail`, `verdict_label`, and `reasoning_trace` exactly as presented.
+- `human_decision.pass_fail`: required when `decision_type` is `confirm` or `override`; null only when the human marked the sample `skip` or `not_reviewable`.
+- `human_decision.decision_type`: one of `confirm`, `override`, `skip`, or `not_reviewable`.
+- `human_decision.agreement`: required boolean when `decision_type` is `confirm` or `override`; null for `skip` and `not_reviewable`.
+- `human_decision.rationale`: required when `decision_type` is `override`, `skip`, or `not_reviewable`; recommended for `confirm`.
+- `human_decision.reviewer_notes`: optional free-form notes that add context without replacing the canonical rationale field.
+- `reviewer_identity.reviewer_id`: stable reviewer identifier (`human:<handle>` or another locally meaningful principal ID).
+- `reviewer_identity.display_name`: human-readable reviewer label shown in audit views.
+- `reviewer_identity.reviewer_role`: reviewer context such as `skill_author`, `operator`, or `qa_reviewer`.
+- `timestamps.sample_surfaced_at`: when the sample entered the human-review queue.
+- `timestamps.review_started_at`: when the human began evaluating the surfaced sample.
+- `timestamps.review_completed_at`: when the human finalized the review. Required for any stored completed judgment.
+- `audit_metadata.source_results_ref`: authoritative pointer back to the stored machine verdict being reviewed.
+- `audit_metadata.source_task_sample_index`: zero-based sample index inside the queued task artifact so replay tooling can reconstruct which surfaced row was reviewed.
+- `audit_metadata.sample_payload_hash`: hash of the exact surfaced sample payload. If the payload changes, write a new judgment instead of mutating the old one.
+- `audit_metadata.artifact_reference`: optional artifact pointer when the human review depended on a stored artifact rather than inline evidence alone.
+- `audit_metadata.session_log_ref`: optional pointer to the additive session-log event written for this review.
+- `audit_metadata.supersedes_judgment_id`: link to the prior judgment when a rereview replaces it; otherwise null.
+
+Usage rules:
+- `human_review_judgments[]` is the authoritative completed-review record. Session-log `spot_check` events are additive, not authoritative.
+- Compute calibration agreement rates from stored judgments where `human_decision.decision_type` is `confirm` or `override`. Exclude `skip` and `not_reviewable` from the denominator, but keep them in the audit trail.
+- Derive `human_judgment_calibration_result` from the aligned `human_judgment_comparison_dataset` so the agreement math reuses the same stable judgment-target matching as reviewer-facing payloads.
+- Do not rewrite `judge_decision` after the fact. It is the frozen snapshot of what the human reviewer actually saw.
+- Preserve `human_review_judgments[]` unchanged on retrieval. Do not backfill or infer missing rationale, agreement, reviewer identity, or timestamps from other files.
 
 ### results.tsv
 Header: `experiment\tscore\tmax_score\tpass_rate\tstatus\tdescription`
@@ -192,14 +396,51 @@ Persist this policy in `evaluation_metadata.config.mutation_stage_split_access_p
 - `allowed_split_ids`: `dev` only. Mutation-time operations may read the dev scoring corpus and no other split.
 - `blocked_split_ids`: enumerate every split that mutation-time operations must not read.
 - `split_access.adversarial_holdout`: must be `inaccessible` so the post-loop holdout cannot leak into Phase 7.
+- Canonical split IDs only: `allowed_split_ids`, `blocked_split_ids`, and `split_access` keys must use `train`, `dev`, `test`, or `adversarial_holdout`. Do not store convenience aliases such as `holdout`, `adversarial-holdout`, or `adversarial holdout` inside the mutation-stage policy.
+- Terminal split decisions only: `split_access` values must be `allowed`, `blocked`, or `inaccessible`. Do not encode delegated resolution like `delegate:adversarial_holdout` or `{ "delegate_split_id": "adversarial_holdout" }` inside the mutation-stage policy.
 - `allowed_operations`: use this policy for baseline scoring, mutation scoring, mutation analysis, regression checks, and same-run version comparison during Phase 7.
+- Intermediate mutation scoring is dev-only. If `requested_operation = mutation_scoring` resolves to `adversarial_holdout`, explicitly deny the request and fail closed before reopening any stored dev corpus.
 - Persist the same object in `state.json.mutation_stage_split_access_policy` once Phase 4 freezes split boundaries. That state field is the orchestration-layer source of truth for later Phase 7 dataset reads and checkpoint resume.
 - On resume or Phase 7 re-entry, restore the exact persisted object into the loaded run context before any scoring, mutation analysis, regression check, same-run version comparison, or other step that may reopen split-scoped inputs.
 - If a Phase 7 step requests a dataset read, verify both the requested operation and the requested split against this restored object before reading fixtures, per-input outputs, or joined experiment records.
 - Session Close adversarial holdout validation is intentionally outside this mutation-stage policy. Switch to the evaluation-only `session_close_holdout_validation` scope before reading holdout fixtures.
+- The final-only evaluation stage is a single post-loop step. Trigger it exactly once after the mutation loop exits for the active `current_run_path`; never call it from Experiment 0 or any intermediate mutation iteration.
 - `train`: blocked at mutation time. It remains few-shot material for Phase 5 judge prompts only.
 - `test`: blocked at mutation time. It remains the Phase 6 final judge-measurement split only.
 - `adversarial_holdout`: inaccessible during mutation-time operations. Only Session Close holdout validation may read it.
+
+### Restricted Mutation-Stage Dataset Access Path
+
+Use this access path for every split-scoped Phase 7 read after `mutation_stage_split_access_policy` has been restored into the loaded run context. Replace direct fixture/result reads inside the mutation loop with this path; the loop must not reopen `fixtures-manifest.md`, `input-sets.json`, per-input outputs, or joined comparison payloads on an ad hoc basis once Phase 7 is active.
+Candidate generation and mutation hypothesis generation must obtain split-scoped inputs exclusively through this access path.
+Do not load split membership, `fixtures-manifest.md`, or `input-sets.json` directly from the candidate-generation path.
+
+Inputs:
+- `policy`: the threaded `mutation_stage_split_access_policy` restored into the active run context.
+- `requested_operation`: one of `baseline_scoring`, `mutation_analysis`, `mutation_scoring`, `regression_check`, or `same_run_version_comparison`.
+- `requested_split_id`: raw split token supplied by the caller. Canonicalize it before the policy check; every mutation-stage read must still resolve to `dev`.
+- `input_set_id`, `input_set_ref`, and `input_ids`: required whenever the read reopens an already-scored dev corpus instead of the initial baseline manifest.
+
+Procedure:
+1. Load the active `policy` from the run context. If it is missing, stop and restore it before reading any split-scoped data.
+2. Verify `requested_operation` is present in `policy.allowed_operations`.
+3. Canonicalize `requested_split_id` before checking the policy. If the raw token, a supported alias, or a delegated resolution path resolves to `adversarial_holdout`, reject the read as a blocked holdout access attempt. If `requested_operation = mutation_scoring` resolves to `adversarial_holdout`, explicitly deny the request and fail closed before reopening any stored dev corpus.
+4. Verify the canonical requested split is present in `policy.allowed_split_ids` and not blocked by `policy.split_access`.
+5. Resolve the dev-scoped corpus through persisted refs only:
+   - `baseline_scoring`: open the dev split recorded in `fixtures-manifest.md` / `input-sets.json`.
+   - `mutation_analysis`, `mutation_scoring`, `regression_check`, and `same_run_version_comparison`: reopen only the stored dev-scoped `input_set_id`, exact `input_set_ref`, and finalized-order `input_ids` for that run/experiment.
+   - Intermediate mutation scoring must resolve its split through this policy-aware accessor. Do not branch on raw split IDs, reopen split manifests, or bypass the accessor to recover the dev corpus.
+6. Return only the dev-scoped fixture content, scored inputs, per-input outputs, or joined comparison payload needed for the requested operation. Never materialize `train`, `test`, or `adversarial_holdout` while servicing this path.
+7. If the request would cross into a blocked split, uses a mismatched `input_set_id`, omits required persisted refs for a reopen, or tries to satisfy a `dev` request by delegating to another split, reject the read and surface a blocking error instead of silently falling back to a direct file read.
+
+Call-site mapping:
+- Experiment 0 baseline scoring -> `requested_operation = baseline_scoring`
+- Failure analysis or hypothesis generation that reopens scored inputs / fixture text -> `requested_operation = mutation_analysis`
+- Experiment scoring -> `requested_operation = mutation_scoring`
+- Regression checks -> `requested_operation = regression_check`
+- Same-run version comparison preflight or joined per-input comparison -> `requested_operation = same_run_version_comparison`
+
+Session Close holdout validation is intentionally outside this path. Once the run switches to `session_close_holdout_validation`, stop using the mutation-stage accessor and use the evaluation-only holdout scope instead. That final-only evaluation stage runs exactly once after mutation completes for the active run; it is never part of Experiment 0 or any intermediate mutation iteration.
 
 - `split_id`: canonical split identifier. Valid Phase 4 split IDs are `train`, `dev`, `test`, and `adversarial_holdout`.
 - `display_label`: human-readable label for the split as shown in manifests and reports.
@@ -210,6 +451,7 @@ Persist this policy in `evaluation_metadata.config.mutation_stage_split_access_p
 - `separate_from`: splits this entry must remain disjoint from. `adversarial_holdout` is a dedicated evaluation-only split and must stay separate from mutation/refinement splits. Every split listed in `config.mutation_refinement_split_datasets[]` must appear here.
 - `mutation_refinement_split_datasets`: evaluation-metadata snapshot of the split corpora referenced by the Phase 5-7 boundary rules. Compare their `input_ids` against the holdout `input_ids` and flag invalid metadata if any overlap exists. For actual Phase 7 mutation-time reads, obey `mutation_stage_split_access_policy`: only `dev` is allowed at runtime.
 - Never alias `adversarial_holdout` to `dev`, `test`, or any mutation/refinement split for convenience. `test` remains the Phase 6 judge-validation measurement split; `adversarial_holdout` is the post-loop overfitting check.
+- Never satisfy a mutation-stage `dev` request by delegating it to `adversarial_holdout`, even indirectly through alias tables, helper indirection, or resolved split targets.
 - Any shared `input_id` between `adversarial_holdout` and a mutation/refinement snapshot is a blocking metadata error. Fail or flag that overlap instead of silently continuing.
 
 ### session-log.json
@@ -231,9 +473,13 @@ Entry types:
 - Discard autopsy: `{"phase":"7","type":"discard_autopsy","experiment":N,"classification":"wrong_target|wrong_params|wrong_type","reasoning":"1-sentence explanation"}`
 - Canonical headings: `{"phase":"7","type":"canonical_headings","sections":["section1","section2","..."]}`
 - Iteration write: `{"phase":"7","type":"iteration_write","experiment":N,"path":"runs/run_.../iteration_NNN/"}`
+- Iteration run started: `{"phase":"7","type":"iteration_run_started","run_id":"run_2026-04-03T14-30-00","path":"runs/run_2026-04-03T14-30-00/","target_version_label":"baseline_candidate|vN"}`
+- Iteration phase transition: `{"phase":"7","type":"iteration_phase_transition","run_id":"run_2026-04-03T14-30-00","experiment":0,"from":"eval","to":"mutate","last_eval_status":"completed","last_eval_results_ref":"runs/run_.../iteration_000/eval_results.json","next_action":"phase7_mutation_analysis"}`
 - Completion cadence increment: `{"phase":"7","type":"completion_cadence","experiment":N,"scope_type":"experiment_series","scope_id":"runs/run_.../","completed_experiments":N,"status":"baseline|keep|discard"}`
 - Input set registration: `{"phase":"3","type":"input_set_registered","set_id":"phase3-fixtures-7f3c91ad","kind":"phase3_fixtures","input_count":18,"canonical_hash":"7f3c91adf2f0f96f..."}`
 - Eval strategy resolution: `{"phase":"1","type":"eval_strategy_resolution","skill_pattern":"pipeline","strategy_id":"pipeline_eval_strategy","reasoning":"Pattern requires gate-aware, resume-safe downstream evaluation."}`
+- Research intake started: `{"phase":"6.5","type":"research_intake_started","target_skill_path":"skill-under-test/SKILL.md","target_domain":"<one-sentence target job>","requested_sources":3}`
+- Research intake completed: `{"phase":"6.5","type":"research_intake_completed","status":"completed|partial|skipped|failed","accepted_sources":2,"rejected_sources":1,"artifact":"research-intake.md","error_code":"none|target_skill_missing|target_domain_missing|missing_phase1_context|no_valid_sources|artifact_write_failed|invalid_research_intake_config"}`
 - Derived registry snapshot: `{"phase":"7","type":"derived_registry_snapshot","experiment":N,"sections_explored":{"section1":{"count":2,"best_delta":0.12,"last_tried":3,"autopsy_pattern":"wrong_target"},...},"mutation_types":{"add":3,"modify":2,"delete":1},"diversity_score":0.6}`
 - Apply back: `{"type":"apply_back","applied":true,"source":"[workspace]/skill-under-test/SKILL.md","target":"[original-skill-path]/SKILL.md"}`
 - Ambient learning: `{"type":"ambient_learning","rules_extracted":2,"diff_size":12}` or `{"type":"ambient_learning","skipped":true,"reason":"full_rewrite","diff_size":180}`
@@ -372,13 +618,39 @@ After the comparison preflight passes, emit a structured per-input comparison pa
 ```json
 {
   "status": "ok",
-  "left_experiment_id": 1,
+  "left_experiment_id": 0,
   "right_experiment_id": 3,
   "input_set_id": "phase4-dev-7f3c91ad",
+  "left_baseline_trials": [
+    {
+      "trial_index": 1,
+      "trial_id": "baseline-trial-001",
+      "run_index": 1,
+      "score": 72.3,
+      "pass_rate": 72.3,
+      "timestamps": {
+        "started_at": "2026-04-11T09:00:00Z",
+        "completed_at": "2026-04-11T09:00:08Z"
+      },
+      "raw_outputs": [
+        {
+          "input_id": "phase4-dev-7f3c91ad-I03",
+          "output_text": "Trial 1 output for fixture I03"
+        }
+      ],
+      "trial_metadata": {
+        "requested_operation": "baseline_scoring",
+        "requested_split_id": "dev",
+        "input_set_id": "phase4-dev-7f3c91ad"
+      }
+    }
+  ],
+  "right_baseline_trials": null,
   "shared_input_summary": {
     "total_shared_inputs": 2,
     "improved": 1,
     "regressed": 0,
+    "unreliable": 0,
     "unchanged": 1
   },
   "per_input": [
@@ -449,8 +721,9 @@ After the comparison preflight passes, emit a structured per-input comparison pa
 
 Rules:
 - `shared_input_summary` aggregates the exact joined rows from `per_input[]`; never count rows from a rejected or mismatched comparison.
-- `shared_input_summary.total_shared_inputs` must equal the `per_input[]` length and must also equal `improved + regressed + unchanged`.
-- Classify each shared input by score outcome, not metadata-only edits. Prefer the `weighted_points` delta when present; otherwise derive the bucket from `pass_fail` transitions. Metadata-only changes stay in `unchanged`.
+- `shared_input_summary.total_shared_inputs` must equal the `per_input[]` length and must also equal `improved + regressed + unreliable + unchanged`.
+- Classify each shared input by score outcome, not metadata-only edits. Prefer the `weighted_points` delta when present; otherwise derive the bucket from `pass_fail` transitions. When a baseline reliability threshold is available, `improved` and `regressed` become the trusted buckets and any within-noise-floor delta must move to `unreliable`. Metadata-only changes stay in `unchanged`.
+- When either comparison side is the Experiment 0 baseline, also expose `left_baseline_trials[]` or `right_baseline_trials[]` and reuse the same serialized `baseline_trials[]` rows on that comparison side so later comparison flows can inspect the three saved pre-mutation runs without reopening the standalone experiment card first.
 - `per_input[]` contains exactly one row per shared stable `input_id`, joined only after the comparison preflight passes.
 - `before_output` and `after_output` are output objects, not raw strings. Each object must carry a stable `locator`, a human-readable `excerpt`, and an `artifact_ref` back to the persisted output artifact used for comparison.
 - `score_changes[]` records only the score fields that changed for that input, for example `pass_fail`, `weight`, `weighted_points`, or `normalized_contribution`.
@@ -563,7 +836,7 @@ Improvements are directional — run Standard for calibrated measurement.
 
 Read when: Quick Start QS Step 5 (state update) or Initialize Workspace.
 
-### state.json after Quick Start
+### Quick Start state snapshot
 ```json
 {
   "schema_version": 4,
@@ -1171,17 +1444,18 @@ Target: >90% both. With 30-40 fixtures (~15 dev), treat as directional signal.
 ### Phase 6 Dev Fold Assignment
 - Phase 6 cross-validation uses deterministic 3-fold assignment derived from stable input data.
 - `stable_fold_key = <input_id>|<content_hash>`
-- Sort the frozen dev split by `stable_fold_key`, then assign `fold_1`, `fold_2`, `fold_3` in repeating order down that sorted list.
-- This keeps fold sizes within one item of each other while staying fully deterministic for a frozen dev set.
+- Sort the unique `source_sample_group_id` values for the frozen dev split, then assign `fold_1`, `fold_2`, `fold_3` in repeating order down that sorted group list.
+- Every `source_sample_group_id` must appear in exactly one persisted fold-assignment entry, and every Phase 6 dev record in that group inherits the same `fold_id`.
+- This keeps fold sizes within one group of each other while staying fully deterministic for a frozen dev set.
 - Never derive fold membership from runtime iteration order, filesystem order, presentation order, or RNG state.
 - Persist the finalized fold map in `judge-validation-report.md` under `phase6_dev_fold_assignments`.
 
 Example payload:
 ```json
 "phase6_dev_fold_assignments":[
-  {"input_id":"phase4-dev-7f3c91ad-I01","content_hash":"91ab77ce...","stable_fold_key":"phase4-dev-7f3c91ad-I01|91ab77ce...","fold_id":"fold_1"},
-  {"input_id":"phase4-dev-7f3c91ad-I02","content_hash":"42be3101...","stable_fold_key":"phase4-dev-7f3c91ad-I02|42be3101...","fold_id":"fold_2"},
-  {"input_id":"phase4-dev-7f3c91ad-I03","content_hash":"6ca1b7d2...","stable_fold_key":"phase4-dev-7f3c91ad-I03|6ca1b7d2...","fold_id":"fold_3"}
+  {"source_sample_group_id":"phase4-dev-7f3c91ad-I01|91ab77ce...","input_id":"phase4-dev-7f3c91ad-I01","content_hash":"91ab77ce...","stable_fold_key":"phase4-dev-7f3c91ad-I01|91ab77ce...","fold_id":"fold_1"},
+  {"source_sample_group_id":"phase4-dev-7f3c91ad-I02|42be3101...","input_id":"phase4-dev-7f3c91ad-I02","content_hash":"42be3101...","stable_fold_key":"phase4-dev-7f3c91ad-I02|42be3101...","fold_id":"fold_2"},
+  {"source_sample_group_id":"phase4-dev-7f3c91ad-I03|6ca1b7d2...","input_id":"phase4-dev-7f3c91ad-I03","content_hash":"6ca1b7d2...","stable_fold_key":"phase4-dev-7f3c91ad-I03|6ca1b7d2...","fold_id":"fold_3"}
 ]
 ```
 
@@ -1198,6 +1472,54 @@ Example payload:
   {"eval":"E5","input_id":"phase4-dev-7f3c91ad-I01","content_hash":"91ab77ce...","stable_fold_key":"phase4-dev-7f3c91ad-I01|91ab77ce...","source_sample_group_id":"phase4-dev-7f3c91ad-I01|91ab77ce...","fold_id":"fold_1","human_label":"pass","judge_label":"fail"}
 ]
 ```
+
+### Phase 6 Validation Result Payload
+- Store aggregate Phase 6 mean/range outputs on each `validation_results[]` row.
+- Mirror the aggregate dev/test TPR/TNR outputs inside `aggregated_tpr_tnr_summary` so the final evaluation result has a dedicated summary section for downstream consumers.
+- Within `aggregated_tpr_tnr_summary.dev`, keep the flat compatibility fields and also persist structured `tpr_confidence_range` / `tnr_confidence_range` objects with `lower_bound`, `upper_bound`, and `half_width`, bounding the interval to the valid 0-1 metric domain.
+- Persist one aggregate confusion matrix per judge on the same `validation_results[]` row. This is the primary Phase 6 trust surface for false-pass / false-fail review.
+- Persist replayable exemplar rows for the aggregate confusion matrix instead of asking report consumers to reopen every fold artifact by hand.
+- Keep fold-level TPR/TNR outputs in `phase6_dev_fold_metrics` instead of flattening them into the aggregate mean/range fields.
+
+Example payload:
+```json
+"validation_results":[
+  {
+    "eval":"E2",
+    "dev_tpr_mean":0.92,
+    "dev_tnr_mean":0.86,
+    "dev_tpr_range":0.07,
+    "dev_tnr_range":0.08,
+    "test_tpr":0.89,
+    "test_tnr":0.84,
+    "aggregated_tpr_tnr_summary":{
+      "dev":{
+        "tpr_mean":0.92,
+        "tpr_range":0.07,
+        "tpr_confidence_range":{"lower_bound":0.85,"upper_bound":0.99,"half_width":0.07},
+        "tnr_mean":0.86,
+        "tnr_range":0.08,
+        "tnr_confidence_range":{"lower_bound":0.78,"upper_bound":0.94,"half_width":0.08}
+      },
+      "test":{"tpr":0.89,"tnr":0.84}
+    },
+    "confusion_matrix":{"tp":12,"tn":5,"fp":1,"fn":2},
+    "confusion_examples":{
+      "false_positives":[{"fixture_reference":"phase4-dev-7f3c91ad-I09","judge_reason":"The judge treated tone as sufficient evidence of correctness."}],
+      "false_negatives":[{"fixture_reference":"phase4-dev-7f3c91ad-I12","judge_reason":"The judge missed that the required gotchas section was present and specific."}]
+    },
+    "status":"APPROVED",
+    "phase6_dev_fold_metrics":[
+      {"fold_id":"fold_1","metric_object":{"sample_count":5,"human_pass_count":3,"human_fail_count":2,"true_positive_count":3,"true_negative_count":2,"tpr":1.0,"tnr":1.0}},
+      {"fold_id":"fold_2","metric_object":{"sample_count":5,"human_pass_count":3,"human_fail_count":2,"true_positive_count":2,"true_negative_count":2,"tpr":0.667,"tnr":1.0}},
+      {"fold_id":"fold_3","metric_object":{"sample_count":5,"human_pass_count":2,"human_fail_count":3,"true_positive_count":2,"true_negative_count":2,"tpr":1.0,"tnr":0.667}}
+    ]
+  }
+]
+```
+
+- `validation_results[].confusion_matrix`: aggregate per-judge confusion counts across the stored Phase 6 dev folds. Persist `tp`, `tn`, `fp`, and `fn` explicitly instead of asking report consumers to rebuild them from fold tables.
+- `validation_results[].confusion_examples`: primary replayable false-pass / false-fail exemplars for the aggregate confusion matrix. Store reviewer-readable `false_positives[]` and `false_negatives[]` rows so trust review can inspect how the judge failed without reopening every fold artifact.
 
 ### Disagreement Actions
 | Type | Judge | Human | Fix |
@@ -1228,13 +1550,14 @@ Read when: Phase 7 active.
 
 ### Results.json experiment record
 ```json
-{"id":N,"input_set_id":"phase4-dev-7f3c91ad","input_set_ref":"input-sets.json#phase4-dev-7f3c91ad","input_ids":["phase4-dev-7f3c91ad-I03","phase4-dev-7f3c91ad-I05","phase4-dev-7f3c91ad-I08"],"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}],"eval_results":[{"eval":"E1","pass_fail":"pass","reasoning_trace":"1. Criterion check: the rubric requires concrete gotcha warnings and the output includes them. 2. Evidence: the output contains a gotchas heading and 3 specific warnings. 3. Verdict link: because both the section and concrete warnings are present, this passes.","evidence":[{"kind":"output_excerpt","source":"skill_output","locator":"input_id:phase4-dev-7f3c91ad-I03 output lines 12-18","excerpt":"## Gotchas\\n- Never run rm -rf without checking the target path.","metric":null,"artifact_ref":null},{"kind":"metric","source":"scoring_metric","locator":"warnings_found","excerpt":"3 concrete warnings found in the gotchas section.","metric":{"name":"warnings_found","value":3,"unit":"count"},"artifact_ref":null}],"supporting_items":[{"stage":"criterion_check","decision":"gotchas heading is present","outcome":"met","evidence_refs":[0]},{"stage":"evidence_check","decision":"three concrete warnings were found","outcome":"met","evidence_refs":[1]},{"stage":"verdict_link","decision":"the rubric passes when both the heading and warning count are present","outcome":"supports_pass","evidence_refs":[0,1]}],"weight":1.0,"weight_source":"code_eval_fixed","weighted_points":1.0,"normalized_contribution":0.25}],"decision_breakdown":{"components":[{"eval":"E1","pass_fail":"pass","weight":1.0,"weight_source":"code_eval_fixed","weighted_points":1.0,"normalized_contribution":0.213}],"formula":"combined_score = weighted_points / total_weight","weighted_points":3.7,"total_weight":4.7,"combined_score":0.787,"combined_score_pct":78.7,"threshold":0.8,"proposed_decision":"discard"},"regression_check":null,"discard_autopsy":null}
+{"id":N,"input_set_id":"phase4-dev-7f3c91ad","input_set_ref":"input-sets.json#phase4-dev-7f3c91ad","input_ids":["phase4-dev-7f3c91ad-I03","phase4-dev-7f3c91ad-I05","phase4-dev-7f3c91ad-I08"],"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}],"validation_results":[{"eval":"E2","dev_tpr_mean":0.92,"dev_tnr_mean":0.86,"dev_tpr_range":0.07,"dev_tnr_range":0.08,"test_tpr":0.89,"test_tnr":0.84,"aggregated_tpr_tnr_summary":{"dev":{"tpr_mean":0.92,"tpr_range":0.07,"tpr_confidence_range":{"lower_bound":0.85,"upper_bound":0.99,"half_width":0.07},"tnr_mean":0.86,"tnr_range":0.08,"tnr_confidence_range":{"lower_bound":0.78,"upper_bound":0.94,"half_width":0.08}},"test":{"tpr":0.89,"tnr":0.84}},"confusion_matrix":{"tp":12,"tn":5,"fp":1,"fn":2},"confusion_examples":{"false_positives":[{"fixture_reference":"phase4-dev-7f3c91ad-I09","judge_reason":"The judge treated tone as sufficient evidence of correctness."}],"false_negatives":[{"fixture_reference":"phase4-dev-7f3c91ad-I12","judge_reason":"The judge missed that the required gotchas section was present and specific."}]},"status":"APPROVED","phase6_dev_fold_metrics":[{"fold_id":"fold_1","metric_object":{"sample_count":5,"human_pass_count":3,"human_fail_count":2,"true_positive_count":3,"true_negative_count":2,"tpr":1.0,"tnr":1.0}},{"fold_id":"fold_2","metric_object":{"sample_count":5,"human_pass_count":3,"human_fail_count":2,"true_positive_count":2,"true_negative_count":2,"tpr":0.667,"tnr":1.0}},{"fold_id":"fold_3","metric_object":{"sample_count":5,"human_pass_count":2,"human_fail_count":3,"true_positive_count":2,"true_negative_count":2,"tpr":1.0,"tnr":0.667}}]}],"eval_results":[{"eval":"E1","pass_fail":"pass","reasoning_trace":"1. Criterion check: the rubric requires concrete gotcha warnings and the output includes them. 2. Evidence: the output contains a gotchas heading and 3 specific warnings. 3. Verdict link: because both the section and concrete warnings are present, this passes.","evidence":[{"kind":"output_excerpt","source":"skill_output","locator":"input_id:phase4-dev-7f3c91ad-I03 output lines 12-18","excerpt":"## Gotchas\\n- Never run rm -rf without checking the target path.","metric":null,"artifact_ref":null},{"kind":"metric","source":"scoring_metric","locator":"warnings_found","excerpt":"3 concrete warnings found in the gotchas section.","metric":{"name":"warnings_found","value":3,"unit":"count"},"artifact_ref":null}],"supporting_items":[{"stage":"criterion_check","decision":"gotchas heading is present","outcome":"met","evidence_refs":[0]},{"stage":"evidence_check","decision":"three concrete warnings were found","outcome":"met","evidence_refs":[1]},{"stage":"verdict_link","decision":"the rubric passes when both the heading and warning count are present","outcome":"supports_pass","evidence_refs":[0,1]}],"weight":1.0,"weight_source":"code_eval_fixed","weighted_points":1.0,"normalized_contribution":0.25}],"decision_breakdown":{"components":[{"eval":"E1","pass_fail":"pass","weight":1.0,"weight_source":"code_eval_fixed","weighted_points":1.0,"normalized_contribution":0.213}],"formula":"combined_score = weighted_points / total_weight","weighted_points":3.7,"total_weight":4.7,"combined_score":0.787,"combined_score_pct":78.7,"threshold":0.8,"proposed_decision":"discard"},"regression_check":null,"discard_autopsy":null}
 ```
 Any result retrieval response schema or serializer that returns experiment records must include the stored `decision_breakdown` field unchanged so downstream dashboards and version-comparison views can explain the aggregation math.
 
 - `input_set_id`: the scoring corpus used for this experiment.
 - `input_set_ref`: exact pointer back to the registered set entry in `input-sets.json`.
 - `input_ids`: exact stable inputs scored for this experiment, listed in finalized set order. Version comparisons are only valid when this matches across experiments.
+- `validation_results`: Phase 6 judge validation summaries. Store aggregate dev/test TPR/TNR mean/range fields on each row, mirror them inside `aggregated_tpr_tnr_summary`, include structured `tpr_confidence_range` / `tnr_confidence_range` interval objects in the dev summary, persist the aggregate `confusion_matrix` plus reviewer-readable `confusion_examples`, and keep fold-level TPR/TNR outputs in `phase6_dev_fold_metrics` instead of flattening them into the aggregate mean/range fields.
 
 ## Judge Verdict Evidence Schema
 
@@ -1292,6 +1615,53 @@ Usage rules:
 - Attach `supporting_items[]` to the same verdict record that produced the cited `evidence[]`; never reassign supporting items by array position, aggregation order, or a later rendering pass.
 - Preserve `supporting_items[]` unchanged in the final judge output for that verdict so replay, dashboards, and version comparison all read the same sub-decision record.
 - `reasoning_trace` must be reconstructible from `supporting_items[]` plus `evidence[]` without additional hidden context.
+
+## Multi-Judge Verdict Schema
+
+Read when: an eval is marked multi-judge in Phase 5 or a stored verdict was produced by 2+ independent judges.
+
+`multi_judge` is an optional structured consensus block attached to one verdict. It preserves the independent panel outputs, the unanimity rule, and whether the verdict is still blocked on human review:
+
+```json
+{
+  "required_judge_count": 2,
+  "agreement_rule": "unanimous",
+  "consensus_status": "disagreement",
+  "requires_human_review": true,
+  "disagreement_event": {
+    "event_type": "multi_judge_disagreement",
+    "session_log_ref": "session-log.json#multi_judge_disagreement-exp4-E2"
+  },
+  "judges": [
+    {
+      "judge_id": "judge_a",
+      "judge_label": "Judge A",
+      "pass_fail": "pass",
+      "reasoning_trace": "Presence-framed judge accepted the examples because two examples were provided."
+    },
+    {
+      "judge_id": "judge_b",
+      "judge_label": "Judge B",
+      "pass_fail": "fail",
+      "reasoning_trace": "Failure-framed judge rejected the examples because they are generic and not concrete enough."
+    }
+  ]
+}
+```
+
+Required fields:
+- `required_judge_count`: positive integer. Number of independent judges that must weigh in before the verdict can resolve automatically.
+- `agreement_rule`: use `unanimous` in v4. A single judge cannot decide a multi-judge eval alone.
+- `consensus_status`: one of `agreed`, `disagreement`, `single_judge`, or `unknown`.
+- `requires_human_review`: boolean. Set `true` whenever the panel disagrees and the verdict must be resolved outside the automated judge loop.
+- `judges[]`: one object per independent judge with `judge_id`, `judge_label`, `pass_fail`, and `reasoning_trace`.
+
+Usage rules:
+- Only agreed multi-judge verdicts may contribute to `decision_breakdown.components[]`.
+- Only unanimous multi-judge verdicts should contribute weighted points to the final score.
+- When `consensus_status = disagreement`, persist `pass_fail = disagreement` on the parent verdict, do not let one judge silently choose the score, and surface the verdict for human review.
+- Log disagreements through `disagreement_event` so the human-review queue and calibration audit trail can reopen the exact split verdict later.
+- Preserve the `multi_judge` object unchanged in `eval_results[]`, `judge_verdict_report_entries[]`, and any surfaced human-review sample derived from that verdict.
 
 ### decision_breakdown fields
 
@@ -1374,6 +1744,97 @@ The aggregation engine also emits `decision_explanation` for baseline and every 
 - Mixed-signal synthesis rule: for `keep`, combine the strongest keep signal with the strongest discard signal as "positive pressure vs. drag," then explain why the keep signal still cleared threshold. For `discard`, combine the strongest discard signal with the strongest keep signal, then explain why the keep signal still missed threshold.
 - Populate `decision_explanation` immediately after `decision_breakdown` is finalized so both records describe the same scoring event.
 - Return the stored `decision_explanation` field unchanged anywhere experiment payloads are serialized, fetched, or shown. Never recompute `decision_explanation` on the retrieval path.
+
+### mutation_handoff fields
+
+The scoring pass also emits `mutation_handoff` for baseline and every mutation. This is the stable structured handoff from eval to mutate:
+
+```json
+{
+  "mutation_handoff": {
+    "schema_version": 1,
+    "artifact_role": "phase7_eval_to_mutate_handoff",
+    "normalized_evaluation_scores": {
+      "combined_score": 0.787,
+      "combined_score_pct": 78.7,
+      "threshold": 0.8,
+      "gap_to_threshold": -0.013,
+      "per_eval": [
+        {
+          "eval": "E1",
+          "category": "structural",
+          "pass_fail": "pass",
+          "normalized_score": 0.213,
+          "missed_weight_share": 0.0,
+          "weight": 1.0,
+          "weight_source": "code_eval_fixed"
+        },
+        {
+          "eval": "E2",
+          "category": "quality",
+          "pass_fail": "fail",
+          "normalized_score": 0.0,
+          "missed_weight_share": 0.191,
+          "weight": 0.9,
+          "weight_source": "phase_6_validation_average"
+        }
+      ]
+    },
+    "failure_reasons": [
+      {
+        "reason_id": "exp3-E2-missing-disclosure-guidance",
+        "eval": "E2",
+        "category": "quality",
+        "reason_code": "missing_required_instruction",
+        "summary": "Disclosure guidance is missing.",
+        "source_eval_ref": "eval_results[E2]",
+        "evidence_refs": [
+          "eval_results[E2].evidence[0]"
+        ],
+        "supporting_item_refs": [
+          "eval_results[E2].supporting_items[0]",
+          "eval_results[E2].supporting_items[1]"
+        ],
+        "missed_weight_share": 0.191,
+        "mapped_target_ids": [
+          "target-progressive-disclosure-read-when"
+        ]
+      }
+    ],
+    "mutation_targets": [
+      {
+        "target_id": "target-progressive-disclosure-read-when",
+        "target_location": "Progressive Disclosure",
+        "recommended_mutation_type": "modify",
+        "priority": 1,
+        "source_eval_ids": [
+          "E2"
+        ],
+        "source_reason_ids": [
+          "exp3-E2-missing-disclosure-guidance"
+        ],
+        "strategy_alignment": "pipeline_eval_strategy",
+        "rationale": "Restore explicit stage-local disclosure guidance for pipeline readers.",
+        "expected_effect": "Recover the missed disclosure requirement without destabilizing passing gotcha behavior."
+      }
+    ]
+  }
+}
+```
+
+- `schema_version`: currently `1` for the canonical eval-to-mutate handoff contract.
+- `artifact_role`: always `phase7_eval_to_mutate_handoff`.
+- `normalized_evaluation_scores`: normalized score surface that the mutate phase reads directly instead of reverse-engineering weight math from `decision_breakdown`.
+- `normalized_evaluation_scores.gap_to_threshold`: signed `combined_score - threshold`; negative means the experiment is still below keep threshold, positive means it cleared threshold with headroom.
+- `normalized_evaluation_scores.per_eval[]`: ordered per-eval score rows. `normalized_score` is the eval's realized share of the final score. `missed_weight_share` is the withheld share for a failed eval and should be `0.0` for passing evals.
+- `failure_reasons[]`: canonical blocking reasons extracted from failing or unresolved evals. One eval may emit multiple failure reasons when the mutate phase must track distinct blockers separately.
+- `failure_reasons[].source_eval_ref`: stable pointer back to the owning `eval_results[]` row.
+- `failure_reasons[].evidence_refs` and `failure_reasons[].supporting_item_refs`: stable pointers back to the exact stored evidence and sub-decisions that justified the failure reason.
+- `failure_reasons[].mapped_target_ids`: ordered link(s) to the mutation target entries this failure reason should feed.
+- `mutation_targets[]`: ordered candidate mutation list for Phase 7 step 2a. The mutate phase should start from the lowest `priority` value and carry `target_location`, `recommended_mutation_type`, `source_reason_ids`, and `strategy_alignment` forward unchanged into the one-change hypothesis.
+- `mutation_targets[].target_location`: use the same section/instruction naming convention as `changes[].location` so keeps, discards, and future autopsies can compare target history without fuzzy matching.
+- Populate `mutation_handoff` immediately after `decision_explanation` is finalized so scoring, explanation, and mutation-target extraction all describe the same evaluation event.
+- Return the stored `mutation_handoff` field unchanged anywhere experiment payloads are serialized, fetched, or shown. Never recompute `mutation_handoff` on the retrieval path.
 
 ---
 
@@ -1572,6 +2033,817 @@ Phase 7 reads this file before hypothesizing mutations — do NOT propose change
 
 ---
 
+## Research Intake Stage Contract
+
+Read when: Gulf 2 gate is approved and before Phase 7 starts, or when resuming a run whose `state.json.research_intake.status` is `in_progress`, `completed`, or `partial`.
+
+Purpose: turn external references into mutation-ready, source-cited patterns for the current skill/domain without replacing the existing 7-phase foundation, leaking evaluation holdout data, or confusing reference skills with alternate routing targets.
+
+### Inputs
+
+- `target_skill_path`: workspace-relative path to the skill under test. It must point to a readable `SKILL.md`.
+- `target_domain`: one-sentence description of the job this skill is being improved for.
+- `selected_skill_pattern` + `selected_eval_strategy_id`: restored from `state.json.phase1_context` so research stays pattern-aware instead of generic.
+- `reference_sources[]`: zero or more user-provided references. Each item must declare a stable `source_id`, `source_kind` (`reference_skill`, `design_doc`, `best_practice`, `article`, or `repo`), a readable `location`, and an `analysis_goal`.
+- Optional `failure_focus[]`: Phase 1/3/6 findings that the extraction should emphasize.
+- Optional `preferences_path`: `[workspace]/preferences.md`, used to reject mutation leads that obviously conflict with captured user preferences.
+- Optional `research_intake_overrides`: per-run patch object applied to the default configuration below. Omitted fields inherit defaults; guardrail-breaking overrides fail before any source reads begin.
+
+### Research Intake Configuration Schema
+
+Resolve exactly one `research_intake_config` object before source validation or extraction. This resolved config is the explainable source-selection and retrieval-budget contract for the run.
+
+```yaml
+research_intake_config:
+  targeting:
+    target_skill_path: "[workspace]/skill-under-test/SKILL.md"
+    target_domain: "<one-sentence target job>"
+    improvement_scope: same_skill_only
+    require_phase1_pattern_context: true
+    pattern_context_source: state.json.phase1_context
+  source_selection:
+    selection_mode: explicit_user_curation
+    enabled_source_kinds:
+      - reference_skill
+      - design_doc
+      - best_practice
+      - article
+      - repo
+    preferred_source_kinds_by_pattern:
+      tool_wrapper: [best_practice, design_doc, article, reference_skill]
+      generator: [reference_skill, design_doc, article, repo]
+      reviewer: [reference_skill, best_practice, design_doc, article]
+      inversion: [design_doc, best_practice, article, reference_skill]
+      pipeline: [reference_skill, design_doc, repo, best_practice]
+    max_total_sources: 4
+    max_sources_per_kind: 2
+    require_analysis_goal: true
+    dedupe_strategy: normalized_location
+    allow_remote_locations: true
+    remote_locations_require_explicit_selection: true
+  retrieval_limits:
+    target_patterns_per_accepted_source: 3-5
+    minimum_patterns_per_accepted_source: 1
+    max_patterns_per_accepted_source: 5
+    max_total_patterns: 12
+    max_mutation_leads: 8
+    max_failure_focus_items: 5
+    require_evidence_locator_per_pattern: true
+  overrides:
+    merge_strategy: deep_merge_replace_arrays
+    precedence:
+      - base_defaults
+      - pattern_defaults
+      - research_intake_overrides
+      - per_source_analysis_goal
+    immutable_guardrails:
+      - improvement_scope stays same_skill_only
+      - require_phase1_pattern_context stays true
+      - dedupe_strategy stays normalized_location
+      - adversarial_holdout remains unreadable
+```
+
+Default behavior:
+- `targeting` always anchors the run to the current workspace copy plus one explicit target domain. Research Intake improves one skill; reference skills are donors, not alternate routing candidates.
+- `source_selection` defaults to explicit user curation with all 5 supported source kinds enabled, but caps the run at 4 total sources and 2 sources from any one kind so weak agents do not drown in reference material.
+- `preferred_source_kinds_by_pattern` reorders which source kinds should be prioritized after Phase 1 classification. It is a ranking hint, not a license to skip validation or invent missing sources.
+- `retrieval_limits` default to a mutation-ready artifact: aim for 3-5 extracted patterns per accepted source, never exceed 5 from one source, cap the run at 12 total extracted patterns and 8 mutation leads, and keep `failure_focus[]` to at most 5 items.
+- Remote URLs are allowed only when they were explicitly selected as reference sources for the run; Research Intake does not auto-discover or crawl new remote sources beyond the user-provided list.
+
+Override behavior:
+- Resolve config in this order: base defaults -> pattern defaults -> `research_intake_overrides` -> per-source `analysis_goal`. The resolved object, not the raw override payload, is the contract Phase 6.5 executes.
+- Scalar values replace earlier values. Object values merge key-by-key. Arrays replace the earlier array in full so humans can see the final source mix without mentally merging two lists.
+- Overrides may narrow the source mix or lower retrieval caps freely. Widening is valid only within hard ceilings: `max_total_sources <= 6`, `max_sources_per_kind <= 3`, `max_patterns_per_accepted_source <= 5`, `max_total_patterns <= 15`, `max_mutation_leads <= 10`, and `max_failure_focus_items <= 5`.
+- Any override that changes `improvement_scope`, disables `require_phase1_pattern_context`, weakens `dedupe_strategy`, or opens access to `adversarial_holdout` is invalid. Fail fast with `error_code = invalid_research_intake_config` instead of silently falling back.
+- If no override is provided, treat the run as `default_only`. If the pattern-aware ranking changed the resolved source priorities, treat it as `pattern_default_only`. If user input changed the resolved config, treat it as `explicit_override`. Surface that resolution mode in `research-intake.md`.
+
+### External Source Retrieval and Snapshot Requirements
+
+Fetch remote `best_practice`, `article`, and `repo` sources before extraction. When a source `location` resolves to a URL, remote repository blob, or other non-local artifact, Phase 6.5 must first fetch the exact source content into `[workspace]/research-sources/<source_id>/` before extracting patterns. Persist at least one raw snapshot artifact plus one metadata sidecar per fetched source, then perform extraction from that stored snapshot instead of from transient browser state, streamed tool output, or memory.
+
+Required fetched-source metadata:
+
+- `citation_metadata`: preserve `title`, `author_or_org`, `published_at`, `publication_or_site`, `canonical_url`, and `accessed_at`. Unknown fields may be `null` or `unknown`, but the object itself must exist for fetched external sources.
+- `retrieval_started_at` + `retrieval_completed_at`: record when the fetch began and when the raw snapshot finished writing. Keep `retrieved_at` as the accepted-source timestamp that downstream readers can treat as "the snapshot is now available."
+- `raw_artifact_ref`: workspace-relative pointer to the stored raw artifact. Also preserve `raw_artifact_kind`, `raw_artifact_sha256`, and `raw_artifact_bytes` when those values are available from the fetch path.
+- `source_last_modified_at`: copy from HTTP headers, page metadata, repo metadata, or commit metadata when available; otherwise record `null`.
+
+Local `reference_skill` and `design_doc` sources may be read in place or copied into the same snapshot directory when the run needs a frozen copy. Remote retrieval failures are blocking for that source: reject the source explicitly instead of extracting from partial content, a stale browser buffer, or an unfetched placeholder.
+
+### Responsibilities
+
+1. Normalize the target first: confirm the stage is about improving one specific `SKILL.md` and one target domain, not comparing different skills or doing runtime routing.
+2. Resolve `research_intake_config` before reading sources. Every later validation and extraction decision must use the resolved targeting, source-selection, and retrieval-limit values instead of ad hoc operator judgment.
+3. Validate every reference before extraction. Unsupported or unreadable sources are rejected explicitly; they are never silently ignored.
+4. For external `best_practice`, `article`, and `repo` sources, fetch the exact source content into `[workspace]/research-sources/<source_id>/` before extraction. Persist citation metadata, retrieval timestamps, and raw artifact refs so the run can be replayed later.
+5. Extract only mutation-relevant patterns. Capture 3-5 evidence-backed patterns per accepted source, not generic summaries.
+6. Normalize every persisted finding into the shared research corpus contract: assign a stable `entry_id`, keep `source_kind` as provenance, and choose exactly one canonical `entry_type`.
+7. Record why each pattern matters to the current target: every extracted pattern must name its applicability, evidence locator, and expected mutation leverage.
+8. Distinguish transferable patterns from local quirks. Reference skills are pattern donors, not gold-standard outputs that Phase 7 must mimic.
+9. Preserve transparency for weak agents: the contract must be satisfiable with plain Read/Write/Bash workflows and a human-readable artifact, without requiring subagents or hidden state.
+10. Stay off protected evaluation data. Research Intake must never read `adversarial_holdout`, mutation-only scoring outputs, or any other hidden evaluation corpus.
+
+### Outputs
+
+- `[workspace]/research-intake.md`: canonical human-readable artifact for the current run.
+- `[workspace]/research-sources/`: per-source snapshot directory for fetched external content and copied frozen source artifacts when the run needs replayable provenance.
+- `state.json.research_intake`: stage ledger with `{status, target_skill_path, target_domain, requested_sources, accepted_sources, rejected_sources, completed_at, error_code}`. Accepted-source records must preserve `citation_metadata`, `retrieval_started_at`, `retrieval_completed_at`, and `raw_artifact_ref` whenever a fetched or copied snapshot exists.
+- `state.json.research_intake_path`: set to `[workspace]/research-intake.md` only when the artifact is written successfully for the current target.
+- `session-log.json` entries for `research_intake_started`, optional per-source `research_source_fetched`, and `research_intake_completed`.
+
+### Research Corpus Normalization Contract
+
+AutoRefine v4.2 preserves the existing filesystem-as-memory foundation. The research corpus is not a new database; it is a read-time normalized view over the artifacts AutoRefine already writes:
+
+- `research-intake.md` contributes external pattern observations and mutation hypotheses.
+- `meta-learnings.md` contributes manually promoted cross-campaign rules.
+- `preferences.md` contributes confirmed user preference signals.
+- prior campaign `results.json` plus version-comparison artifacts contribute reusable case studies.
+
+`source_kind` is an ingestion/provenance field, not the final storage type. Do not store `reference_skill`, `design_doc`, `best_practice`, `article`, or `repo` as the canonical `entry_type`. Normalize every reusable research record into exactly one of:
+
+- `pattern_observation`
+- `case_study`
+- `meta_learning_rule`
+- `preference_signal`
+- `mutation_hypothesis`
+
+Comparison guardrail: `case_study` entries may cite version-to-version improvement only when the stored evidence proves same-corpus comparison for that skill lineage. Cross-skill transfer happens through promoted patterns and rules, not by pretending two different skills were directly comparable.
+
+### Corpus Provenance and Attribution Requirements
+
+Every normalized research record must carry enough provenance to answer four human questions without reopening the source:
+
+1. What exact source snapshot produced this entry?
+2. Why was that source retrieved for this target skill and run?
+3. When was the source observed and when was the normalized entry captured?
+4. How do I trace the entry back to the human-readable artifact, session log, and evidence chain?
+
+Required provenance dimensions for every entry:
+
+- `source identity`: capture `source_ref.source_id`, `source_ref.display_name`, `source_ref.location`, `source_ref.canonical_location`, `source_ref.locator`, `source_ref.artifact_kind`, and `source_ref.content_hash`.
+- `citation metadata`: capture `source_ref.citation_metadata.title`, `source_ref.citation_metadata.author_or_org`, `source_ref.citation_metadata.published_at`, `source_ref.citation_metadata.publication_or_site`, `source_ref.citation_metadata.canonical_url`, and `source_ref.citation_metadata.accessed_at`.
+- `retrieval context`: capture `retrieval_context.retrieval_id`, `retrieval_context.stage`, `retrieval_context.run_path`, `retrieval_context.analysis_goal`, `retrieval_context.retrieved_via`, and `retrieval_context.selection_basis`.
+- `timestamps`: preserve both source-observation time and normalization time. `captured_at` remains the normalized-entry timestamp; `source_timestamps.retrieval_started_at`, `source_timestamps.retrieval_completed_at`, `source_timestamps.retrieved_at`, and `source_timestamps.source_observed_at` are required; `source_timestamps.source_last_modified_at` must exist as a field but may be `null` when unavailable.
+- `traceability`: capture `traceability.research_artifact_ref`, `traceability.raw_artifact_refs[]`, `traceability.session_log_refs[]`, `traceability.evidence_refs[]`, `traceability.lineage_parent_ids[]`, and `traceability.normalization_note`.
+
+Normalization rule: unknown provenance must be explicit as `null` or `unknown`. Do not omit required attribution fields or silently invent metadata.
+
+### Reference and Exemplar Canonicalization Rules
+
+References and exemplars are upstream input shapes, not extra canonical `entry_type`s. After normalization, downstream phases should branch only on `entry_type` plus the shared metadata envelope, never on raw reference-source kinds or exemplar loader bundle kinds.
+
+Stable identity rules:
+
+- `source_id` is the stable identity for one accepted reference snapshot. Reuse it across every extracted row derived from that source. If `canonical_location` or the stored snapshot `content_hash` changes materially, mint a new `source_id` instead of mutating provenance in place.
+- `record_id` from the canonical exemplar loader is the stable exemplar identity. Reuse it when a repository or evaluated-skill exemplar is cited by later research artifacts, case studies, or meta-learning promotion notes.
+- `entry_id` is the stable identity for one normalized research finding. Never derive it from transient array position alone; mint a new `entry_id` only when the normalized claim, evidence chain, or applicability envelope materially changes.
+
+Reference canonicalization rules:
+
+- Canonicalize reference sources on `canonical_location` plus the stored snapshot `content_hash`. Keep the original operator-provided `location` for audit, but treat `canonical_location` as the de-duplication key and `content_hash` as the exact-source proof.
+- Carry one `retrieval_id` per accepted source snapshot. All entries derived from that snapshot must reuse the same `source_ref` and `retrieval_context` envelope so humans can trace the full family of findings back to one fetch.
+- Normalize fetched references from stored artifacts only. Do not compute `source_ref.content_hash`, `citation_metadata.accessed_at`, or `traceability.raw_artifact_refs[]` from live browser state, transient tool output, or memory.
+
+Exemplar canonicalization rules:
+
+- Canonical exemplar inputs come from the loader-native `candidate_skill_record_bundle` / `selected_exemplar_payload` surfaces. Preserve loader-native provenance: `record_id`, `record_kind`, `skill_id`, `version_label`, `source_id`, `source_kind`, `content_hash`, and `performance.source_results_ref` when present.
+- Repository exemplars (`record_kind = repository_skill`) normalize into `pattern_observation` unless a human later promotes them into a curated rule. Do not invent a repository-only corpus type.
+- Evaluated exemplars (`record_kind = evaluated_skill_version`) may normalize into `case_study` only when the stored evidence proves same-skill lineage and `same_input_set_verified = true`. Otherwise, extract reusable patterns and normalize them as `pattern_observation` instead of treating the exemplar as direct comparison proof.
+- When exemplar selection deduplicates records, preserve the chosen `selection.dedupe_strategy` and `selection.dedupe_key` in traceability or index metadata so downstream consumers can replay why one exemplar survived.
+
+### Downstream Normalized Research Corpus View
+
+Downstream phases should consume one normalized bundle rather than reopening raw markdown tables, source snapshots, or exemplar payloads ad hoc:
+
+```json
+{
+  "schema_version": 1,
+  "bundle_type": "normalized_research_corpus",
+  "generated_at": "2026-04-11T18:40:00Z",
+  "target_context": {
+    "skill_pattern": "pipeline",
+    "agent_target": "any_skill_md",
+    "scenario_target": "individual"
+  },
+  "entries": [],
+  "entry_index": {
+    "rc-pattern-autorefine-2026-04-11-001": 0
+  },
+  "reference_index": [
+    {
+      "source_id": "source-reference-skill-ship-001",
+      "canonical_location": "~/.claude/skills/ship/SKILL.md",
+      "entry_ids": ["rc-pattern-autorefine-2026-04-11-001"],
+      "raw_artifact_refs": ["research-sources/source-reference-skill-ship-001/source.md"]
+    }
+  ],
+  "exemplar_index": [
+    {
+      "record_id": "autorefine-v3-keep-004",
+      "record_kind": "evaluated_skill_version",
+      "normalization_mode": "case_study",
+      "entry_ids": ["rc-case-autorefine-2026-04-11-001"]
+    }
+  ]
+}
+```
+
+- `entries[]` is the authoritative normalized corpus payload.
+- `entry_index` maps stable `entry_id` to array position for weak-agent lookup without reparsing.
+- `reference_index[]` groups entries by normalized source snapshot (`source_id` + `canonical_location`).
+- `exemplar_index[]` groups entries derived from exemplar records and declares whether the exemplar was reduced to `pattern_observation`, promoted to `case_study`, or mixed across both.
+- Downstream consumers should read `entries[]`, `entry_index`, `reference_index[]`, and `exemplar_index[]` from the same normalized view. Do not branch on raw `research-intake.md` tables or the exemplar loader payload once this bundle exists.
+
+### Shared Research Corpus Entry Schema
+
+Every normalized research record must share the following required fields before any type-specific payload is read:
+
+```json
+{
+  "entry_id": "rc-pattern-autorefine-2026-04-11-001",
+  "schema_version": 1,
+  "entry_type": "pattern_observation",
+  "title": "Explicit exit conditions improve checkpoint fidelity",
+  "summary": "A donor skill uses numbered exits at each step, which reduces weak-agent drift in pipeline skills.",
+  "source_kind": "reference_skill",
+  "source_ref": {
+    "source_id": "source-reference-skill-ship-001",
+    "location": "~/.claude/skills/ship/SKILL.md",
+    "canonical_location": "~/.claude/skills/ship/SKILL.md",
+    "locator": "## Phase 7",
+    "artifact_kind": "markdown_section",
+    "display_name": "ship/SKILL.md",
+    "content_hash": "sha256:31d8f4f0c3...",
+    "citation_metadata": {
+      "title": "ship/SKILL.md",
+      "author_or_org": "Surah Li",
+      "published_at": null,
+      "publication_or_site": "Local skill library",
+      "canonical_url": null,
+      "accessed_at": "2026-04-11T18:26:10Z"
+    }
+  },
+  "retrieval_context": {
+    "retrieval_id": "ri-2026-04-11-source-01",
+    "stage": "phase_6_5_research_intake",
+    "run_path": "runs/run_2026-04-11T18-25-00/",
+    "analysis_goal": "extract pipeline checkpoint and exit-condition patterns",
+    "retrieved_via": "read_and_extract",
+    "selection_basis": "pattern_default_priority:pipeline"
+  },
+  "captured_at": "2026-04-11T18:30:00Z",
+  "captured_by": {
+    "stage": "phase_6_5_research_intake",
+    "method": "agent_extracted"
+  },
+  "source_timestamps": {
+    "retrieval_started_at": "2026-04-11T18:26:02Z",
+    "retrieval_completed_at": "2026-04-11T18:26:10Z",
+    "retrieved_at": "2026-04-11T18:26:10Z",
+    "source_observed_at": "2026-04-11T18:26:10Z",
+    "source_last_modified_at": null
+  },
+  "applicability": {
+    "skill_patterns": ["pipeline"],
+    "agent_targets": ["claude_code", "rovodev", "any_skill_md"],
+    "scenario_targets": ["individual", "production"],
+    "scope_type": "pattern_family",
+    "scope_ref": "pipeline"
+  },
+  "evidence": [
+    {
+      "kind": "source_excerpt",
+      "source": "research_source",
+      "locator": "## Phase 7",
+      "excerpt": "Step 3 ends with an explicit exit condition."
+    }
+  ],
+  "confidence": "medium",
+  "status": "active",
+  "derived_from_entry_ids": [],
+  "traceability": {
+    "research_artifact_ref": "research-intake.md#accepted-source-source-reference-skill-ship-001",
+    "raw_artifact_refs": ["research-sources/source-reference-skill-ship-001/source.md"],
+    "session_log_refs": ["session-log.json#research_intake_started-2026-04-11T18:25:00Z"],
+    "evidence_refs": [0],
+    "lineage_parent_ids": [],
+    "normalization_note": "Normalized from Accepted Sources row source-reference-skill-ship-001 and Extracted Pattern row 1."
+  },
+  "type_payload": {
+    "pattern_label": "explicit_exit_conditions",
+    "pattern_statement": "Use explicit exit conditions after numbered steps to keep weak agents on track.",
+    "transfer_type": "positive_pattern",
+    "applicability_reason": "Pipeline skills benefit from explicit stage exits.",
+    "mutation_leverage": "Add completion gates to long multi-step instructions.",
+    "evidence_reference": {
+      "schema_version": 1,
+      "source_hash": "sha256:31d8f4f0c3...",
+      "source_location": {
+        "locator": "## Phase 7",
+        "section_id": "phase_7",
+        "heading_path": ["Phase 7"]
+      },
+      "quote": "Step 3 ends with an explicit exit condition.",
+      "span": {
+        "line_start": 42,
+        "line_end": 45,
+        "char_start": 812,
+        "char_end": 924,
+        "byte_start": 812,
+        "byte_end": 924,
+        "offset_basis": "normalized_text_utf8"
+      },
+      "retrieval_fingerprint": null
+    }
+  }
+}
+```
+
+- `entry_id`: stable corpus identifier. Do not recycle ids across materially different findings.
+- `schema_version`: starts at `1` for the normalized research corpus contract.
+- `entry_type`: exactly one canonical normalized type. Valid values: `pattern_observation`, `case_study`, `meta_learning_rule`, `preference_signal`, or `mutation_hypothesis`.
+- `title` + `summary`: compact human-readable description. Weak agents should understand the record without reopening the source immediately.
+- `source_kind`: original ingestion surface, such as `reference_skill`, `design_doc`, `best_practice`, `article`, `repo`, `meta_learning`, `preference_log`, or `prior_campaign`.
+- `source_ref`: stable provenance pointer. Required fields: `source_id`, `location`, `canonical_location`, `locator`, `artifact_kind`, `display_name`, `content_hash`, and `citation_metadata`. `location` is the original operator-provided location; `canonical_location` is the normalized de-duplication target.
+- `retrieval_context`: why and how this source entered the current run. Required fields: `retrieval_id`, `stage`, `run_path`, `analysis_goal`, `retrieved_via`, and `selection_basis`.
+- `captured_at`: when this normalized entry was created.
+- `captured_by`: stage + method that produced the entry, for example `phase_6_5_research_intake` + `agent_extracted` or `session_close` + `human_curated`.
+- `source_timestamps`: required source-time metadata. `retrieval_started_at`, `retrieval_completed_at`, `retrieved_at`, and `source_observed_at` are required; `source_last_modified_at` may be `null` when the upstream source does not expose it.
+- `applicability`: normalized targeting envelope. `skill_patterns[]`, `agent_targets[]`, and `scenario_targets[]` are required so the same corpus can serve both individual and production scenarios without runtime routing. `scope_type` + `scope_ref` describe whether the entry applies to one skill lineage, one pattern family, or the full SKILL.md ecosystem.
+- `evidence[]`: structured support for the entry. Reuse the same evidence shape as judge verdicts whenever possible (`kind`, `source`, `locator`, plus optional `excerpt`, `metric`, and `artifact_ref`).
+- `confidence`: `high`, `medium`, or `low`.
+- `status`: lifecycle flag. Use `candidate`, `active`, `superseded`, or `rejected`.
+- `derived_from_entry_ids[]`: upstream corpus entries that informed this one. Use an empty list for first-order observations.
+- `traceability`: required back-pointers to the artifact/evidence chain. `research_artifact_ref`, `raw_artifact_refs[]`, and at least one `evidence_refs[]` item are required; `session_log_refs[]` and `lineage_parent_ids[]` preserve replayable lineage, and `normalization_note` explains how the normalized entry was produced from markdown-first artifacts.
+- `type_payload`: entry-type-specific extension object. Required fields depend on `entry_type`. For `pattern_observation`, this payload must also preserve a structured `evidence_reference` so humans can trace the extracted pattern back to one precise source span without reopening the raw source first.
+
+### Research Corpus Entry Types
+
+#### `pattern_observation`
+
+Use when one reusable pattern, anti-pattern, or heuristic is extracted from a source artifact.
+
+Required `type_payload` fields:
+- `pattern_label`
+- `pattern_statement`
+- `transfer_type`: `positive_pattern`, `anti_pattern`, or `heuristic`
+- `applicability_reason`
+- `mutation_leverage`
+- `evidence_reference`
+- `pattern_type_tactic`
+- `pattern_type_structure`
+- `pattern_type_heuristic`
+- `evidence_reference`: canonical structured pointer to the pattern's primary supporting evidence with
+  - `schema_version`
+  - `source_hash`
+  - `source_location.locator`
+  - `source_location.section_id`
+  - `source_location.heading_path[]`
+  - `quote` or `span`
+  - optional `retrieval_fingerprint`
+- `span`: when present, preserve `line_start`, `line_end`, `char_start`, `char_end`, `byte_start`, `byte_end`, and `offset_basis`
+- `pattern`: canonical nested object with
+  - `schema_version`
+  - `pattern_label`
+  - `pattern_statement`
+  - `transfer_type`
+  - `applicability_reason`
+  - `mutation_leverage`
+  - `evidence_reference`
+  - `pattern_type_tactic`
+  - `pattern_type_structure`
+  - `pattern_type_heuristic`
+
+Typical `source_kind`: `reference_skill`, `design_doc`, `best_practice`, `article`, or `repo`.
+
+#### `case_study`
+
+Use when a prior campaign or version comparison contributes reusable evidence about what helped or hurt.
+
+Required `type_payload` fields:
+- `campaign_ref`
+- `skill_id`
+- `version_before`
+- `version_after`
+- `same_input_set_verified`
+- `observed_delta`
+- `takeaway`
+
+Guardrail: if `same_input_set_verified = false`, the entry cannot be used as version-comparison proof. It may only be promoted into a looser `pattern_observation` after human review.
+
+#### `meta_learning_rule`
+
+Use when a human promotes a repeatable cross-campaign rule into `meta-learnings.md`.
+
+Required `type_payload` fields:
+- `rule_statement`
+- `supporting_case_ids`
+- `promotion_basis`
+- `precedence`
+- `review_status`
+
+Use `precedence` to resolve conflicts with lower-trust preference signals. Meta-learning rules outrank ambient and mid-session preferences unless the current user explicitly overrides them in-session.
+
+### meta-learnings.md required sections
+
+`meta-learnings.md` is markdown-first and manually curated so weak agents can read it directly, but every entry must normalize into one `meta_learning_rule` record from the shared research corpus schema.
+
+```markdown
+# AutoRefine Meta-Learnings
+
+## Curation Rules
+- Manual promotion only.
+- One entry per reusable rule.
+- Every entry must name its applicability conditions and supporting evidence.
+
+## Entry Template
+
+### ML-<YYYY-MM-DD>-<NNN> | <short title>
+- entry_type: meta_learning_rule
+- status: candidate | active | superseded | rejected
+- learning: <one-sentence reusable insight>
+- applicability_conditions:
+  - skill_patterns: [tool_wrapper|generator|reviewer|inversion|pipeline]
+  - agent_targets: [claude_code|rovodev|any_skill_md]
+  - scenario_targets: [individual|production]
+  - scope_type: skill_lineage | pattern_family | ecosystem
+  - scope_ref: <skill id, pattern id, or any_skill_md>
+  - skill_metadata_keywords: [optional metadata phrases from skill id/title/summary/tags/path]
+  - objective_keywords: [optional campaign-objective phrases]
+  - when_to_apply: <observable conditions>
+  - do_not_apply_when: <known exclusions>
+- supporting_evidence:
+  - case_id: <campaign/version-comparison id>
+    source_kind: prior_campaign | reference_skill | meta_learning | best_practice
+    source_ref: <path, artifact ref, or URL>
+    evidence_locator: <section/lines/experiment/comparison artifact>
+    excerpt_or_metric: <quote or numeric delta>
+    why_it_supports: <causal link>
+- confidence: high | medium | low
+- promotion_basis: <why this was promoted>
+- precedence: high | medium | low
+- review_status: pending | approved | superseded
+- supporting_case_ids: [<case-study ids>]
+- derived_from_entry_ids: [<research corpus ids>]
+- last_reviewed_at: <ISO timestamp>
+```
+
+- `learning` is the canonical reusable rule that Phase 7 may consider during mutation design.
+- `applicability_conditions` is required. Do not treat a rule as universal unless the scope explicitly says so.
+- `skill_metadata_keywords` and `objective_keywords` are optional relevance filters inside `applicability_conditions`. Use them when a rule should only steer campaigns whose target skill metadata or stated objective clearly matches the curated evidence.
+- `supporting_evidence` is required. Cite concrete artifacts or metrics, not memory or intuition.
+- Prefer at least 2 supporting cases before promoting an entry from `candidate` to `active`.
+- `supporting_case_ids` maps directly to `type_payload.supporting_case_ids`.
+- `promotion_basis`, `precedence`, and `review_status` map directly to the required `meta_learning_rule` payload.
+- Keep superseded or rejected entries in the file with updated status so future runs can understand why a rule lost trust.
+
+### Parsed Meta-Learnings Runtime Schema
+
+Campaign setup does not consume `meta-learnings.md` as raw markdown bullets. After resolving `state.json.meta_learnings_path` (or defaulting to the AutoRefine skill directory copy), parse the document into one in-memory `parsed_meta_learnings` bundle and use that bundle for Phase 7 startup, resume-time context hydration, and mutation steering.
+
+```json
+{
+  "schema_version": 1,
+  "bundle_type": "parsed_meta_learnings",
+  "meta_learnings_path": "~/.claude/skills/autorefine/meta-learnings.md",
+  "curator_source": "~/.claude/skills/autorefine/meta-learnings.md",
+  "curator_version": "sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8",
+  "loaded_at": "2026-04-11T18:30:00Z",
+  "load_status": "loaded",
+  "target_context": {
+    "skill_pattern": "pipeline",
+    "agent_target": "claude_code",
+    "scenario_target": "individual",
+    "scope_type": "skill_lineage",
+    "scope_ref": "autorefine",
+    "skill_metadata": {
+      "skill_id": "autorefine",
+      "title": "AutoRefine",
+      "summary": "Improve one SKILL.md through staged evaluation and mutation.",
+      "tags": ["pipeline", "evaluation", "mutation"]
+    },
+    "campaign_objective": "Improve mutation-loop reliability without broadening scope."
+  },
+  "transfer_parameters": {
+    "skill_pattern": "pipeline",
+    "agent_target": "claude_code",
+    "scenario_target": "individual",
+    "scope_type": "skill_lineage",
+    "scope_ref": "autorefine",
+    "campaign_objective": "Improve mutation-loop reliability without broadening scope."
+  },
+  "entries": [],
+  "actionable_entry_ids": ["ML-2026-04-11-001"],
+  "historical_entry_ids": ["ML-2026-03-29-001"],
+  "blocked_entry_ids": ["ML-2026-04-09-002"],
+  "transfer_traceability": {
+    "trace_id": "ml-transfer-3f9a2f8d1c4b",
+    "transfer_signature": "sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8",
+    "actionable_entry_refs": ["~/.claude/skills/autorefine/meta-learnings.md#ML-2026-04-11-001"],
+    "historical_entry_refs": ["~/.claude/skills/autorefine/meta-learnings.md#ML-2026-03-29-001"],
+    "blocked_entry_refs": ["~/.claude/skills/autorefine/meta-learnings.md#ML-2026-04-09-002"],
+    "filter_refs": [
+      "curator_source:~/.claude/skills/autorefine/meta-learnings.md",
+      "curator_version:sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8",
+      "transfer_signature:sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8",
+      "skill_pattern:pipeline",
+      "agent_target:claude_code",
+      "scenario_target:individual",
+      "scope_type:skill_lineage",
+      "scope_ref:autorefine"
+    ]
+  }
+}
+```
+
+- `bundle_type`: fixed discriminator for campaign setup consumers that expect parsed meta-learning input.
+- `meta_learnings_path`: resolved source path used for this load.
+- `curator_source`: exact curated source document used for this load. In v4.2 this is the resolved `meta-learnings.md` path.
+- `curator_version`: deterministic content version for the curated source. Use a stable hash of the source contents so production exports can distinguish one curation snapshot from another.
+- `load_status`: `loaded`, `missing`, `parse_failed`, or `empty`.
+- `target_context`: the current campaign setup envelope. Match `skill_pattern`, `agent_target`, `scenario_target`, `scope_type`, and `scope_ref` against each entry before applying it. When present, also use `skill_metadata` and `campaign_objective` to enforce optional relevance filters.
+- `transfer_parameters`: normalized transfer-target envelope used to decide whether curated learnings apply to this run. Default to the normalized `target_context` fields so filters and exports can reference the exact transfer settings without reparsing the source payload.
+- `entries[]`: full parsed entry list. Keep the original curation record visible for humans and resume flows.
+- `actionable_entry_ids[]`: precedence-aware ids that campaign setup may actually use as cross-campaign steering input.
+- `historical_entry_ids[]`: ids whose entries are retained for transparency but should never steer the current run (`superseded` or `rejected`).
+- `blocked_entry_ids[]`: ids that parsed successfully but are not actionable for the current run because of status, review, coarse applicability mismatch, or metadata/objective relevance mismatch.
+- `transfer_traceability`: deterministic trace envelope for exports and filters. Preserve `trace_id`, `transfer_signature`, stable entry refs, and `filter_refs[]` so dashboards and production systems can reference the same transfer event without recomputing it differently.
+- Only entries with `status = active` and `review_status = approved` may appear in `actionable_entry_ids`.
+- When `skill_metadata_keywords` or `objective_keywords` are present, those entries must also pass the current run's normalized metadata/objective relevance filters before they remain actionable.
+- `candidate` entries stay visible for humans but are excluded from the actionable list until approved.
+- Do not persist this bundle back into `state.json`. Reconstruct it from `meta-learnings.md` whenever campaign setup or resume needs it so the markdown file stays the single source of truth.
+
+### Campaign Bootstrap Meta-Learnings Context
+
+Campaign bootstrap should provide the parsed meta-learnings surface as part of the initial campaign configuration/context. Resolve the source path once, normalize the current campaign target envelope once, then carry the parsed bundle forward in the loaded run context:
+
+```json
+{
+  "meta_learnings_path": "~/.claude/skills/autorefine/meta-learnings.md",
+  "curator_source": "~/.claude/skills/autorefine/meta-learnings.md",
+  "curator_version": "sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8",
+  "target_context": {
+    "skill_pattern": "pipeline",
+    "agent_target": "claude_code",
+    "scenario_target": "individual",
+    "scope_type": "skill_lineage",
+    "scope_ref": "autorefine",
+    "campaign_objective": "Improve mutation-loop reliability without broadening scope."
+  },
+  "transfer_parameters": {
+    "skill_pattern": "pipeline",
+    "agent_target": "claude_code",
+    "scenario_target": "individual",
+    "scope_type": "skill_lineage",
+    "scope_ref": "autorefine",
+    "campaign_objective": "Improve mutation-loop reliability without broadening scope."
+  },
+  "parsed_meta_learnings": {
+    "bundle_type": "parsed_meta_learnings",
+    "actionable_entry_ids": ["ML-2026-04-11-001"]
+  },
+  "transfer_traceability": {
+    "trace_id": "ml-transfer-3f9a2f8d1c4b",
+    "transfer_signature": "sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8",
+    "actionable_entry_refs": ["~/.claude/skills/autorefine/meta-learnings.md#ML-2026-04-11-001"],
+    "filter_refs": [
+      "curator_source:~/.claude/skills/autorefine/meta-learnings.md",
+      "curator_version:sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8",
+      "transfer_signature:sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8",
+      "skill_pattern:pipeline",
+      "agent_target:claude_code",
+      "scenario_target:individual",
+      "scope_type:skill_lineage",
+      "scope_ref:autorefine"
+    ]
+  }
+}
+```
+
+- Campaign bootstrap should provide this object as part of the initial campaign configuration/context before Phase 7 mutation design or Session Close resume-time steering begins.
+- `meta_learnings_path` is the resolved config input for the current run.
+- `curator_source` and `curator_version` are the reporting-grade curation lineage fields that downstream run output exports should carry unchanged.
+- `target_context` is the normalized campaign-setup envelope used to evaluate applicability and optional relevance filters.
+- `transfer_parameters` is the filter/export-friendly copy of the normalized transfer envelope for this run.
+- `parsed_meta_learnings` is the derived runtime context payload reused by Phase 7 and resume flows; downstream steps should read this object instead of re-parsing markdown ad hoc.
+- `transfer_traceability` carries the deterministic transfer signature plus filter refs for the current curated-learning selection event.
+- Rebuild this object on every start/resume from `state.json.meta_learnings_path` plus the current target context. Do not persist parsed entry payloads back into `state.json`.
+
+### Meta-Learning Reporting Export Surface
+
+When reporting or exporting a run output, preserve the bootstrap envelope under `meta_learning_bootstrap_context` and derive a read-only `meta_learning_filter_index`:
+
+```json
+{
+  "meta_learning_bootstrap_context": {
+    "curator_source": "~/.claude/skills/autorefine/meta-learnings.md",
+    "curator_version": "sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8",
+    "transfer_parameters": {
+      "skill_pattern": "pipeline",
+      "agent_target": "claude_code",
+      "scenario_target": "individual",
+      "scope_type": "skill_lineage",
+      "scope_ref": "autorefine"
+    },
+    "transfer_traceability": {
+      "trace_id": "ml-transfer-3f9a2f8d1c4b",
+      "transfer_signature": "sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8",
+      "filter_refs": [
+        "curator_source:~/.claude/skills/autorefine/meta-learnings.md",
+        "curator_version:sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8",
+        "transfer_signature:sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8",
+        "skill_pattern:pipeline",
+        "agent_target:claude_code"
+      ]
+    }
+  },
+  "meta_learning_filter_index": {
+    "curator_sources": ["~/.claude/skills/autorefine/meta-learnings.md"],
+    "curator_versions": ["sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8"],
+    "transfer_signatures": ["sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8"],
+    "filter_refs": [
+      "curator_source:~/.claude/skills/autorefine/meta-learnings.md",
+      "curator_version:sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8",
+      "transfer_signature:sha256:4cfeaf2c4e1c69056d0c2d2d17296c3f79e7d08b618f6404fb756b39f5ccefd8",
+      "skill_pattern:pipeline",
+      "agent_target:claude_code"
+    ]
+  }
+}
+```
+
+- `meta_learning_bootstrap_context` is the authoritative run-level envelope. Preserve `curator_source`, `curator_version`, `transfer_parameters`, and `transfer_traceability` unchanged on retrieval.
+- `meta_learning_filter_index` is additive and derived. It exists so exports, dashboards, and production filters can reference curator source/version and transfer parameters without reparsing the full bootstrap context.
+
+### Parsed Meta-Learning Entry Schema
+
+Each item in `parsed_meta_learnings.entries[]` must preserve the markdown semantics while exposing a stable in-memory shape for campaign setup:
+
+```json
+{
+  "entry_id": "ML-2026-04-11-001",
+  "title": "Subtractive cleanup after additive streaks",
+  "entry_type": "meta_learning_rule",
+  "status": "active",
+  "learning": "After 3 additive mutations in a row, try one subtractive pass before expanding the skill further.",
+  "applicability_conditions": {
+    "skill_patterns": ["pipeline"],
+    "agent_targets": ["claude_code", "rovodev", "any_skill_md"],
+    "scenario_targets": ["individual", "production"],
+    "scope_type": "skill_lineage",
+    "scope_ref": "autorefine",
+    "skill_metadata_keywords": ["mutation", "evaluation"],
+    "objective_keywords": ["reliability"],
+    "when_to_apply": "The active run has already accepted multiple additive mutations.",
+    "do_not_apply_when": "The current baseline is still missing a required capability."
+  },
+  "supporting_evidence": [],
+  "confidence": "medium",
+  "promotion_basis": "Observed in two prior AutoRefine campaigns with same-skill deltas.",
+  "precedence": "high",
+  "review_status": "approved",
+  "supporting_case_ids": ["case-ds-trace", "case-ds-review"],
+  "derived_from_entry_ids": ["rc-case-ds-trace-001"],
+  "last_reviewed_at": "2026-04-11T18:05:00Z",
+  "normalized_entry_type": "meta_learning_rule",
+  "is_actionable": true,
+  "block_reason": null
+}
+```
+
+- `entry_id`, `title`, `status`, `learning`, `confidence`, `promotion_basis`, `precedence`, `review_status`, `supporting_case_ids[]`, `derived_from_entry_ids[]`, and `last_reviewed_at` map directly from the markdown entry.
+- `applicability_conditions` and `supporting_evidence[]` preserve the original curation payload without forcing campaign setup to reopen the markdown file. `skill_metadata_keywords[]` matches against the normalized target skill metadata (`skill_id`, title, summary, tags, and known paths). `objective_keywords[]` matches against the normalized campaign objective text when present.
+- `normalized_entry_type`: always `meta_learning_rule` for entries parsed from `meta-learnings.md`; this is the bridge into the shared research corpus schema.
+- `is_actionable` is true only when the entry is active, approved, and matches the current `target_context`.
+- When `skill_metadata_keywords[]` or `objective_keywords[]` are present, `is_actionable` also requires those optional relevance filters to match the normalized target skill metadata and campaign objective.
+- `block_reason`: null when actionable. Otherwise use one of `status_not_active`, `pending_review`, `context_mismatch`, `relevance_mismatch`, or `insufficient_supporting_evidence` so humans can see why a parsed rule was withheld from setup-time steering.
+
+#### `preference_signal`
+
+Use when override behavior or confirmed preferences should influence future mutations.
+
+Required `type_payload` fields:
+- `preference_statement`
+- `detected_from`
+- `confirmation_state`
+- `preference_scope`
+- `expiry_policy`
+
+Guardrail: preference signals are local steering input. Do not auto-promote them into cross-campaign rules without human review.
+
+#### `mutation_hypothesis`
+
+Use when research has already been converted into an actionable Phase 7 change candidate.
+
+Required `type_payload` fields:
+- `hypothesis_statement`
+- `target_section`
+- `expected_effect`
+- `evaluation_plan`
+- `source_entry_ids`
+
+Guardrail: every mutation hypothesis must point back to at least one non-hypothesis corpus entry through `source_entry_ids`.
+
+### research-intake.md required sections
+
+The artifact stays markdown-first for weak agents, but every persisted row below must normalize into the shared research corpus schema on read. At minimum, each extracted pattern becomes one `pattern_observation` entry and each mutation lead becomes one `mutation_hypothesis` entry.
+
+```markdown
+# Research Intake
+
+## Target
+- Skill: [workspace]/skill-under-test/SKILL.md
+- Domain: <one-sentence target job>
+- Pattern context: <selected_skill_pattern> via <selected_eval_strategy_id>
+
+## Resolved Config
+- resolution_mode: <default_only|pattern_default_only|explicit_override>
+- enabled_source_kinds: <ordered list>
+- max_total_sources: <N>
+- max_sources_per_kind: <N>
+- target_patterns_per_accepted_source: 3-5
+- max_total_patterns: <N>
+- max_mutation_leads: <N>
+
+## Accepted Sources
+- source_id: <id> | retrieval_id: <id> | kind: <reference_skill|design_doc|best_practice|article|repo> | location: <path-or-url> | canonical_location: <normalized-path-or-url> | analysis_goal: <goal> | retrieved_at: <ISO timestamp> | retrieval_started_at: <ISO timestamp> | retrieval_completed_at: <ISO timestamp> | snapshot_hash: <sha256-or-version-label> | selection_basis: <why this source was chosen>
+
+## Source Snapshots
+- source_id: <id> | raw_artifact_ref: <workspace-relative-path> | raw_artifact_kind: <markdown|html|json|txt|archive> | raw_artifact_sha256: <sha256> | citation_title: <title> | citation_author_or_org: <author-or-org> | citation_published_at: <ISO timestamp|null|unknown> | retrieval_started_at: <ISO timestamp> | retrieval_completed_at: <ISO timestamp>
+
+## Rejected Sources
+- source_id: <id> | reason: <duplicate_source|unsupported_source|unreadable_source|no_mutation_relevant_patterns>
+
+## Extracted Patterns
+- entry_id: <id> | entry_type: pattern_observation | source_id: <id> | trace_ref: <accepted-source row or anchor>
+  pattern_label: <short label>
+  applicability: <why it matters to this target skill/domain>
+  evidence_reference:
+    source_hash: <sha256-or-version-label>
+    source_location:
+      locator: <path/heading/URL fragment/line cue>
+      section_id: <section-id-or-null>
+      heading_path: [<heading-1>, <heading-2>]
+    quote: <short quote|null>
+    span:
+      line_start: <N|null>
+      line_end: <N|null>
+      char_start: <N|null>
+      char_end: <N|null>
+      byte_start: <N|null>
+      byte_end: <N|null>
+      offset_basis: <normalized_text_utf8|unknown>
+    retrieval_fingerprint: <stable-id|null>
+  mutation_leverage: <what kind of mutation it suggests>
+  confidence: high | medium | low
+
+## Mutation Leads
+- entry_id: <id> | entry_type: mutation_hypothesis | lead_id: <stable id> | derived_from: <source_id/pattern_label> | target_section: <section-or-behavior> | expected_effect: <hypothesis>
+
+## Stage Outcome
+- status: completed | partial | skipped | failed
+- accepted_sources: <N>
+- rejected_sources: <N>
+- blocking_reason: <none or error code>
+```
+
+- `Accepted Sources` is the minimum attribution surface for normalizing `source_ref`, `retrieval_context`, and `source_timestamps`.
+- Each `Extracted Patterns` row must point back to one accepted source through both `source_id` and `trace_ref`, and must include enough evidence detail to populate both `type_payload.evidence_reference` and `traceability.evidence_refs[]`.
+
+### Validation rules
+
+- `target_skill_path` is required and must resolve to a readable `SKILL.md`.
+- `target_domain` is required and must be non-empty after trimming.
+- `selected_skill_pattern` and `selected_eval_strategy_id` are required. If Phase 1 context is missing, the stage is invalid and must not improvise a generic route.
+- Resolve `research_intake_config` before validating sources. If the override merge fails or a guardrail is weakened, stop with `error_code = invalid_research_intake_config`.
+- Each reference source must have a unique `source_id`, a supported `source_kind`, and a readable `location`.
+- Each accepted source must record `canonical_location`, `retrieved_at`, `snapshot_hash`, and `selection_basis` before it can produce normalized corpus entries.
+- Each fetched external source must also record `citation_metadata`, `retrieval_started_at`, `retrieval_completed_at`, and `raw_artifact_ref` before extraction can succeed.
+- Only `enabled_source_kinds` from the resolved config may be accepted for this run.
+- `max_total_sources` and `max_sources_per_kind` apply after de-duplication. Extra sources beyond those caps must be rejected explicitly instead of being silently dropped.
+- De-duplicate sources by normalized location. Keep the first occurrence and record later duplicates under `Rejected Sources`.
+- Accept the stage only when at least one source yields at least one evidence-backed extracted pattern.
+- Each extracted pattern must include `source_id`, `trace_ref`, `pattern_label`, `applicability`, `evidence_locator`, `mutation_leverage`, and `confidence`.
+- Every normalized corpus entry derived from `research-intake.md` must preserve `source_ref`, `retrieval_context`, `source_timestamps`, and `traceability`; missing provenance is a blocking normalization error.
+- Target 3-5 extracted patterns per accepted source, require at least 1, and never exceed `max_patterns_per_accepted_source`.
+- Total extracted patterns across the run must not exceed `max_total_patterns`. Total mutation leads must not exceed `max_mutation_leads`.
+- Trim `failure_focus[]` to `max_failure_focus_items` before extraction; reject extra focus items instead of silently inflating retrieval scope.
+- `research-intake.md` is run-scoped: rewrite it from the current inputs instead of merging stale output from another target skill or domain.
+- Phase 7 may read `research-intake.md` only when `state.json.research_intake.status` is `completed` or `partial`. `failed` is blocking; `skipped` means continue without research input.
+
+### Failure / Error Handling
+
+- User skips or provides zero sources: write `state.json.research_intake.status = "skipped"`, leave `research_intake_path = null`, log the reason, and continue to Phase 7 with internal analysis only.
+- Invalid config or override payload: write `status = "failed"`, keep `research_intake_path = null`, log `invalid_research_intake_config`, and stop before reading sources.
+- Unsupported, duplicate, or unreadable sources: reject them per-source, record the rejection reason, and continue only if at least one accepted source remains.
+- Remote retrieval fails or writes only a partial snapshot: reject that source with `reason = retrieval_failed`, keep any partial artifact out of `Accepted Sources`, and continue only if at least one accepted source remains.
+- Source extraction produces no mutation-relevant evidence-backed patterns: reject that source with `error_code = no_valid_sources` at the source level; do not pad the artifact with generic advice.
+- User requested research but every source failed validation or extraction: write `status = "failed"`, preserve the blocking `error_code`, and stop before Phase 7 rather than pretending the mutation loop is research-informed.
+- Artifact write failure: write `status = "failed"`, keep `research_intake_path = null`, log `artifact_write_failed`, and stop before Phase 7.
+
+---
+
 ## Judge Validation Report Format
 
 Read when: Phase 6 Step 5.
@@ -1596,6 +2868,7 @@ Read when: updating state.json after a phase.
 | 4 | `fixture_count, pass_count, fail_count, split_sizes, mutation_stage_split_access_policy` |
 | 5 | `code_eval_count, judge_eval_count` |
 | 6 | `validation_results` (TPR/TNR per judge) |
+| 6.5 | `research_intake.status`, `research_intake.target_skill_path`, `research_intake.target_domain`, `research_intake.requested_sources`, `research_intake.accepted_sources`, `research_intake.rejected_sources`, `research_intake_path` |
 | 7 | `current_experiment, best_score, consecutive_discards, circuit_breaker, completion_cadence` |
 
 ---
@@ -1889,7 +3162,7 @@ To resume, paste this prompt into a new autorefine session.
 When reading state.json on startup:
 1. If `checkpoint` is not null and `checkpoint.next_action` exists → resume mode
 2. Read all files listed in `checkpoint.files_to_read_on_resume`. If any file is missing, skip it and note: "Missing file: {filename} — may have been deleted between sessions."
-3. Deserialize `state.json.phase1_context` and `state.json.mutation_stage_split_access_policy` into the loaded run context before routing or resuming later phases. If `phase1_context.selected_skill_pattern` and/or `phase1_context.selected_eval_strategy_id` exist, restore them unchanged so later phases can read the chosen pattern + resolved strategy from the loaded context. If the restored pattern and `state.json.skill_pattern` differ, treat it as state corruption and rerun Phase 1 Step 0 instead of continuing. If the restored strategy is missing or no longer maps back to the restored pattern through `Skill Pattern Eval Strategy > Pattern-to-Evaluation-Strategy Selector`, treat it as state corruption and rerun strategy selection before continuing. If split-scoped Phase 7 work is active and `mutation_stage_split_access_policy` is missing, read the same policy from `fixtures-manifest.md` or a stored Phase 4 `evaluation_metadata.config.mutation_stage_split_access_policy` snapshot, restore it into the loaded run context, and stop if the sources disagree.
+3. Deserialize `state.json.phase1_context`, `state.json.mutation_stage_split_access_policy`, and `state.json.iteration_state` into the loaded run context before routing or resuming later phases. If `phase1_context.selected_skill_pattern` and/or `phase1_context.selected_eval_strategy_id` exist, restore them unchanged so later phases can read the chosen pattern + resolved strategy from the loaded context. If the restored pattern and `state.json.skill_pattern` differ, treat it as state corruption and rerun Phase 1 Step 0 instead of continuing. If the restored strategy is missing or no longer maps back to the restored pattern through `Skill Pattern Eval Strategy > Pattern-to-Evaluation-Strategy Selector`, treat it as state corruption and rerun strategy selection before continuing. If split-scoped Phase 7 work is active and `mutation_stage_split_access_policy` is missing, read the same policy from `fixtures-manifest.md` or a stored Phase 4 `evaluation_metadata.config.mutation_stage_split_access_policy` snapshot, restore it into the loaded run context, and stop if the sources disagree. If `iteration_state` is present, resume from its persisted `next_action` and continue automatic eval->mutate->test->session_close progression until terminal success (`phase_status = "completed"`) or terminal failure (`phase_status = "blocked"`), without manual handoff.
 4. Print resume context: "Resuming from checkpoint: {next_action}"
 5. Set `checkpoint` to null (clear the checkpoint — it's been consumed). Preserve all non-checkpoint state, including `phase1_context` and `mutation_stage_split_access_policy`, when writing the updated `state.json`.
 6. Proceed from `checkpoint.next_action`
@@ -1949,6 +3222,98 @@ The user can override (keep anyway). Log as: `{"phase":"7","type":"regression","
 Read when: Phase 7 active (after each experiment).
 
 The iteration directory provides filesystem-as-memory for Phase 7. Each experiment's full state is written to disk as individual files, making experiments independently inspectable and surviving context compaction.
+
+Read `references.md > Iteration Run Record Schema` first when Phase 7 starts. The run record is the single-run metadata envelope created before any `iteration_000/` baseline artifacts exist; the iteration directory then stores per-experiment artifacts underneath that run.
+
+## Iteration Run Record Schema
+
+Read when: Phase 7 start, loop-back re-entry, or resume-time reopening of the active mutation run.
+
+Create exactly one run record for each Phase 7 start trigger. Do this before Experiment 0 baseline scoring, before writing any `iteration_000/` artifacts, and before proposing mutations. The trigger must never append another run record for later experiments inside the same run.
+
+Treat the same run-start write as the full baseline-in-progress recovery state for the new run. Before baseline scoring starts, set `state.json.current_experiment = 0`, persist `state.json.current_run_id`, persist `state.json.current_run_path`, initialize `state.json.iteration_state` / `results.json.iteration_state` to the eval-running baseline handoff record, initialize the default run-scoped cadence object with `scope_id = `state.json.current_run_path`` when `scope_type = experiment_series`, and clear any stale `state.json.final_only_evaluation` object back to null when it still points at an older run path.
+
+### Storage Contract
+
+- Persist the unique active run ID in `state.json.current_run_id`.
+- Persist the run directory path in `state.json.current_run_path`.
+- Persist the active baseline slot with `state.json.current_experiment = 0` before any `iteration_000/` artifacts exist.
+- Persist the eval-running runner handoff in `state.json.iteration_state` and `results.json.iteration_state` before baseline scoring starts.
+- When `iteration_000/eval_results.json` is written, update the same `iteration_state` object to the mutate-ready handoff for the same `run_id` / `run_path` instead of opening a second run.
+- When `iteration_<NNN>/mutation.md` is written for a completed mutate phase, update the same `iteration_state` object with `last_mutation_status`, `last_mutation_results_ref`, and a test-ready handoff (`active_phase = "test"`, `phase_status = "ready"`, `next_action = "phase7_test_phase"`) for the same `run_id` / `run_path`.
+- When test-phase validation completes for that experiment, update the same `iteration_state` object to a Session Close-ready handoff (`active_phase = "session_close"`, `phase_status = "ready"`, `next_action = "phase7_session_close"`) for the same `run_id` / `run_path`.
+- Session Close completion must set terminal `iteration_state` on the same run: success writes `phase_status = "completed"` with `next_action = null`; unrecoverable closeout failure writes `phase_status = "blocked"` with `next_action = null`.
+- Append the full run record to `results.json.iteration_runs[]`.
+- Append one `session-log.json` entry of type `iteration_run_started`.
+
+### Unique ID Rule
+
+- `run_id` must be unique within the workspace.
+- Default format: reuse the run-directory slug exactly: `run_YYYY-MM-DDTHH-MM-SS`.
+- `run_path` must be `runs/<run_id>/`.
+
+### Target Skill/Version Link Rule
+
+- `target_skill.skill_path` points to the working-copy skill file that Phase 7 will evaluate: `skill-under-test/SKILL.md`.
+- `target_version.snapshot_path` points to the same working-copy file path because that exact file is the baseline-evaluation input at run start.
+- `target_version.snapshot_sha256` is computed from the exact working-copy skill file contents at trigger time so production systems can distinguish versions even before a keep/discard decision exists.
+- `target_version.evaluation_label` is `baseline_candidate` on the first Phase 7 run for a skill, or the derived `vN` label for the latest kept version when a later Phase 7 run re-enters with an already-kept working baseline.
+- `target_version.source_experiment_id` is null when `evaluation_label = baseline_candidate`; otherwise it points to the experiment record that produced the working baseline entering this run.
+- `target_version.source_iteration_path` is null when `source_experiment_id` is null; otherwise it points to the iteration directory that produced the carried-forward working baseline.
+
+### Example
+
+```json
+{
+  "run_id": "run_2026-04-11T09-00-00",
+  "trigger": "phase7_iteration_start",
+  "started_at": "2026-04-11T09:00:00Z",
+  "run_path": "runs/run_2026-04-11T09-00-00/",
+  "target_skill": {
+    "skill_name": "autorefine",
+    "skill_path": "skill-under-test/SKILL.md"
+  },
+  "target_version": {
+    "evaluation_label": "baseline_candidate",
+    "source_experiment_id": null,
+    "source_iteration_path": null,
+    "snapshot_path": "skill-under-test/SKILL.md",
+    "snapshot_sha256": "sha256:4b2859d8c0f1f1a9..."
+  }
+}
+```
+
+## Iteration State Schema
+
+Read when: Phase 7 start, baseline finalization, later mutation/test transitions, Session Close completion, or resume-time reopening of the active run.
+
+`iteration_state` is the runner's single-source-of-truth handoff record for whether the active `run_id` is still evaluating, ready for mutate/test/session_close, or has reached terminal success/failure. Persist the same object at the root of both `state.json` and `results.json`.
+
+### Example
+
+```json
+{
+  "run_id": "run_2026-04-11T09-00-00",
+  "run_path": "runs/run_2026-04-11T09-00-00/",
+  "experiment_id": 0,
+  "active_phase": "mutate",
+  "phase_status": "ready",
+  "last_eval_status": "completed",
+  "last_eval_results_ref": "runs/run_2026-04-11T09-00-00/iteration_000/eval_results.json",
+  "next_action": "phase7_mutation_analysis"
+}
+```
+
+### Rules
+
+- On Phase 7 start, initialize `iteration_state` with `active_phase = "eval"`, `phase_status = "running"`, `experiment_id = 0`, `last_eval_status = null`, `last_eval_results_ref = null`, and `next_action = "phase7_baseline_eval"`.
+- When the baseline eval finishes and `iteration_000/eval_results.json` exists, update the same object to `active_phase = "mutate"`, `phase_status = "ready"`, `last_eval_status = "completed"`, `last_eval_results_ref = "runs/.../iteration_000/eval_results.json"`, and `next_action = "phase7_mutation_analysis"`.
+- This is the explicit eval-to-mutate handoff for the same run. Do not allocate a new `run_id`, create a second `run_path`, or append another run record just because the phase advanced.
+- When later mutation evals finish, overwrite `experiment_id`, `last_eval_status`, and `last_eval_results_ref` for the current `iteration_<NNN>/eval_results.json` while keeping the same run identifiers. Use this record to reopen the newest eval output on resume instead of scanning the filesystem.
+- When the mutate phase finishes for the same experiment, record `last_mutation_status = "completed"` and `last_mutation_results_ref = "runs/.../iteration_<NNN>/mutation.md"`, then advance the same run into a test-ready handoff with `active_phase = "test"`, `phase_status = "ready"`, and `next_action = "phase7_test_phase"`.
+- When test-phase validation completes for that experiment, keep the same run identifiers and advance the same object into a Session Close-ready handoff with `active_phase = "session_close"`, `phase_status = "ready"`, and `next_action = "phase7_session_close"`.
+- At Session Close completion, write a terminal state on the same object: success sets `active_phase = "session_close"`, `phase_status = "completed"`, `next_action = null`; unrecoverable failure sets `active_phase = "session_close"`, `phase_status = "blocked"`, `next_action = null`.
+- Resume/load must continue from the persisted `next_action` while `phase_status` is `running|ready`, and stop handoff progression only when `phase_status` is terminal (`completed|blocked`).
 
 ### Directory Structure
 
@@ -2010,6 +3375,46 @@ For baseline: content is `N/A — this is the baseline scoring run.`
   "pass_rate": 0.75,
   "score": 6,
   "max_score": 8,
+  "baseline_trials": [
+    {
+      "trial_index": 1,
+      "trial_id": "baseline-trial-001",
+      "run_index": 1,
+      "score": 72.3,
+      "pass_rate": 72.3,
+      "timestamps": {
+        "started_at": "2026-04-11T09:00:00Z",
+        "completed_at": "2026-04-11T09:00:08Z"
+      },
+      "raw_outputs": [
+        {
+          "input_id": "phase4-dev-7f3c91ad-I03",
+          "output_text": "Trial 1 output for fixture I03"
+        }
+      ],
+      "trial_metadata": {
+        "requested_operation": "baseline_scoring",
+        "requested_split_id": "dev",
+        "input_set_id": "phase4-dev-7f3c91ad",
+        "input_set_ref": "input-sets.json#phase4-dev-7f3c91ad",
+        "input_ids": ["phase4-dev-7f3c91ad-I03"]
+      }
+    },
+    {
+      "trial_index": 2,
+      "trial_id": "baseline-trial-002",
+      "run_index": 2,
+      "score": 75.1,
+      "pass_rate": 75.1
+    },
+    {
+      "trial_index": 3,
+      "trial_id": "baseline-trial-003",
+      "run_index": 3,
+      "score": 71.8,
+      "pass_rate": 71.8
+    }
+  ],
   "eval_results": [
     {
       "eval": "E1",
@@ -2138,7 +3543,7 @@ For baseline: content is `N/A — this is the baseline scoring run.`
   "discard_autopsy": null
 }
 ```
-Fields mirror the experiment record in results.json. `experiment_id` matches the iteration directory number (0 for baseline, 1+ for mutations). `input_set_id` records which stable scoring set this experiment used. `input_set_ref` points directly to the registered set entry, and `input_ids` preserve the exact stable inputs scored in finalized set order. Persist `completion_cadence` here too, using the finalized snapshot copied from the root cadence counter at the moment the experiment becomes final. Persist `requires_human_spot_check` here too, copying the finalized boolean written on the experiment record after the cadence increment instead of recomputing it on load. Every `eval_results[]` entry must preserve `pass_fail`, `reasoning_trace`, `evidence`, `supporting_items`, `weight`, `weight_source`, `weighted_points`, and `normalized_contribution`. `evidence[]` uses `Judge Verdict Evidence Schema` so each verdict can store output/input excerpts, metrics, and artifact references in a uniform shape. `supporting_items[]` uses `Judge Decision Support Schema` so each verdict also records which concrete evidence objects backed each individual sub-decision. Include `decision_breakdown`, `decision_explanation` (with `strongest_outcomes[]`), `regression_check`, and `discard_autopsy` when applicable (null otherwise).
+Fields mirror the experiment record in results.json. `experiment_id` matches the iteration directory number (0 for baseline, 1+ for mutations). `input_set_id` records which stable scoring set this experiment used. `input_set_ref` points directly to the registered set entry, and `input_ids` preserve the exact stable inputs scored in finalized set order. Persist `completion_cadence` here too, using the finalized snapshot copied from the root cadence counter at the moment the experiment becomes final. Persist `requires_human_spot_check` here too, copying the finalized boolean written on the experiment record after the cadence increment instead of recomputing it on load. Every `eval_results[]` entry must preserve `pass_fail`, `reasoning_trace`, `evidence`, `supporting_items`, `weight`, `weight_source`, `weighted_points`, and `normalized_contribution`. `evidence[]` uses `Judge Verdict Evidence Schema` so each verdict can store output/input excerpts, metrics, and artifact references in a uniform shape. `supporting_items[]` uses `Judge Decision Support Schema` so each verdict also records which concrete evidence objects backed each individual sub-decision. Include `decision_breakdown`, `decision_explanation` (with `strongest_outcomes[]`), `mutation_handoff` (with `normalized_evaluation_scores`, `failure_reasons[]`, and `mutation_targets[]`), `regression_check`, and `discard_autopsy` when applicable (null otherwise).
 
 **decision.md** — Keep/discard verdict with full reasoning.
 ```markdown
@@ -2739,6 +4144,182 @@ Version History
 
 ---
 
+## Final Holdout Variant Runner
+
+Read when: Session Close step 0c.
+
+This is the final evaluation runner for the adversarial holdout split. It reuses the existing variant-evaluation interface; do not invent a second holdout-only scoring path for Session Close.
+
+### Inputs
+
+- Completed variants from `Version Registry Schema` in version order. This means every `baseline` or `keep` experiment, and never `discard`.
+- Holdout split metadata from Phase 4 (`split_id = adversarial_holdout`).
+- The validated judge bundle already used for Phase 7 scoring.
+
+### Procedure
+
+1. Rebuild the completed variant lineage from `results.json` via `Version Registry Schema`.
+2. For each completed variant, load its `skill_snapshot` and run the existing variant-evaluation interface against the holdout split.
+3. Preserve the same result shape AutoRefine already uses for versioned evaluations: `input_set_id`, `input_set_ref`, `input_ids`, `score`, `max_score`, `pass_rate`, `final_score`, `evaluation_metadata`, `evaluation_metadata_validation`, `validation_results`, `eval_results`, `decision_breakdown`, and `decision_explanation`.
+4. Populate the same per-run score surface (`score`, `max_score`, `pass_rate`, `final_score`) on the structured holdout result row before persistence so downstream comparison, export, and research consumers do not have to reopen the source experiment to recover basic metrics.
+5. Do not invent a second holdout-only result schema. The holdout runner exists so version-to-version comparisons can reuse the exact same stored evaluation shape they already inspect elsewhere.
+6. Each `variant_results[]` row reuses the existing evaluation record shape, but the ordered collection lives in a dedicated final-holdout artifact instead of mutation-time `results.json` storage.
+7. Persist the ordered outputs inside the dedicated final-holdout artifact at `[current_run_path]/session_close_holdout/variant_results.json`.
+8. Do not append Session Close holdout outputs to mutation-time `results.json.experiments[]`, iteration `eval_results.json`, or any other mutation-loop record. Those artifacts remain the dev-scored mutation history only.
+9. Select the current final candidate using the existing Session Close rule (best kept version, or baseline if nothing was kept), mirror that candidate into `final_only_evaluation.evaluated_experiment_id`, and persist its authoritative final summary in `selected_candidate_summary` (`version`, `experiment_id`, `holdout_score`). Emit dev-side tuning diagnostics in the sibling `optimization_metrics` section with explicit non-authoritative labeling; at minimum store `optimization_metrics.selected_candidate.dev_score` and `optimization_metrics.selected_candidate.holdout_gap`.
+10. Do not mirror those machine-readable holdout outputs into top-level state. `state.json.final_only_evaluation` keeps only the idempotence/ref metadata needed to reopen the dedicated artifact on resume.
+
+### Artifact Shape
+
+### session_close_holdout/variant_results.json
+
+```json
+{
+  "schema_version":1,
+  "artifact_type":"final_holdout_results",
+  "stage_id": "session_close_holdout_validation",
+  "run_path":"runs/run_2026-04-03T14-30-00/",
+  "source_results_ref":"results.json",
+  "evaluated_experiment_ids":[0,2,4],
+  "variant_results": [
+    {
+      "version": "v0",
+      "experiment_id": 0,
+      "input_set_id": "phase4-adversarial_holdout-91ab77ce",
+      "input_set_ref": "input-sets.json#phase4-adversarial_holdout-91ab77ce",
+      "input_ids": ["phase4-adversarial_holdout-91ab77ce-I01"],
+      "score": 0.914,
+      "max_score": 1.0,
+      "pass_rate": 91.4,
+      "final_score": 91.4,
+      "evaluation_metadata": {},
+      "evaluation_metadata_validation": {"status": "valid", "issues": []},
+      "validation_results": [
+        {
+          "eval":"E2",
+          "dev_tpr_mean":0.92,
+          "dev_tnr_mean":0.86,
+          "dev_tpr_range":0.07,
+          "dev_tnr_range":0.08,
+          "test_tpr":0.89,
+          "test_tnr":0.84,
+          "aggregated_tpr_tnr_summary": {
+            "dev": {
+              "tpr_mean":0.92,
+              "tpr_range":0.07,
+              "tpr_confidence_range": {"lower_bound":0.85,"upper_bound":0.99,"half_width":0.07},
+              "tnr_mean":0.86,
+              "tnr_range":0.08,
+              "tnr_confidence_range": {"lower_bound":0.78,"upper_bound":0.94,"half_width":0.08}
+            },
+            "test": {"tpr":0.89,"tnr":0.84}
+          },
+          "status":"APPROVED",
+          "phase6_dev_fold_metrics": [
+            {"fold_id":"fold_1","metric_object":{"sample_count":5,"human_pass_count":3,"human_fail_count":2,"true_positive_count":3,"true_negative_count":2,"tpr":1.0,"tnr":1.0}},
+            {"fold_id":"fold_2","metric_object":{"sample_count":5,"human_pass_count":3,"human_fail_count":2,"true_positive_count":2,"true_negative_count":2,"tpr":0.667,"tnr":1.0}},
+            {"fold_id":"fold_3","metric_object":{"sample_count":5,"human_pass_count":2,"human_fail_count":3,"true_positive_count":2,"true_negative_count":2,"tpr":1.0,"tnr":0.667}}
+          ]
+        }
+      ],
+      "eval_results": [],
+      "decision_breakdown": {},
+      "decision_explanation": {}
+    }
+  ],
+  "selected_variant_version": "v2",
+  "selected_experiment_id": 4,
+  "selected_candidate_summary": {
+    "version":"v2",
+    "experiment_id":4,
+    "holdout_score":0.857
+  },
+  "trust_gate": {
+    "outcome":"review_required",
+    "selected_candidate":{"version":"v2","experiment_id":4},
+    "holdout_assessment":{
+      "holdout_n":7,
+      "interpretation_mode":"directional_only",
+      "holdout_score":0.857,
+      "baseline_holdout_score":0.791,
+      "holdout_gap":-0.066,
+      "holdout_gap_status":"moderate_gap"
+    },
+    "noise_assessment":{
+      "noise_source":"baseline_trials",
+      "combined_score_noise_threshold":0.021,
+      "status":"outside_noise"
+    },
+    "disagreement_assessment":{
+      "unresolved_contributing_disagreement":false,
+      "unapproved_material_judge":false
+    },
+    "calibration_assessment":{
+      "sample_count":8,
+      "false_pass_rate":0.29,
+      "false_fail_rate":0.17,
+      "status":"review_required"
+    },
+    "hard_blockers": [
+      {"code":"holdout_below_baseline_plus_noise","triggered":false},
+      {"code":"unresolved_contributing_disagreement","triggered":false},
+      {"code":"unapproved_material_judge","triggered":false},
+      {"code":"calibration_block","triggered":false}
+    ],
+    "advisory_flags": [
+      {"code":"directional_only_holdout","triggered":true},
+      {"code":"calibration_review_required","triggered":true},
+      {"code":"within_noise_floor","triggered":false}
+    ]
+  },
+  "optimization_metrics": {
+    "label":"Non-authoritative optimization/tuning metrics",
+    "authoritative":false,
+    "interpretation":"directional_signal_only",
+    "note":"Intermediate tuning metrics are directional only. Use holdout_score for the authoritative final evaluation result.",
+    "selected_candidate": {
+      "dev_score":0.923,
+      "holdout_gap":-0.066
+    }
+  }
+}
+```
+
+- `schema_version`: currently `1` for the dedicated final-holdout artifact.
+- `artifact_type`: always `final_holdout_results`.
+- `status`: run-level artifact resolution state (`completed`, `skipped`, `failed`, or `aborted`).
+- `reason`: coarse resolved exit reason for the final-only evaluation run. Use `no_adversarial_holdout_split` for the skip path, or the terminal failure/abort token for failed runs.
+- `source_results_ref`: points back to the mutation-time `results.json` lineage that produced the completed variants.
+- `evaluated_experiment_ids`: ordered lineage IDs scored in this holdout run. This should match `state.json.final_only_evaluation.evaluated_experiment_ids`.
+- `variant_results[]`: ordered per-variant holdout rows. Reuse the existing evaluation record shape here rather than defining a second per-variant schema.
+- Write this artifact even when final-only evaluation fails or exits early. In that case `variant_results[]` may be partial or empty, but the artifact is still the canonical machine-readable result for the resolved run.
+- `variant_results[]` must persist the full per-run score surface (`score`, `max_score`, `pass_rate`, `final_score`) alongside the rest of the evaluation record so downstream consumers can compare runs without reopening mutation-time experiment rows.
+- `variant_results[].validation_results`: preserve the stored Phase 6 judge-validation rows unchanged, including `aggregated_tpr_tnr_summary`, `confusion_matrix`, `confusion_examples`, plus the structured `tpr_confidence_range` / `tnr_confidence_range` objects, so downstream holdout comparison consumers can inspect calibration context without reopening mutation-time records.
+- `failure_reasons[]`: structured final-only evaluation failure reasons. Populate this when `status` is `failed` or `aborted`, using rows with `reason_id`, `reason_code`, `stage`, and `summary`. If the runner only surfaced one coarse failure token, synthesize a single `failure_reasons[]` row from `reason` instead of dropping the detail.
+- `selected_candidate_summary`: selected final candidate summary derived from the ordered holdout run. Keep this summary authoritative and limited to the final-candidate identity plus `holdout_score`.
+- `selected_candidate_summary` is the authoritative final summary and must stay limited to `version`, `experiment_id`, and `holdout_score`.
+- `trust_gate`: authoritative final promotion contract for the selected candidate. Downstream consumers must render trust/promotion state from `trust_gate`, not by inferring it from `selected_candidate_summary`, `optimization_metrics`, or top-level state.
+- `trust_gate.holdout_assessment.interpretation_mode`: use `directional_only` when `holdout_n < 10`, `decision_grade` when `holdout_n >= 10`.
+- `trust_gate.noise_assessment.noise_source`: always `baseline_trials` for v4.1. Do not derive trust-gate noise from a judge-only shortcut or from holdout-only variance.
+- `trust_gate.hard_blockers[]`: enumerated blocking conditions. Use `holdout_below_baseline_plus_noise`, `unresolved_contributing_disagreement`, `unapproved_material_judge`, and `calibration_block`.
+- `trust_gate.advisory_flags[]`: enumerated non-blocking trust warnings. Use explicit flags such as `directional_only_holdout`, `calibration_review_required`, and `within_noise_floor` so dashboards can render the reason for `review_required` without extra inference.
+- Deterministic precedence for `trust_gate.outcome` is `block` > `review_required` > `promote`.
+- `holdout_below_baseline_plus_noise` triggers when `holdout_score < baseline_holdout_score`.
+- `within_noise_floor` triggers when `holdout_score` does not exceed `baseline_holdout_score + combined_score_noise_threshold`.
+- Set `trust_gate.outcome = block` when any `hard_blockers[].triggered = true`.
+- Set `trust_gate.outcome = review_required` when zero hard blockers are triggered but one or more `advisory_flags[].triggered = true`.
+- Set `trust_gate.outcome = promote` only when zero hard blockers and zero advisory flags are triggered.
+- Healthy means `false_pass_rate <= 0.25` and `false_fail_rate <= 0.33`.
+- `review_required` calibration means `false_pass_rate > 0.25 and <= 0.40` or `false_fail_rate > 0.33 and <= 0.50`.
+- `block` calibration means `false_pass_rate > 0.40` or `false_fail_rate > 0.50` with `sample_count >= 6`.
+- If `sample_count < 6`, never emit `calibration_block`; emit `calibration_review_required` instead when the rate thresholds are exceeded.
+- `optimization_metrics`: sibling tuning/optimization diagnostics for the same selected candidate. Label this section as non-authoritative and store directional-only metrics such as `selected_candidate.dev_score` and `selected_candidate.holdout_gap` here instead of mixing them into `selected_candidate_summary`.
+- `optimization_metrics` is secondary diagnostics only and must not be promoted into `selected_candidate_summary` or `final_score`.
+- Keep this artifact separate from mutation-time `results.json.experiments[]` storage. The holdout artifact exists so final validation can be reopened, compared, and audited without polluting the mutation-loop score history.
+- Do not mirror `trust_gate` into `state.json.final_only_evaluation`. Top-level state remains the idempotence/ref surface only; the final holdout artifact is the single authoritative home for trust promotion data.
+
+---
+
 ## Version Comparison Template
 
 Read when: Phase 7 (after kept mutation, compare vs previous version) or Session Close (compare v0 vs vN).
@@ -2750,6 +4331,12 @@ Before rendering a comparison, run the comparison preflight from `Version Compar
 ### Per-Input Layout
 
 For each shared-input comparison entry, render two explicitly labeled output panels: `Before` and `After`. Use a consistent two-column side-by-side layout on wider screens, and collapse to a stacked layout on narrow screens while preserving the same `Before` then `After` order. Within those panels, visually highlight only the sections that changed and leave unchanged sections unaccented for quick scanning.
+
+### Baseline-Side Reference
+
+If either comparison side is the Experiment 0 baseline, surface the baseline-side trial collection inline before the shared-input diff. Render it from `left_baseline_trials[]` or `right_baseline_trials[]` and reuse the same serialized `baseline_trials[]` rows from the baseline experiment so the comparison view preserves each pre-mutation run's score, raw outputs, timestamps, run index, and trial metadata.
+
+When the left side is baseline, label the section `Baseline Trial Reference (Before)`. When the right side is baseline, label the section `Baseline Trial Reference (After)`.
 
 ### Side-by-Side Format
 
@@ -2766,7 +4353,7 @@ E5 (agent)        Pass      Fail      REGRESSED
 ────────────────────────────────────────────────────
 Pass rate         80.0%     80.0%     --
 Weighted score    82.3%     85.1%     +2.8pp
-Shared inputs     1 improved / 1 regressed / 3 unchanged
+Shared inputs     1 trusted improved / 1 trusted regressed / 0 unreliable / 3 unchanged
 ────────────────────────────────────────────────────
 
 Skill diff (v1 -> v3):  [expandable]
@@ -2784,7 +4371,7 @@ Skill diff (v1 -> v3):  [expandable]
 |--------|------------|
 | Pass rate | `passing_evals / total_evals` for each version |
 | Weighted score | From `decision_breakdown.combined_score_pct` |
-| Shared input outcomes | From `shared_input_summary.improved`, `shared_input_summary.regressed`, and `shared_input_summary.unchanged`; counts must sum to `shared_input_summary.total_shared_inputs` |
+| Shared input outcomes | From `shared_input_summary.improved`, `shared_input_summary.regressed`, `shared_input_summary.unreliable`, and `shared_input_summary.unchanged`; counts must sum to `shared_input_summary.total_shared_inputs`, with `improved` / `regressed` reserved for trusted deltas once reliability gating is available |
 
 ### Skill Diff
 
