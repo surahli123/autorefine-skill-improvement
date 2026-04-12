@@ -1,0 +1,26 @@
+{
+  "name": "autorefine",
+  "version": "0.1.0",
+  "description": "Iteratively improve any skill using eval-grounded autoresearch and Hamel's Three Gulfs methodology.",
+  "author": {
+    "name": "Surah Li",
+    "url": "https://github.com/surahli123"
+  },
+  "homepage": "https://github.com/surahli123/autorefine-skill-improvement",
+  "repository": "https://github.com/surahli123/autorefine-skill-improvement",
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "codex",
+    "autoresearch",
+    "evals",
+    "prompt-engineering",
+    "agent-workflows",
+    "three-gulfs",
+    "trust",
+    "quality"
+  ],
+  "skills": [
+    "./autorefine"
+  ]
+}
