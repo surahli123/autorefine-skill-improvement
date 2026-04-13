@@ -148,20 +148,20 @@ STATUS values: `not started`, `in progress`, `complete`, `skipped`. Read from `s
 
 ## Gulf Routing
 
-After Initialize Workspace and Pipeline Status, read the appropriate gulf file based on pipeline state. **Only read the gulf file relevant to the current phase. Do NOT preload all gulf files.**
+After Initialize Workspace and Pipeline Status, stay in `SKILL.md` as the single skill entrypoint/router and read the appropriate support file from `references/` based on pipeline state. **Only read the support file relevant to the current phase. Do NOT preload all support files.**
 
 | Current Phase | Read | Contains |
 |---------------|------|----------|
-| Quick Start, Phase 1-3 | `SKILL-gulf1.md` | Quick Start Path, Phase 1 (Design Audit + Pattern Classification), Phase 2 (Eval Audit), Phase 3 (Error Analysis), Gulf 1 Gate |
-| Phase 4-6 | `SKILL-gulf2.md` | Phase 4 (Expand Inputs), Phase 5 (Write Judges + Eval Category Tags), Phase 6 (Validate Judges), Gulf 2 Gate |
-| Phase 7, Session Close | `SKILL-gulf3.md` | Phase 7 (AutoResearch Loop + Verdict Explanation Cards + Aggregation Explainer + Version Registry), Loop-Back Prompt, Session Close (+ Version Comparison) |
+| Quick Start, Phase 1-3 | `references/gulf1-comprehension.md` | Quick Start Path, Phase 1 (Design Audit + Pattern Classification), Phase 2 (Eval Audit), Phase 3 (Error Analysis), Gulf 1 Gate |
+| Phase 4-6 | `references/gulf2-specification.md` | Phase 4 (Expand Inputs), Phase 5 (Write Judges + Eval Category Tags), Phase 6 (Validate Judges), Gulf 2 Gate |
+| Phase 7, Session Close | `references/gulf3-generalization.md` | Phase 7 (AutoResearch Loop + Verdict Explanation Cards + Aggregation Explainer + Version Registry), Loop-Back Prompt, Session Close (+ Version Comparison) |
 
 **Routing rules:**
-- Starting fresh or resuming in Phases 1-3 → read `SKILL-gulf1.md`
-- Gulf 1 gate approved, entering Phases 4-6 → read `SKILL-gulf2.md`
-- Gulf 2 gate approved (or Quick Start returning) → read `SKILL-gulf3.md`
-- **Quick Start returning (State 2 or 3):** read `SKILL-gulf1.md` for Phase 1, then read `SKILL-gulf3.md` for Phase 7 + Session Close (two-file read)
-- Loop-back from Phase 7 to Phase 5 → re-read `SKILL-gulf2.md`
+- Starting fresh or resuming in Phases 1-3 → read `references/gulf1-comprehension.md`
+- Gulf 1 gate approved, entering Phases 4-6 → read `references/gulf2-specification.md`
+- Gulf 2 gate approved (or Quick Start returning) → read `references/gulf3-generalization.md`
+- **Quick Start returning (State 2 or 3):** read `references/gulf1-comprehension.md` for Phase 1, then read `references/gulf3-generalization.md` for Phase 7 + Session Close (two-file read)
+- Loop-back from Phase 7 to Phase 5 → re-read `references/gulf2-specification.md`
 
 ---
 
