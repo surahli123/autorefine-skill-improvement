@@ -5,9 +5,14 @@ import re
 from bisect import bisect_right
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Any
+
+from ._shared_text import (
+    clean_identifier as _clean_identifier,
+    clean_text as _clean_text,
+    now_utc_timestamp as _now_utc_timestamp,
+)
 
 
 SOURCE_DOCUMENT_SCHEMA_VERSION = 1
@@ -30,7 +35,6 @@ _EXTENSION_TO_ADAPTER = {
     ".htm": "html",
     ".xhtml": "html",
 }
-_IDENTIFIER_PATTERN = re.compile(r"[^a-z0-9]+")
 _MARKDOWN_HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 _WHITESPACE_PATTERN = re.compile(r"\s+")
 
@@ -69,21 +73,6 @@ _ADAPTER_CONTRACTS: dict[str, ParserAdapterContract] = {
         supported_extensions=(".html", ".htm", ".xhtml"),
     ),
 }
-
-
-def _clean_text(value: Any, *, default: str = "") -> str:
-    if value is None:
-        return default
-    if isinstance(value, str):
-        return value.strip()
-    return str(value).strip()
-
-
-def _clean_identifier(value: Any, *, default: str = "") -> str:
-    normalized = _clean_text(value, default=default).lower()
-    if not normalized:
-        return default
-    return _IDENTIFIER_PATTERN.sub("_", normalized).strip("_") or default
 
 
 def _normalize_newlines(text: str) -> str:
@@ -169,10 +158,6 @@ def _resolve_adapter(
             return adapter_from_extension
 
     return "text"
-
-
-def _now_utc_timestamp() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _iso_timestamp_or_default(value: Any) -> str:

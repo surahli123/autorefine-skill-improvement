@@ -4,6 +4,10 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from ._shared_text import (
+    clean_identifier as _clean_identifier,
+    clean_text as _clean_text,
+)
 from .target_skill_scoring_context import (
     CANONICAL_TARGET_SKILL_SCORING_CONTEXT_TYPE,
     build_target_skill_scoring_context,
@@ -39,7 +43,6 @@ _CRITERION_DESCRIPTIONS = {
     ),
 }
 
-_IDENTIFIER_PATTERN = re.compile(r"[^a-z0-9]+")
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 _STOPWORDS = {
     "a",
@@ -78,21 +81,6 @@ _STOPWORDS = {
 
 class MutationCandidateRelevanceError(ValueError):
     """Raised when donor-pattern relevance scoring inputs are invalid."""
-
-
-def _clean_text(value: Any, *, default: str = "") -> str:
-    if value is None:
-        return default
-    if isinstance(value, str):
-        return value.strip()
-    return str(value).strip()
-
-
-def _clean_identifier(value: Any, *, default: str = "") -> str:
-    cleaned = _clean_text(value, default=default).lower()
-    if not cleaned:
-        return default
-    return _IDENTIFIER_PATTERN.sub("_", cleaned).strip("_") or default
 
 
 def _clone_json_value(value: Any) -> Any:

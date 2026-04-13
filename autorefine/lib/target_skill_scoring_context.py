@@ -2,29 +2,28 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from pathlib import Path
+import sys
 from typing import Any
 
+if __package__:
+    from ._shared_text import (
+        clean_identifier as _clean_identifier,
+        clean_text as _clean_text,
+    )
+else:
+    _CURRENT_DIR = Path(__file__).resolve().parent
+    if str(_CURRENT_DIR) not in sys.path:
+        sys.path.insert(0, str(_CURRENT_DIR))
+    from _shared_text import (
+        clean_identifier as _clean_identifier,
+        clean_text as _clean_text,
+    )
 
 TARGET_SKILL_SCORING_CONTEXT_SCHEMA_VERSION = 1
 CANONICAL_TARGET_SKILL_SCORING_CONTEXT_TYPE = "target_skill_scoring_context"
 
-_IDENTIFIER_PATTERN = re.compile(r"[^a-z0-9]+")
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
-
-
-def _clean_text(value: Any, *, default: str = "") -> str:
-    if value is None:
-        return default
-    if isinstance(value, str):
-        return value.strip()
-    return str(value).strip()
-
-
-def _clean_identifier(value: Any, *, default: str = "") -> str:
-    cleaned = _clean_text(value, default=default).lower()
-    if not cleaned:
-        return default
-    return _IDENTIFIER_PATTERN.sub("_", cleaned).strip("_") or default
 
 
 def _first_present(mapping: Mapping[str, Any], *keys: str) -> Any:

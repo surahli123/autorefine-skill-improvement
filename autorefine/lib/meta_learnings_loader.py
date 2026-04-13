@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime
 import hashlib
 import json
 from pathlib import Path
@@ -11,11 +11,19 @@ import sys
 from typing import Any
 
 if __package__:
+    from ._shared_text import (
+        clean_text as _clean_text,
+        now_utc_timestamp as _now_utc_timestamp,
+    )
     from .target_skill_scoring_context import build_target_skill_scoring_context
 else:
     _CURRENT_DIR = Path(__file__).resolve().parent
     if str(_CURRENT_DIR) not in sys.path:
         sys.path.insert(0, str(_CURRENT_DIR))
+    from _shared_text import (
+        clean_text as _clean_text,
+        now_utc_timestamp as _now_utc_timestamp,
+    )
     from target_skill_scoring_context import build_target_skill_scoring_context
 
 
@@ -74,14 +82,6 @@ class MetaLearningsValidationError(ValueError):
         super().__init__("; ".join(errors))
 
 
-def _clean_text(value: Any, *, default: str = "") -> str:
-    if value is None:
-        return default
-    if isinstance(value, str):
-        return value.strip()
-    return str(value).strip()
-
-
 def _first_present(mapping: Mapping[str, Any], *keys: str) -> Any:
     for key in keys:
         if key in mapping and mapping[key] is not None:
@@ -122,10 +122,6 @@ def _split_key_value(line: str) -> tuple[str, str]:
         raise ValueError(f"expected '<key>: <value>' line, received {line!r}")
     key, raw_value = line.split(":", 1)
     return (_clean_text(key), raw_value)
-
-
-def _now_utc_timestamp() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _normalize_iso_timestamp(value: Any, *, field_name: str) -> str:

@@ -9,6 +9,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ._shared_text import (
+    clean_identifier as _clean_identifier,
+    clean_text as _clean_text,
+    now_utc_timestamp as _now_utc_timestamp,
+)
 from .exemplar_source_loader import (
     CANONICAL_EXEMPLAR_PAYLOAD_TYPE,
     CANONICAL_VERSION_SNAPSHOT_BUNDLE_TYPE,
@@ -110,7 +115,6 @@ PATTERN_STORE_PROVENANCE_INDEX_FIELDS = (
     "raw_artifact_ref",
 )
 
-_IDENTIFIER_PATTERN = re.compile(r"[^a-z0-9]+")
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 _PATTERN_PROJECTION_KIND_BY_PREFIX = {
     "tp": "tactic",
@@ -282,26 +286,11 @@ class ResearchCorpusValidationError(ValueError):
         super().__init__("; ".join(errors))
 
 
-def _clean_text(value: Any, *, default: str = "") -> str:
-    if value is None:
-        return default
-    if isinstance(value, str):
-        return value.strip()
-    return str(value).strip()
-
-
 def _first_present(mapping: Mapping[str, Any], *keys: str) -> Any:
     for key in keys:
         if key in mapping and mapping[key] is not None:
             return mapping[key]
     return None
-
-
-def _clean_identifier(value: Any, *, default: str = "") -> str:
-    cleaned = _clean_text(value, default=default).lower()
-    if not cleaned:
-        return default
-    return _IDENTIFIER_PATTERN.sub("_", cleaned).strip("_") or default
 
 
 def _clone_json_value(value: Any) -> Any:
@@ -314,10 +303,6 @@ def _clone_json_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return [_clone_json_value(item) for item in value]
     return value
-
-
-def _now_utc_timestamp() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _normalize_iso_timestamp(value: Any, *, field_name: str, default: str | None = None) -> str:
