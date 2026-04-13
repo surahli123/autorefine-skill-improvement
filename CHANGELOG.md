@@ -9,3 +9,4 @@
 - move repo-maintenance shell tests out of the shipped bundle into `dev/tests/`
 - add `.claude-plugin/` and `.codex-plugin/` manifests plus a plugin-facing README
 - normalize internal note and archive naming in `dev/` and add an internal consolidation sanity check
+- remove stale maintainer git hooks from the shipped `autorefine/` bundle and refresh `validate-host.sh` to describe the current `SKILL.md` + `references/` package model
