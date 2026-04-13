@@ -5,9 +5,14 @@ import json
 import re
 from bisect import bisect_right
 from collections.abc import Mapping
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from ._shared_text import (
+    clean_identifier as _clean_identifier,
+    clean_text as _clean_text,
+    now_utc_timestamp as _now_utc_timestamp,
+)
 
 
 EXEMPLAR_SOURCE_BUNDLE_SCHEMA_VERSION = 1
@@ -27,7 +32,6 @@ CANONICAL_EXEMPLAR_PAYLOAD_TYPE = "selected_exemplar_payload"
 SKILL_VERSION_SNAPSHOT_SCHEMA_VERSION = 1
 CANONICAL_VERSION_SNAPSHOT_BUNDLE_TYPE = "skill_version_snapshot_bundle"
 
-_IDENTIFIER_PATTERN = re.compile(r"[^a-z0-9]+")
 _HEADING_PATTERN = re.compile(r"^\s*#\s+(.+?)\s*$", re.MULTILINE)
 _FRONTMATTER_DESCRIPTION_PATTERN = re.compile(
     r"^---\s*\n.*?^description:\s*(.+?)\s*$.*?^---\s*$",
@@ -45,21 +49,6 @@ class ExemplarSourceValidationError(ValueError):
     def __init__(self, errors: list[str]):
         self.errors = errors
         super().__init__("; ".join(errors))
-
-
-def _clean_text(value: Any, *, default: str = "") -> str:
-    if value is None:
-        return default
-    if isinstance(value, str):
-        return value.strip()
-    return str(value).strip()
-
-
-def _clean_identifier(value: Any, *, default: str = "") -> str:
-    cleaned = _clean_text(value, default=default).lower()
-    if not cleaned:
-        return default
-    return _IDENTIFIER_PATTERN.sub("_", cleaned).strip("_") or default
 
 
 def _coerce_bool(value: Any, *, default: bool) -> bool:
@@ -129,10 +118,6 @@ def _normalize_threshold(value: Any, *, field_name: str) -> float | None:
             f"{field_name} must be a percentage between 0-1 or 0-100; received {value!r}"
         )
     return normalized
-
-
-def _now_utc_timestamp() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _read_text(path: Path) -> str:
