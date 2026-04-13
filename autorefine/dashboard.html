@@ -360,6 +360,10 @@ function serializeResultsPayload(payload) {
   const {
     completion_cadence: completionCadence,
     iteration_state: iterationState,
+    pending_user_override_scan: storedPendingUserOverrideScan,
+    mid_session_preference_signals: storedMidSessionPreferenceSignals,
+    mid_session_preference_signals_path: storedMidSessionPreferenceSignalsPath,
+    style_preferences: storedStylePreferences,
     noise_floor: persistedNoiseFloor,
     experiments,
     eval_breakdown: evalBreakdown,
@@ -391,6 +395,16 @@ function serializeResultsPayload(payload) {
     ...restPayload
   } = normalizedPayload;
   const rawExperiments = Array.isArray(experiments) ? experiments : [];
+  const serializedCompletionCadence = serializeCompletionCadence(completionCadence);
+  const serializedIterationState = serializeIterationState(iterationState);
+  const serializedMidSessionPreferenceSignals = serializeMidSessionPreferenceSignals(
+    storedMidSessionPreferenceSignals
+  );
+  const serializedStylePreferences = serializeStylePreferencesPayload(storedStylePreferences, {
+    mid_session_preference_signals: serializedMidSessionPreferenceSignals,
+    mid_session_preference_signals_path: storedMidSessionPreferenceSignalsPath,
+    workspace_path: normalizedPayload.workspace_path
+  });
   const persistedSessionNoiseFloor = serializeNoiseFloor(persistedNoiseFloor);
   const embeddedSessionCloseHoldout = rawExperiments.find(isSessionCloseHoldoutArtifactEntry) || null;
   const serializedExperiments = Array.isArray(experiments)
@@ -468,14 +482,37 @@ function serializeResultsPayload(payload) {
         : (hasNonEmptyString(iterationState && iterationState.run_id) ? iterationState.run_id : null)
     }
   );
+  const pendingUserOverrideScan = buildPendingUserOverrideScanTask({
+    preparedTask: storedPendingUserOverrideScan,
+    completionCadence: serializedCompletionCadence,
+    iterationState: serializedIterationState,
+    currentExperiment: Number.isInteger(normalizedPayload.current_experiment)
+      ? normalizedPayload.current_experiment
+      : null,
+    status: hasNonEmptyString(normalizedPayload.status) ? normalizedPayload.status : null,
+    experiments: publishedExperiments
+  });
 
   return {
     ...restPayload,
     // completion_cadence: serializeCompletionCadence(payload.completion_cadence)
-    completion_cadence: serializeCompletionCadence(completionCadence),
+    completion_cadence: serializedCompletionCadence,
+    // iteration_state: serializeIterationState(iterationState)
     // Preserve the persisted Phase 7 eval-to-mutate runner handoff record.
     // Do not infer this state from experiment order when iteration_state is already stored.
-    iteration_state: serializeIterationState(iterationState),
+    iteration_state: serializedIterationState,
+    // Trigger the session-level user-override scan every 3rd completed experiment
+    // while the refinement loop stays active.
+    pending_user_override_scan: pendingUserOverrideScan
+      ? cloneStructuredValue(pendingUserOverrideScan)
+      : null,
+    mid_session_preference_signals: serializedMidSessionPreferenceSignals,
+    mid_session_preference_signals_path: hasNonEmptyString(storedMidSessionPreferenceSignalsPath)
+      ? storedMidSessionPreferenceSignalsPath.trim()
+      : null,
+    // Preserve the normalized style-preferences context for the active refinement loop.
+    // Mid-loop stages should reuse this envelope instead of rebuilding active signals ad hoc.
+    style_preferences: serializedStylePreferences,
     baseline_score: mutationTimeScoreSummary.baseline_score,
     best_score: mutationTimeScoreSummary.best_score,
     noise_floor: mutationTimeScoreSummary.noise_floor,
@@ -2765,12 +2802,190 @@ function cloneStructuredValue(value) {
   return value;
 }
 
+function isQueuedPreferenceSnapshotKey(key) {
+  if (typeof key !== 'string') {
+    return false;
+  }
+
+  const normalizedKey = key.trim().toLowerCase();
+  if (
+    normalizedKey === 'style_preferences' ||
+    normalizedKey === 'mid_session_preference_signals' ||
+    normalizedKey === 'mid_session_preference_signals_path' ||
+    normalizedKey === 'resolved_preferences_path'
+  ) {
+    return true;
+  }
+
+  return normalizedKey.startsWith('session_start_') &&
+    (normalizedKey.includes('preference') || normalizedKey.includes('style_preferences'));
+}
+
+function stripQueuedPreferenceSnapshotFields(value) {
+  if (Array.isArray(value)) {
+    return value.map(stripQueuedPreferenceSnapshotFields);
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !isQueuedPreferenceSnapshotKey(key))
+      .map(([key, nestedValue]) => [key, stripQueuedPreferenceSnapshotFields(nestedValue)])
+  );
+}
+
 function serializeCompletionCadence(value) {
   if (!value || typeof value !== 'object') {
     return null;
   }
 
   return cloneStructuredValue(value);
+}
+
+function resolveStylePreferencesPath(pathReference, workspacePath) {
+  const normalizedPathReference = hasNonEmptyString(pathReference)
+    ? pathReference.trim()
+    : null;
+  if (!normalizedPathReference) {
+    return null;
+  }
+
+  if (normalizedPathReference.startsWith('[workspace]/')) {
+    if (!hasNonEmptyString(workspacePath)) {
+      return normalizedPathReference;
+    }
+    const relativeSuffix = normalizedPathReference.slice('[workspace]/'.length);
+    return `${workspacePath.trim().replace(/\/$/, '')}/${relativeSuffix}`;
+  }
+
+  if (
+    hasNonEmptyString(workspacePath) &&
+    !normalizedPathReference.startsWith('/') &&
+    !/^[A-Za-z]:[\\/]/.test(normalizedPathReference)
+  ) {
+    return `${workspacePath.trim().replace(/\/$/, '')}/${normalizedPathReference}`;
+  }
+
+  return normalizedPathReference;
+}
+
+function serializeMidSessionPreferenceSignals(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const serializedValue = cloneStructuredValue(value);
+  const signals = Array.isArray(serializedValue.signals)
+    ? serializedValue.signals
+        .filter(signal => signal && typeof signal === 'object' && !Array.isArray(signal))
+        .map(cloneStructuredValue)
+    : [];
+
+  return {
+    ...serializedValue,
+    status: hasNonEmptyString(serializedValue.status) ? serializedValue.status.trim() : null,
+    source_task_ref: hasNonEmptyString(serializedValue.source_task_ref)
+      ? serializedValue.source_task_ref.trim()
+      : null,
+    source_window_experiment_ids: Array.isArray(serializedValue.source_window_experiment_ids)
+      ? serializedValue.source_window_experiment_ids.filter(Number.isInteger)
+      : [],
+    signals,
+    detected_signal_count: Number.isInteger(serializedValue.detected_signal_count)
+      ? serializedValue.detected_signal_count
+      : signals.length,
+    confirmed_signal_count: Number.isInteger(serializedValue.confirmed_signal_count)
+      ? serializedValue.confirmed_signal_count
+      : null,
+    last_detected_at: hasNonEmptyString(serializedValue.last_detected_at)
+      ? serializedValue.last_detected_at.trim()
+      : null,
+    last_confirmed_experiment_id: Number.isInteger(serializedValue.last_confirmed_experiment_id)
+      ? serializedValue.last_confirmed_experiment_id
+      : null
+  };
+}
+
+function serializeStylePreferencesPayload(value, options = {}) {
+  const storedPayload = value && typeof value === 'object' && !Array.isArray(value)
+    ? cloneStructuredValue(value)
+    : null;
+  const normalizedLedger = serializeMidSessionPreferenceSignals(
+    storedPayload && storedPayload.signals
+      ? {
+          status: storedPayload.status,
+          source_task_ref: storedPayload.source_task_ref,
+          source_window_experiment_ids: storedPayload.source_window_experiment_ids,
+          signals: storedPayload.signals,
+          detected_signal_count: storedPayload.detected_signal_count,
+          confirmed_signal_count: storedPayload.confirmed_signal_count,
+          last_detected_at: storedPayload.last_detected_at,
+          last_confirmed_experiment_id: storedPayload.last_confirmed_experiment_id
+        }
+      : options.mid_session_preference_signals
+  ) || {
+    status: null,
+    source_task_ref: null,
+    source_window_experiment_ids: [],
+    signals: [],
+    detected_signal_count: 0,
+    confirmed_signal_count: 0,
+    last_detected_at: null,
+    last_confirmed_experiment_id: null
+  };
+  const payloadStatus = hasNonEmptyString(storedPayload && storedPayload.status)
+    ? storedPayload.status.trim()
+    : normalizedLedger.status;
+  const pathReference = hasNonEmptyString(storedPayload && storedPayload.mid_session_preference_signals_path)
+    ? storedPayload.mid_session_preference_signals_path.trim()
+    : (
+        hasNonEmptyString(options.mid_session_preference_signals_path)
+          ? options.mid_session_preference_signals_path.trim()
+          : null
+      );
+  const resolvedPreferencesPath = resolveStylePreferencesPath(
+    pathReference,
+    options.workspace_path
+  ) || (
+    hasNonEmptyString(storedPayload && storedPayload.resolved_preferences_path)
+      ? storedPayload.resolved_preferences_path.trim()
+      : null
+  );
+  const explicitActiveSignals = Array.isArray(storedPayload && storedPayload.active_signals)
+    ? storedPayload.active_signals
+        .filter(signal => signal && typeof signal === 'object' && !Array.isArray(signal))
+        .map(cloneStructuredValue)
+    : null;
+  const activeSignals = payloadStatus === 'confirmed' || payloadStatus === 'applied'
+    ? (explicitActiveSignals || normalizedLedger.signals.map(cloneStructuredValue))
+    : [];
+
+  return {
+    schema_version: Number.isInteger(storedPayload && storedPayload.schema_version)
+      ? storedPayload.schema_version
+      : 1,
+    payload_type: hasNonEmptyString(storedPayload && storedPayload.payload_type)
+      ? storedPayload.payload_type.trim()
+      : 'style_preferences',
+    status: payloadStatus,
+    source_task_ref: normalizedLedger.source_task_ref,
+    source_window_experiment_ids: normalizedLedger.source_window_experiment_ids,
+    signals: normalizedLedger.signals.map(cloneStructuredValue),
+    active_signals: activeSignals,
+    detected_signal_count: Number.isInteger(normalizedLedger.detected_signal_count)
+      ? normalizedLedger.detected_signal_count
+      : normalizedLedger.signals.length,
+    confirmed_signal_count: Number.isInteger(normalizedLedger.confirmed_signal_count)
+      ? normalizedLedger.confirmed_signal_count
+      : activeSignals.length,
+    last_detected_at: normalizedLedger.last_detected_at,
+    last_confirmed_experiment_id: normalizedLedger.last_confirmed_experiment_id,
+    mid_session_preference_signals_path: pathReference,
+    resolved_preferences_path: resolvedPreferencesPath
+  };
 }
 
 function serializeIterationState(value) {
@@ -2798,6 +3013,258 @@ function serializeIterationState(value) {
   }
 
   return serialized;
+}
+
+function isFinalizedMutationExperiment(experiment) {
+  const finalStatus = normalizeDecisionLabel(experiment && experiment.status);
+  return finalStatus === 'baseline' || finalStatus === 'keep' || finalStatus === 'discard';
+}
+
+function isActiveRefinementLoop(options = {}) {
+  const normalizedStatus = hasNonEmptyString(options.status)
+    ? options.status.trim().toLowerCase()
+    : null;
+  if (normalizedStatus === 'complete') {
+    return false;
+  }
+
+  const iterationState = options.iterationState && typeof options.iterationState === 'object'
+    ? options.iterationState
+    : null;
+  if (iterationState) {
+    const activePhase = hasNonEmptyString(iterationState.active_phase)
+      ? iterationState.active_phase.trim().toLowerCase()
+      : null;
+    const phaseStatus = hasNonEmptyString(iterationState.phase_status)
+      ? iterationState.phase_status.trim().toLowerCase()
+      : null;
+
+    if (phaseStatus === 'completed' || phaseStatus === 'blocked') {
+      return false;
+    }
+
+    if (
+      (activePhase === 'eval' || activePhase === 'mutate' || activePhase === 'test' || activePhase === 'session_close') &&
+      (phaseStatus === 'running' || phaseStatus === 'ready')
+    ) {
+      return true;
+    }
+  }
+
+  return Number.isInteger(options.currentExperiment);
+}
+
+function resolvePendingUserOverrideScanCadence(completionCadence, experiments) {
+  if (completionCadence && typeof completionCadence === 'object' && !Array.isArray(completionCadence)) {
+    return cloneStructuredValue(completionCadence);
+  }
+
+  if (!Array.isArray(experiments)) {
+    return null;
+  }
+
+  for (let index = experiments.length - 1; index >= 0; index -= 1) {
+    const experiment = experiments[index];
+    if (
+      experiment &&
+      experiment.completion_cadence &&
+      typeof experiment.completion_cadence === 'object' &&
+      !Array.isArray(experiment.completion_cadence)
+    ) {
+      return cloneStructuredValue(experiment.completion_cadence);
+    }
+  }
+
+  return null;
+}
+
+function resolvePendingUserOverrideVerdict(value) {
+  const normalizedVerdict = normalizeDecisionLabel(value);
+  return normalizedVerdict === 'baseline' || normalizedVerdict === 'keep' || normalizedVerdict === 'discard'
+    ? normalizedVerdict
+    : null;
+}
+
+function buildPendingUserOverrideScanWindowEntry(experiment) {
+  const agentVerdict = resolvePendingUserOverrideVerdict(
+    experiment &&
+    experiment.decision_breakdown &&
+    experiment.decision_breakdown.proposed_decision
+  );
+  const userVerdict = resolvePendingUserOverrideVerdict(experiment && experiment.status);
+  const overrideDetected =
+    (agentVerdict === 'keep' || agentVerdict === 'discard') &&
+    (userVerdict === 'keep' || userVerdict === 'discard') &&
+    agentVerdict !== userVerdict;
+  const changedLocations = Array.isArray(experiment && experiment.changes)
+    ? Array.from(
+        new Set(
+          experiment.changes
+            .map(change => hasNonEmptyString(change && change.location) ? change.location : null)
+            .filter(hasNonEmptyString)
+        )
+      )
+    : [];
+  const mutationTypes = Array.isArray(experiment && experiment.changes)
+    ? Array.from(
+        new Set(
+          experiment.changes
+            .map(change => hasNonEmptyString(change && change.type) ? change.type : null)
+            .filter(hasNonEmptyString)
+        )
+      )
+    : [];
+
+  return {
+    experiment_id: Number.isInteger(experiment && experiment.id) ? experiment.id : null,
+    agent_verdict: agentVerdict,
+    user_verdict: userVerdict,
+    final_status: userVerdict,
+    override_detected: overrideDetected,
+    override_direction: overrideDetected ? `${agentVerdict}_to_${userVerdict}` : null,
+    changed_locations: changedLocations,
+    mutation_types: mutationTypes,
+    description: hasNonEmptyString(experiment && experiment.description) ? experiment.description : '',
+    completion_cadence:
+      experiment &&
+      experiment.completion_cadence &&
+      typeof experiment.completion_cadence === 'object' &&
+      !Array.isArray(experiment.completion_cadence)
+        ? cloneStructuredValue(experiment.completion_cadence)
+        : null
+  };
+}
+
+function buildPendingUserOverrideScanWindow(experiments, windowSize = 3) {
+  if (!Array.isArray(experiments)) {
+    return [];
+  }
+
+  return experiments
+    .filter(isFinalizedMutationExperiment)
+    .slice(-windowSize)
+    .map(buildPendingUserOverrideScanWindowEntry);
+}
+
+function normalizePendingUserOverrideScanWindowEntry(entry) {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return null;
+  }
+
+  const normalizedEntry = stripQueuedPreferenceSnapshotFields(cloneStructuredValue(entry));
+  return {
+    experiment_id: Number.isInteger(normalizedEntry.experiment_id)
+      ? normalizedEntry.experiment_id
+      : null,
+    agent_verdict: resolvePendingUserOverrideVerdict(normalizedEntry.agent_verdict),
+    user_verdict: resolvePendingUserOverrideVerdict(normalizedEntry.user_verdict),
+    final_status: resolvePendingUserOverrideVerdict(normalizedEntry.final_status),
+    override_detected: normalizedEntry.override_detected === true,
+    override_direction: hasNonEmptyString(normalizedEntry.override_direction)
+      ? normalizedEntry.override_direction
+      : null,
+    changed_locations: normalizeUniqueStringList(normalizedEntry.changed_locations),
+    mutation_types: normalizeUniqueStringList(normalizedEntry.mutation_types),
+    description: hasNonEmptyString(normalizedEntry.description)
+      ? normalizedEntry.description
+      : '',
+    completion_cadence: serializeCompletionCadence(normalizedEntry.completion_cadence)
+  };
+}
+
+function buildPendingUserOverrideScanTask(options = {}) {
+  const preparedTask = options.preparedTask && typeof options.preparedTask === 'object' && !Array.isArray(options.preparedTask)
+    ? options.preparedTask
+    : null;
+  const windowSize = Number.isInteger(preparedTask && preparedTask.scan_window_size) &&
+    preparedTask.scan_window_size >= 1
+      ? preparedTask.scan_window_size
+      : 3;
+  const resolvedCompletionCadence = resolvePendingUserOverrideScanCadence(
+    options.completionCadence,
+    options.experiments
+  );
+  const completedExperimentSlot = Number.isInteger(preparedTask && preparedTask.completed_experiment_slot)
+    ? preparedTask.completed_experiment_slot
+    : (
+        resolvedCompletionCadence &&
+        Number.isInteger(resolvedCompletionCadence.completed_experiments)
+          ? resolvedCompletionCadence.completed_experiments
+          : null
+      );
+  const cadenceTriggered =
+    completedExperimentSlot !== null &&
+    completedExperimentSlot > 0 &&
+    completedExperimentSlot % 3 === 0;
+  const activeLoop = isActiveRefinementLoop({
+    status: options.status,
+    iterationState: options.iterationState,
+    currentExperiment: options.currentExperiment
+  });
+
+  if (!preparedTask && (!cadenceTriggered || !activeLoop)) {
+    return null;
+  }
+
+  const experimentWindow = Array.isArray(preparedTask && preparedTask.experiment_window)
+    ? preparedTask.experiment_window
+        .map(normalizePendingUserOverrideScanWindowEntry)
+        .filter(Boolean)
+    : buildPendingUserOverrideScanWindow(options.experiments, windowSize);
+  const overrideCount = Number.isInteger(preparedTask && preparedTask.override_count)
+    ? preparedTask.override_count
+    : experimentWindow.filter(entry => entry && entry.override_detected === true).length;
+  const scanWindowStatus = hasNonEmptyString(preparedTask && preparedTask.scan_window_status)
+    ? preparedTask.scan_window_status
+    : experimentWindow.length === 0
+      ? 'empty'
+      : experimentWindow.length < windowSize
+        ? 'underfilled'
+        : 'ready';
+  const triggerExperimentId = Number.isInteger(preparedTask && preparedTask.trigger_experiment_id)
+    ? preparedTask.trigger_experiment_id
+    : (
+        resolvedCompletionCadence &&
+        Number.isInteger(resolvedCompletionCadence.last_finalized_experiment_id)
+          ? resolvedCompletionCadence.last_finalized_experiment_id
+          : (
+              experimentWindow.length > 0 &&
+              Number.isInteger(experimentWindow[experimentWindow.length - 1].experiment_id)
+                ? experimentWindow[experimentWindow.length - 1].experiment_id
+                : null
+            )
+      );
+  const scanWindowExperimentIds = Array.isArray(preparedTask && preparedTask.scan_window_experiment_ids)
+    ? preparedTask.scan_window_experiment_ids.filter(Number.isInteger)
+    : experimentWindow
+        .map(entry => entry && entry.experiment_id)
+        .filter(Number.isInteger);
+
+  return {
+    task_type: hasNonEmptyString(preparedTask && preparedTask.task_type)
+      ? preparedTask.task_type
+      : 'user_override_scan',
+    trigger: hasNonEmptyString(preparedTask && preparedTask.trigger)
+      ? preparedTask.trigger
+      : 'completion_cadence',
+    status: hasNonEmptyString(preparedTask && preparedTask.status)
+      ? preparedTask.status
+      : 'pending',
+    completed_experiment_slot: completedExperimentSlot,
+    trigger_experiment_id: triggerExperimentId,
+    scan_window_size: windowSize,
+    scan_window_status: scanWindowStatus,
+    scan_scope: hasNonEmptyString(preparedTask && preparedTask.scan_scope)
+      ? preparedTask.scan_scope
+      : 'last_3_finalized_experiments',
+    override_count: overrideCount,
+    override_detected: preparedTask && typeof preparedTask.override_detected === 'boolean'
+      ? preparedTask.override_detected
+      : overrideCount > 0,
+    scan_window_experiment_ids: scanWindowExperimentIds,
+    experiment_window: experimentWindow,
+    completion_cadence: resolvedCompletionCadence
+  };
 }
 
 function buildBaselineTrialId(trialIndex) {
@@ -3622,7 +4089,7 @@ function normalizeHumanSpotCheckSampleRecord(sample, options = {}) {
       : null;
   normalizedSample.human_review_judgment = attachedJudgment;
 
-  return normalizedSample;
+  return stripQueuedPreferenceSnapshotFields(normalizedSample);
 }
 
 function normalizeHumanSpotCheckSamples(samples, options = {}) {
@@ -6096,6 +6563,2480 @@ function getStoredMutationHandoff(experiment) {
   return null;
 }
 
+function roundMutationHandoffMetric(value) {
+  const normalizedValue = normalizeOptionalScore(value);
+  if (normalizedValue === null) {
+    return null;
+  }
+
+  return Math.round(normalizedValue * 1000) / 1000;
+}
+
+function getMutationHandoffEvalId(candidate, index) {
+  if (hasNonEmptyString(candidate && candidate.eval)) {
+    return candidate.eval.trim();
+  }
+
+  return `E${index + 1}`;
+}
+
+function normalizeMutationHandoffPassFail(value) {
+  return normalizeJudgePassFail(value) || 'unknown';
+}
+
+function buildMutationHandoffPerEvalRows(evalResults, decisionBreakdown) {
+  const serializedEvalResults = (Array.isArray(evalResults) ? evalResults : []).map(serializeJudgeVerdict);
+  const verdictByEval = new Map();
+  serializedEvalResults.forEach((verdict, index) => {
+    verdictByEval.set(getMutationHandoffEvalId(verdict, index), verdict);
+  });
+
+  const breakdownComponents = Array.isArray(decisionBreakdown && decisionBreakdown.components)
+    ? decisionBreakdown.components
+    : [];
+  const componentByEval = new Map();
+  breakdownComponents.forEach((component, index) => {
+    componentByEval.set(getMutationHandoffEvalId(component, index), component);
+  });
+
+  const totalWeight = roundMutationHandoffMetric(
+    decisionBreakdown && decisionBreakdown.total_weight
+  ) ?? roundMutationHandoffMetric(
+    breakdownComponents.reduce((sum, component) => (
+      sum + (normalizeOptionalScore(component && component.weight) || 0)
+    ), 0)
+  );
+  const orderedEvalIds = [];
+
+  breakdownComponents.forEach((component, index) => {
+    const evalId = getMutationHandoffEvalId(component, index);
+    if (!orderedEvalIds.includes(evalId)) {
+      orderedEvalIds.push(evalId);
+    }
+  });
+
+  serializedEvalResults.forEach((verdict, index) => {
+    const evalId = getMutationHandoffEvalId(verdict, index);
+    if (!orderedEvalIds.includes(evalId)) {
+      orderedEvalIds.push(evalId);
+    }
+  });
+
+  return orderedEvalIds.map(evalId => {
+    const component = componentByEval.get(evalId) || null;
+    const verdict = verdictByEval.get(evalId) || null;
+    const passFail = normalizeMutationHandoffPassFail(
+      component && component.pass_fail != null ? component.pass_fail : verdict && verdict.pass_fail
+    );
+    const weight = roundMutationHandoffMetric(
+      component && component.weight != null ? component.weight : verdict && verdict.weight
+    );
+    const weightSource = firstNonEmptyString([
+      component && component.weight_source,
+      verdict && verdict.weight_source
+    ]);
+    let normalizedScore = roundMutationHandoffMetric(component && component.normalized_contribution);
+    if (normalizedScore === null && passFail === 'pass' && weight !== null && totalWeight && totalWeight > 0) {
+      normalizedScore = roundMutationHandoffMetric(weight / totalWeight);
+    }
+
+    let missedWeightShare = roundMutationHandoffMetric(component && component.missed_weight_share);
+    if (missedWeightShare === null) {
+      if (passFail !== 'pass' && weight !== null && totalWeight && totalWeight > 0) {
+        missedWeightShare = roundMutationHandoffMetric(weight / totalWeight);
+      } else {
+        missedWeightShare = 0;
+      }
+    }
+
+    return {
+      eval: evalId,
+      category: firstNonEmptyString([
+        component && component.category,
+        verdict && verdict.category
+      ]),
+      pass_fail: passFail,
+      normalized_score: normalizedScore ?? 0,
+      missed_weight_share: missedWeightShare ?? 0,
+      weight,
+      weight_source: weightSource
+    };
+  });
+}
+
+function normalizeMutationHandoffText(value) {
+  if (!hasNonEmptyString(value)) {
+    return null;
+  }
+
+  return value.trim().replace(/\s+/g, ' ');
+}
+
+function extractMutationHandoffSentence(value) {
+  const normalizedText = normalizeMutationHandoffText(value);
+  if (!normalizedText) {
+    return null;
+  }
+
+  const trimmedText = normalizedText.replace(/^\d+\.\s*/, '');
+  const match = trimmedText.match(/^[^.!?]+[.!?]?/);
+  return match ? match[0].trim() : trimmedText;
+}
+
+function isMutationHandoffFailingSupportItem(item) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) {
+    return false;
+  }
+
+  const outcome = normalizeMutationHandoffText(item.outcome)?.toLowerCase() || '';
+  const decision = normalizeMutationHandoffText(item.decision)?.toLowerCase() || '';
+
+  return (
+    outcome.includes('fail') ||
+    outcome.includes('missing') ||
+    outcome.includes('blocked') ||
+    outcome.includes('regression') ||
+    outcome.includes('unmet') ||
+    outcome.includes('review') ||
+    outcome.includes('disagreement') ||
+    decision.includes('missing') ||
+    decision.includes('omit') ||
+    decision.includes('absent') ||
+    decision.includes('unclear') ||
+    decision.includes('vague') ||
+    decision.includes('stale') ||
+    decision.includes('deprecated') ||
+    decision.includes('skip') ||
+    decision.includes('out of order') ||
+    decision.includes('bypass')
+  );
+}
+
+function collectMutationHandoffTextCandidates(verdict, supportingItems) {
+  const candidates = [];
+  const items = Array.isArray(supportingItems) ? supportingItems : [];
+
+  items.forEach(item => {
+    if (hasNonEmptyString(item && item.decision)) {
+      candidates.push(item.decision);
+    }
+  });
+
+  if (hasNonEmptyString(verdict && verdict.reasoning_trace)) {
+    candidates.push(verdict.reasoning_trace);
+  }
+
+  (Array.isArray(verdict && verdict.evidence) ? verdict.evidence : []).forEach(item => {
+    if (hasNonEmptyString(item && item.excerpt)) {
+      candidates.push(item.excerpt);
+    }
+    if (hasNonEmptyString(item && item.locator)) {
+      candidates.push(item.locator);
+    }
+  });
+
+  return candidates;
+}
+
+function cleanMutationTargetLocation(value) {
+  if (!hasNonEmptyString(value)) {
+    return null;
+  }
+
+  return value
+    .trim()
+    .replace(/^#+\s*/, '')
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[.]+$/g, '');
+}
+
+function inferMutationTargetLocation(textCandidates, fallbackEvalId) {
+  const candidates = Array.isArray(textCandidates) ? textCandidates : [];
+  const locationPatterns = [
+    /##+\s*([^\n#]+)/,
+    /\b([A-Z][A-Za-z0-9]+(?: [A-Z][A-Za-z0-9]+){0,5}) section\b/,
+    /\b([A-Z][A-Za-z0-9]+(?: [A-Z][A-Za-z0-9]+){0,5}) guidance\b/,
+    /\b([A-Z][A-Za-z0-9]+(?: [A-Z][A-Za-z0-9]+){0,5}) rule\b/
+  ];
+
+  for (const candidate of candidates) {
+    const normalizedText = normalizeMutationHandoffText(candidate);
+    if (!normalizedText) {
+      continue;
+    }
+
+    for (const pattern of locationPatterns) {
+      const match = normalizedText.match(pattern);
+      if (match && hasNonEmptyString(match[1])) {
+        return cleanMutationTargetLocation(match[1]);
+      }
+    }
+  }
+
+  return hasNonEmptyString(fallbackEvalId) ? fallbackEvalId : 'Unknown Target';
+}
+
+function inferMutationReasonCode(passFail, textCandidates) {
+  if (passFail === 'disagreement') {
+    return 'review_required_disagreement';
+  }
+
+  const normalizedText = normalizeMutationHandoffText(
+    (Array.isArray(textCandidates) ? textCandidates : []).filter(hasNonEmptyString).join(' ')
+  )?.toLowerCase() || '';
+
+  if (/(missing|omits?|omitted|absent|not present|without|lacks?)/.test(normalizedText)) {
+    return 'missing_required_instruction';
+  }
+  if (/(ambiguous|unclear|vague|confusing)/.test(normalizedText)) {
+    return 'ambiguous_instruction';
+  }
+  if (/(stale|outdated|deprecated)/.test(normalizedText)) {
+    return 'stale_reference';
+  }
+  if (/(skip|skipped|out of order|wrong order|bypass)/.test(normalizedText)) {
+    return 'broken_pipeline_order';
+  }
+  if (/(redundant|duplicate|too long|verbose|over-specific|overspecific)/.test(normalizedText)) {
+    return 'excess_instruction';
+  }
+
+  return passFail === 'fail' ? 'eval_failed' : 'review_required';
+}
+
+function inferMutationType(reasonCode, targetLocation, textCandidates) {
+  const normalizedText = normalizeMutationHandoffText(
+    (Array.isArray(textCandidates) ? textCandidates : []).filter(hasNonEmptyString).join(' ')
+  )?.toLowerCase() || '';
+
+  if (/(remove|delete|drop|trim|shorten|reduce|redundant|duplicate|too long|verbose|over-specific|overspecific)/.test(normalizedText)) {
+    return 'delete';
+  }
+  if (/(add|create|insert|new section)/.test(normalizedText)) {
+    return 'add';
+  }
+  if (reasonCode === 'missing_required_instruction') {
+    return hasNonEmptyString(targetLocation) && !/^E\d+$/i.test(targetLocation) ? 'modify' : 'add';
+  }
+
+  return 'modify';
+}
+
+function slugifyMutationToken(value) {
+  if (!hasNonEmptyString(value)) {
+    return 'target';
+  }
+
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
+  return slug || 'target';
+}
+
+function buildMutationReasonSummary(verdict, failureItems) {
+  const items = Array.isArray(failureItems) ? failureItems : [];
+  const decisionSummary = firstNonEmptyString(items.map(item => extractMutationHandoffSentence(item && item.decision)));
+  if (decisionSummary) {
+    return decisionSummary;
+  }
+
+  const reasoningTraceSummary = extractMutationHandoffSentence(verdict && verdict.reasoning_trace);
+  if (reasoningTraceSummary) {
+    return reasoningTraceSummary;
+  }
+
+  return firstNonEmptyString(
+    (Array.isArray(verdict && verdict.evidence) ? verdict.evidence : []).map(item => extractMutationHandoffSentence(item && item.excerpt))
+  ) || 'Stored evaluation findings require a mutation follow-up.';
+}
+
+function buildMutationExpectedEffect(verdict, summary) {
+  const normalizedReasoningTrace = normalizeMutationHandoffText(verdict && verdict.reasoning_trace);
+  if (normalizedReasoningTrace) {
+    const criterionMatch = normalizedReasoningTrace.match(/criterion:\s*([^.!?]+)[.!?]?/i);
+    if (criterionMatch && hasNonEmptyString(criterionMatch[1])) {
+      return `Restore ${criterionMatch[1].trim().replace(/[.!?]+$/, '').toLowerCase()}.`;
+    }
+
+    const guidanceMatch = normalizedReasoningTrace.match(/([A-Za-z-]+(?: [A-Za-z-]+){0,4} guidance(?: [A-Za-z-]+){0,4})/i);
+    if (guidanceMatch && hasNonEmptyString(guidanceMatch[1])) {
+      return `Restore ${guidanceMatch[1].trim().replace(/[.!?]+$/, '').toLowerCase()}.`;
+    }
+  }
+
+  return `Recover the missed score share by resolving: ${summary}`;
+}
+
+function collectMutationEvidenceRefs(evalId, evidence, supportingItems) {
+  const refs = [];
+
+  (Array.isArray(supportingItems) ? supportingItems : []).forEach(item => {
+    (Array.isArray(item && item.evidence_refs) ? item.evidence_refs : []).forEach(ref => {
+      const normalizedRef = normalizeOptionalInteger(ref);
+      if (normalizedRef !== null) {
+        const refId = `eval_results[${evalId}].evidence[${normalizedRef}]`;
+        if (!refs.includes(refId)) {
+          refs.push(refId);
+        }
+      }
+    });
+  });
+
+  if (refs.length > 0) {
+    return refs;
+  }
+
+  const evidenceItems = Array.isArray(evidence) ? evidence : [];
+  return evidenceItems.length > 0 ? [`eval_results[${evalId}].evidence[0]`] : [];
+}
+
+function collectMutationSupportingItemRefs(evalId, supportingItems) {
+  return (Array.isArray(supportingItems) ? supportingItems : []).map((_, index) => (
+    `eval_results[${evalId}].supporting_items[${index}]`
+  ));
+}
+
+function resolveMutationStrategyAlignment(experiment, evaluationMetadata) {
+  return firstNonEmptyString([
+    evaluationMetadata &&
+      evaluationMetadata.phase1_context &&
+      evaluationMetadata.phase1_context.selected_eval_strategy_id,
+    evaluationMetadata &&
+      evaluationMetadata.config &&
+      evaluationMetadata.config.selected_eval_strategy_id,
+    experiment &&
+      experiment.phase1_context &&
+      experiment.phase1_context.selected_eval_strategy_id,
+    experiment && experiment.selected_eval_strategy_id
+  ]);
+}
+
+function buildDerivedMutationHandoff(experiment, options = {}) {
+  const decisionBreakdown = options.storedDecisionBreakdown || getStoredDecisionBreakdown(experiment);
+  const evaluationMetadata = options.storedEvaluationMetadata || getStoredEvaluationMetadata(experiment);
+  const serializedEvalResults = (
+    Array.isArray(options.storedEvalResults) ? options.storedEvalResults : getStoredEvalResults(experiment)
+  ).map(serializeJudgeVerdict);
+
+  if (serializedEvalResults.length === 0 && !(decisionBreakdown && typeof decisionBreakdown === 'object')) {
+    return null;
+  }
+
+  const perEvalRows = buildMutationHandoffPerEvalRows(serializedEvalResults, decisionBreakdown);
+  const combinedScore = roundMutationHandoffMetric(
+    decisionBreakdown && decisionBreakdown.combined_score != null
+      ? decisionBreakdown.combined_score
+      : (
+          decisionBreakdown && decisionBreakdown.combined_score_pct != null
+            ? normalizeOptionalScore(decisionBreakdown.combined_score_pct) / 100
+            : null
+        )
+  );
+  const combinedScorePct = normalizeScorePercentage(
+    decisionBreakdown && decisionBreakdown.combined_score_pct != null
+      ? decisionBreakdown.combined_score_pct
+      : combinedScore
+  );
+  const threshold = roundMutationHandoffMetric(decisionBreakdown && decisionBreakdown.threshold);
+  const gapToThreshold = combinedScore !== null && threshold !== null
+    ? roundMutationHandoffMetric(combinedScore - threshold)
+    : null;
+  const strategyAlignment = resolveMutationStrategyAlignment(experiment, evaluationMetadata);
+  const experimentId = normalizeOptionalInteger(experiment && experiment.id);
+  const failureReasons = [];
+
+  perEvalRows.forEach(evalRow => {
+    if (evalRow.pass_fail === 'pass') {
+      return;
+    }
+
+    const verdict = serializedEvalResults.find(item => getMutationHandoffEvalId(item, 0) === evalRow.eval) || null;
+    const allSupportingItems = Array.isArray(verdict && verdict.supporting_items) ? verdict.supporting_items : [];
+    const failureSupportingItems = allSupportingItems.filter(isMutationHandoffFailingSupportItem);
+    const relevantSupportingItems = failureSupportingItems.length > 0 ? failureSupportingItems : allSupportingItems;
+    const textCandidates = collectMutationHandoffTextCandidates(verdict, relevantSupportingItems);
+    const summary = buildMutationReasonSummary(verdict, relevantSupportingItems);
+    const targetLocation = inferMutationTargetLocation(textCandidates, evalRow.eval);
+    const reasonCode = inferMutationReasonCode(evalRow.pass_fail, textCandidates);
+    const recommendedMutationType = inferMutationType(reasonCode, targetLocation, textCandidates);
+    const reasonId = `exp${experimentId !== null ? experimentId : 'x'}-${evalRow.eval}-${slugifyMutationToken(targetLocation || reasonCode)}`;
+
+    failureReasons.push({
+      reason_id: reasonId,
+      eval: evalRow.eval,
+      category: evalRow.category,
+      reason_code: reasonCode,
+      summary,
+      source_eval_ref: `eval_results[${evalRow.eval}]`,
+      evidence_refs: collectMutationEvidenceRefs(evalRow.eval, verdict && verdict.evidence, relevantSupportingItems),
+      supporting_item_refs: collectMutationSupportingItemRefs(evalRow.eval, relevantSupportingItems),
+      missed_weight_share: evalRow.missed_weight_share,
+      mapped_target_ids: [],
+      __target_location: targetLocation,
+      __recommended_mutation_type: recommendedMutationType,
+      __strategy_alignment: strategyAlignment,
+      __rationale: firstNonEmptyString([
+        firstNonEmptyString(relevantSupportingItems.map(item => extractMutationHandoffSentence(item && item.decision))),
+        summary
+      ]),
+      __expected_effect: buildMutationExpectedEffect(verdict, summary)
+    });
+  });
+
+  const targetGroups = new Map();
+  failureReasons.forEach(reason => {
+    const groupKey = `${reason.__target_location}::${reason.__recommended_mutation_type}`;
+    if (!targetGroups.has(groupKey)) {
+      targetGroups.set(groupKey, {
+        target_location: reason.__target_location,
+        recommended_mutation_type: reason.__recommended_mutation_type,
+        strategy_alignment: reason.__strategy_alignment,
+        source_eval_ids: [],
+        source_reason_ids: [],
+        max_missed_weight_share: reason.missed_weight_share || 0,
+        rationale: reason.__rationale,
+        expected_effect: reason.__expected_effect
+      });
+    }
+
+    const group = targetGroups.get(groupKey);
+    if (!group.source_eval_ids.includes(reason.eval)) {
+      group.source_eval_ids.push(reason.eval);
+    }
+    group.source_reason_ids.push(reason.reason_id);
+    group.max_missed_weight_share = Math.max(group.max_missed_weight_share, reason.missed_weight_share || 0);
+    if (!group.rationale && reason.__rationale) {
+      group.rationale = reason.__rationale;
+    }
+    if (!group.expected_effect && reason.__expected_effect) {
+      group.expected_effect = reason.__expected_effect;
+    }
+  });
+
+  const mutationTargets = Array.from(targetGroups.values())
+    .sort((left, right) => {
+      const missedWeightDelta = (right.max_missed_weight_share || 0) - (left.max_missed_weight_share || 0);
+      if (missedWeightDelta !== 0) {
+        return missedWeightDelta;
+      }
+
+      return String(left.target_location || '').localeCompare(String(right.target_location || ''));
+    })
+    .map((group, index) => ({
+      target_id: `target-${slugifyMutationToken(group.target_location || `priority-${index + 1}`)}`,
+      target_location: group.target_location,
+      recommended_mutation_type: group.recommended_mutation_type,
+      priority: index + 1,
+      source_eval_ids: group.source_eval_ids,
+      source_reason_ids: group.source_reason_ids,
+      strategy_alignment: group.strategy_alignment || 'generic_eval_strategy',
+      rationale: group.rationale || `Resolve the stored blocker affecting ${group.target_location}.`,
+      expected_effect: group.expected_effect || `Recover the withheld score share for ${group.target_location}.`
+    }));
+
+  const targetIdByReasonId = new Map();
+  mutationTargets.forEach(target => {
+    target.source_reason_ids.forEach(reasonId => {
+      targetIdByReasonId.set(reasonId, target.target_id);
+    });
+  });
+
+  const normalizedFailureReasons = failureReasons.map(reason => ({
+    reason_id: reason.reason_id,
+    eval: reason.eval,
+    category: reason.category,
+    reason_code: reason.reason_code,
+    summary: reason.summary,
+    source_eval_ref: reason.source_eval_ref,
+    evidence_refs: reason.evidence_refs,
+    supporting_item_refs: reason.supporting_item_refs,
+    missed_weight_share: reason.missed_weight_share,
+    mapped_target_ids: targetIdByReasonId.has(reason.reason_id)
+      ? [targetIdByReasonId.get(reason.reason_id)]
+      : []
+  }));
+
+  if (
+    combinedScore === null &&
+    combinedScorePct === null &&
+    threshold === null &&
+    perEvalRows.length === 0 &&
+    normalizedFailureReasons.length === 0 &&
+    mutationTargets.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    schema_version: 1,
+    artifact_role: 'phase7_eval_to_mutate_handoff',
+    normalized_evaluation_scores: {
+      combined_score: combinedScore,
+      combined_score_pct: combinedScorePct,
+      threshold,
+      gap_to_threshold: gapToThreshold,
+      per_eval: perEvalRows
+    },
+    failure_reasons: normalizedFailureReasons,
+    mutation_targets: mutationTargets
+  };
+}
+
+function normalizeMutationInputVersionLabel(value) {
+  if (!hasNonEmptyString(value)) {
+    return null;
+  }
+
+  return value.trim();
+}
+
+function normalizeMutationInputStatus(value) {
+  if (!hasNonEmptyString(value)) {
+    return null;
+  }
+
+  return value.trim().toLowerCase();
+}
+
+function resolveMutationInputExperimentId(experiment) {
+  const storedEvaluationResult = getStoredEvaluationResult(experiment);
+  const experimentId = normalizeOptionalInteger(
+    experiment && (experiment.id != null ? experiment.id : experiment.experiment_id)
+  );
+  if (experimentId !== null) {
+    return experimentId;
+  }
+
+  return normalizeOptionalInteger(
+    storedEvaluationResult && (
+      storedEvaluationResult.experiment_id != null
+        ? storedEvaluationResult.experiment_id
+        : storedEvaluationResult.id
+    )
+  );
+}
+
+function resolveMutationInputVersionLabel(experiment, experimentId) {
+  const storedEvaluationResult = getStoredEvaluationResult(experiment);
+  return normalizeMutationInputVersionLabel(firstNonEmptyString([
+    experiment && experiment.version_label,
+    experiment && experiment.version,
+    storedEvaluationResult && storedEvaluationResult.version_label,
+    storedEvaluationResult && storedEvaluationResult.version
+  ])) || (experimentId !== null ? `v${experimentId}` : null);
+}
+
+function resolveMutationInputIds(experiment) {
+  const storedEvaluationResult = getStoredEvaluationResult(experiment);
+  const candidateLists = [
+    experiment && experiment.input_ids,
+    storedEvaluationResult && storedEvaluationResult.input_ids
+  ];
+
+  for (const candidate of candidateLists) {
+    if (!Array.isArray(candidate)) {
+      continue;
+    }
+
+    const normalizedIds = normalizeUniqueStringList(
+      candidate
+        .filter(hasNonEmptyString)
+        .map(value => value.trim())
+    );
+    if (normalizedIds.length > 0) {
+      return normalizedIds;
+    }
+  }
+
+  return [];
+}
+
+function buildMutationPhaseLineageMetadata(experiment, evaluationMetadata) {
+  const storedEvaluationResult = getStoredEvaluationResult(experiment);
+  const experimentId = resolveMutationInputExperimentId(experiment);
+  const dataset = evaluationMetadata && evaluationMetadata.dataset && typeof evaluationMetadata.dataset === 'object'
+    ? evaluationMetadata.dataset
+    : null;
+
+  return {
+    experiment_id: experimentId,
+    version_label: resolveMutationInputVersionLabel(experiment, experimentId),
+    experiment_status: normalizeMutationInputStatus(firstNonEmptyString([
+      experiment && experiment.status,
+      storedEvaluationResult && storedEvaluationResult.status
+    ])),
+    input_set_id: firstNonEmptyString([
+      experiment && experiment.input_set_id,
+      storedEvaluationResult && storedEvaluationResult.input_set_id
+    ]),
+    input_set_ref: firstNonEmptyString([
+      experiment && experiment.input_set_ref,
+      storedEvaluationResult && storedEvaluationResult.input_set_ref
+    ]),
+    input_ids: resolveMutationInputIds(experiment),
+    dataset_split_id: canonicalizeSplitIdentifier(firstNonEmptyString([
+      dataset && dataset.split_id,
+      dataset && dataset.split
+    ])),
+    selected_eval_strategy_id: resolveMutationStrategyAlignment(experiment, evaluationMetadata)
+  };
+}
+
+function buildMutationInputValidationError(code, message, field = null, action = null, sourceField = null) {
+  return {
+    code,
+    message,
+    field,
+    action,
+    source_field: sourceField
+  };
+}
+
+function pushMutationInputValidationError(errors, options = {}) {
+  const field = hasNonEmptyString(options.field) ? options.field.trim() : null;
+  const sourceField = hasNonEmptyString(options.sourceField) ? options.sourceField.trim() : null;
+  const missingDescriptor = hasNonEmptyString(options.missingDescriptor)
+    ? options.missingDescriptor.trim()
+    : (field || 'mutation input field');
+  const actionInstruction = hasNonEmptyString(options.actionInstruction)
+    ? options.actionInstruction.trim()
+    : `Persist ${sourceField || missingDescriptor} before invoking mutate.`;
+
+  errors.push(buildMutationInputValidationError(
+    hasNonEmptyString(options.code) ? options.code.trim() : 'invalid_mutation_input',
+    `Mutation cannot start because ${missingDescriptor} is missing from the eval-to-mutate handoff.`,
+    field,
+    actionInstruction,
+    sourceField
+  ));
+}
+
+function hasMutationInputArrayRows(value) {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function validateRequiredMutationInputNumber(errors, value, options = {}) {
+  const normalizer = typeof options.normalizer === 'function'
+    ? options.normalizer
+    : (candidateValue => (
+        typeof candidateValue === 'number' && Number.isFinite(candidateValue)
+          ? candidateValue
+          : null
+      ));
+  const normalizedValue = normalizer(value);
+
+  if (normalizedValue !== null) {
+    return;
+  }
+
+  pushMutationInputValidationError(errors, options);
+}
+
+function validateRequiredMutationInputString(errors, value, options = {}) {
+  if (hasNonEmptyString(value)) {
+    return;
+  }
+
+  pushMutationInputValidationError(errors, options);
+}
+
+function validateRequiredMutationInputStringArray(errors, value, options = {}) {
+  if (normalizeUniqueStringList(Array.isArray(value) ? value : []).length > 0) {
+    return;
+  }
+
+  pushMutationInputValidationError(errors, options);
+}
+
+function collectMutationPhaseDirectTargetInputErrors(directInput, options = {}) {
+  const errors = [];
+  const resolvedMutationHandoff = options.resolvedMutationHandoff &&
+    typeof options.resolvedMutationHandoff === 'object' &&
+    !Array.isArray(options.resolvedMutationHandoff)
+      ? options.resolvedMutationHandoff
+      : null;
+  const normalizedScoresPresent = options.normalizedScoresPresent === true;
+  const failureReasonsPresent = options.failureReasonsPresent === true;
+  const mutationTargetsPresent = options.mutationTargetsPresent === true;
+  const mutationFindingsPresent =
+    hasMutationInputArrayRows(resolvedMutationHandoff && resolvedMutationHandoff.failure_reasons) ||
+    hasMutationInputArrayRows(resolvedMutationHandoff && resolvedMutationHandoff.mutation_targets);
+
+  if (!mutationFindingsPresent) {
+    return errors;
+  }
+
+  const scores = directInput && directInput.scores && typeof directInput.scores === 'object'
+    ? directInput.scores
+    : null;
+  const normalizedEvaluationScores = scores &&
+    scores.normalized_evaluation_scores &&
+    typeof scores.normalized_evaluation_scores === 'object' &&
+    !Array.isArray(scores.normalized_evaluation_scores)
+      ? scores.normalized_evaluation_scores
+      : null;
+
+  if (!normalizedScoresPresent || !normalizedEvaluationScores) {
+    pushMutationInputValidationError(errors, {
+      code: 'missing_mutation_score_block',
+      field: 'scores.normalized_evaluation_scores',
+      sourceField: 'mutation_handoff.normalized_evaluation_scores',
+      actionInstruction: 'Persist mutation_handoff.normalized_evaluation_scores with combined_score, combined_score_pct, threshold, gap_to_threshold, and per_eval[] before invoking mutate.'
+    });
+  } else {
+    validateRequiredMutationInputNumber(errors, normalizedEvaluationScores.combined_score, {
+      code: 'missing_mutation_score_field',
+      field: 'scores.normalized_evaluation_scores.combined_score',
+      sourceField: 'mutation_handoff.normalized_evaluation_scores.combined_score',
+      actionInstruction: 'Persist mutation_handoff.normalized_evaluation_scores.combined_score before invoking mutate.',
+      normalizer: normalizeOptionalScore
+    });
+    validateRequiredMutationInputNumber(errors, normalizedEvaluationScores.combined_score_pct, {
+      code: 'missing_mutation_score_field',
+      field: 'scores.normalized_evaluation_scores.combined_score_pct',
+      sourceField: 'mutation_handoff.normalized_evaluation_scores.combined_score_pct',
+      actionInstruction: 'Persist mutation_handoff.normalized_evaluation_scores.combined_score_pct before invoking mutate.',
+      normalizer: normalizeScorePercentage
+    });
+    validateRequiredMutationInputNumber(errors, normalizedEvaluationScores.threshold, {
+      code: 'missing_mutation_score_field',
+      field: 'scores.normalized_evaluation_scores.threshold',
+      sourceField: 'mutation_handoff.normalized_evaluation_scores.threshold',
+      actionInstruction: 'Persist mutation_handoff.normalized_evaluation_scores.threshold before invoking mutate.',
+      normalizer: normalizeOptionalScore
+    });
+    validateRequiredMutationInputNumber(errors, normalizedEvaluationScores.gap_to_threshold, {
+      code: 'missing_mutation_score_field',
+      field: 'scores.normalized_evaluation_scores.gap_to_threshold',
+      sourceField: 'mutation_handoff.normalized_evaluation_scores.gap_to_threshold',
+      actionInstruction: 'Persist mutation_handoff.normalized_evaluation_scores.gap_to_threshold before invoking mutate.',
+      normalizer: normalizeOptionalScore
+    });
+
+    if (!hasMutationInputArrayRows(normalizedEvaluationScores.per_eval)) {
+      pushMutationInputValidationError(errors, {
+        code: 'missing_mutation_score_rows',
+        field: 'scores.normalized_evaluation_scores.per_eval',
+        sourceField: 'mutation_handoff.normalized_evaluation_scores.per_eval',
+        actionInstruction: 'Persist at least one mutation_handoff.normalized_evaluation_scores.per_eval[] row before invoking mutate.'
+      });
+    } else {
+      normalizedEvaluationScores.per_eval.forEach((row, index) => {
+        validateRequiredMutationInputString(errors, row && row.eval, {
+          code: 'missing_mutation_score_row_field',
+          field: `scores.normalized_evaluation_scores.per_eval[${index}].eval`,
+          sourceField: `mutation_handoff.normalized_evaluation_scores.per_eval[${index}].eval`,
+          actionInstruction: `Persist mutation_handoff.normalized_evaluation_scores.per_eval[${index}].eval before invoking mutate.`
+        });
+        validateRequiredMutationInputString(errors, row && row.category, {
+          code: 'missing_mutation_score_row_field',
+          field: `scores.normalized_evaluation_scores.per_eval[${index}].category`,
+          sourceField: `mutation_handoff.normalized_evaluation_scores.per_eval[${index}].category`,
+          actionInstruction: `Persist mutation_handoff.normalized_evaluation_scores.per_eval[${index}].category before invoking mutate.`
+        });
+        validateRequiredMutationInputString(errors, row && row.pass_fail, {
+          code: 'missing_mutation_score_row_field',
+          field: `scores.normalized_evaluation_scores.per_eval[${index}].pass_fail`,
+          sourceField: `mutation_handoff.normalized_evaluation_scores.per_eval[${index}].pass_fail`,
+          actionInstruction: `Persist mutation_handoff.normalized_evaluation_scores.per_eval[${index}].pass_fail before invoking mutate.`
+        });
+        validateRequiredMutationInputNumber(errors, row && row.normalized_score, {
+          code: 'missing_mutation_score_row_field',
+          field: `scores.normalized_evaluation_scores.per_eval[${index}].normalized_score`,
+          sourceField: `mutation_handoff.normalized_evaluation_scores.per_eval[${index}].normalized_score`,
+          actionInstruction: `Persist mutation_handoff.normalized_evaluation_scores.per_eval[${index}].normalized_score before invoking mutate.`,
+          normalizer: normalizeOptionalScore
+        });
+        validateRequiredMutationInputNumber(errors, row && row.missed_weight_share, {
+          code: 'missing_mutation_score_row_field',
+          field: `scores.normalized_evaluation_scores.per_eval[${index}].missed_weight_share`,
+          sourceField: `mutation_handoff.normalized_evaluation_scores.per_eval[${index}].missed_weight_share`,
+          actionInstruction: `Persist mutation_handoff.normalized_evaluation_scores.per_eval[${index}].missed_weight_share before invoking mutate.`,
+          normalizer: normalizeOptionalScore
+        });
+        validateRequiredMutationInputNumber(errors, row && row.weight, {
+          code: 'missing_mutation_score_row_field',
+          field: `scores.normalized_evaluation_scores.per_eval[${index}].weight`,
+          sourceField: `mutation_handoff.normalized_evaluation_scores.per_eval[${index}].weight`,
+          actionInstruction: `Persist mutation_handoff.normalized_evaluation_scores.per_eval[${index}].weight before invoking mutate.`,
+          normalizer: normalizeOptionalScore
+        });
+        validateRequiredMutationInputString(errors, row && row.weight_source, {
+          code: 'missing_mutation_score_row_field',
+          field: `scores.normalized_evaluation_scores.per_eval[${index}].weight_source`,
+          sourceField: `mutation_handoff.normalized_evaluation_scores.per_eval[${index}].weight_source`,
+          actionInstruction: `Persist mutation_handoff.normalized_evaluation_scores.per_eval[${index}].weight_source before invoking mutate.`
+        });
+      });
+    }
+  }
+
+  const findings = directInput && directInput.findings && typeof directInput.findings === 'object'
+    ? directInput.findings
+    : null;
+  const failureReasons = findings && Array.isArray(findings.failure_reasons)
+    ? findings.failure_reasons
+    : [];
+  const mutationTargets = findings && Array.isArray(findings.mutation_targets)
+    ? findings.mutation_targets
+    : [];
+  const lineageMetadata = directInput &&
+    directInput.lineage_metadata &&
+    typeof directInput.lineage_metadata === 'object' &&
+    !Array.isArray(directInput.lineage_metadata)
+      ? directInput.lineage_metadata
+      : null;
+
+  if (!failureReasonsPresent || !hasMutationInputArrayRows(failureReasons)) {
+    pushMutationInputValidationError(errors, {
+      code: 'missing_mutation_finding_block',
+      field: 'findings.failure_reasons',
+      sourceField: 'mutation_handoff.failure_reasons',
+      actionInstruction: 'Persist at least one mutation_handoff.failure_reasons[] row before invoking mutate.'
+    });
+  } else {
+    failureReasons.forEach((reason, index) => {
+      validateRequiredMutationInputString(errors, reason && reason.reason_id, {
+        code: 'missing_mutation_finding_field',
+        field: `findings.failure_reasons[${index}].reason_id`,
+        sourceField: `mutation_handoff.failure_reasons[${index}].reason_id`,
+        actionInstruction: `Persist mutation_handoff.failure_reasons[${index}].reason_id before invoking mutate.`
+      });
+      validateRequiredMutationInputString(errors, reason && reason.eval, {
+        code: 'missing_mutation_finding_field',
+        field: `findings.failure_reasons[${index}].eval`,
+        sourceField: `mutation_handoff.failure_reasons[${index}].eval`,
+        actionInstruction: `Persist mutation_handoff.failure_reasons[${index}].eval before invoking mutate.`
+      });
+      validateRequiredMutationInputString(errors, reason && reason.category, {
+        code: 'missing_mutation_finding_field',
+        field: `findings.failure_reasons[${index}].category`,
+        sourceField: `mutation_handoff.failure_reasons[${index}].category`,
+        actionInstruction: `Persist mutation_handoff.failure_reasons[${index}].category before invoking mutate.`
+      });
+      validateRequiredMutationInputString(errors, reason && reason.reason_code, {
+        code: 'missing_mutation_finding_field',
+        field: `findings.failure_reasons[${index}].reason_code`,
+        sourceField: `mutation_handoff.failure_reasons[${index}].reason_code`,
+        actionInstruction: `Persist mutation_handoff.failure_reasons[${index}].reason_code before invoking mutate.`
+      });
+      validateRequiredMutationInputString(errors, reason && reason.summary, {
+        code: 'missing_mutation_finding_field',
+        field: `findings.failure_reasons[${index}].summary`,
+        sourceField: `mutation_handoff.failure_reasons[${index}].summary`,
+        actionInstruction: `Persist mutation_handoff.failure_reasons[${index}].summary before invoking mutate.`
+      });
+      validateRequiredMutationInputString(errors, reason && reason.source_eval_ref, {
+        code: 'missing_mutation_finding_field',
+        field: `findings.failure_reasons[${index}].source_eval_ref`,
+        sourceField: `mutation_handoff.failure_reasons[${index}].source_eval_ref`,
+        actionInstruction: `Persist mutation_handoff.failure_reasons[${index}].source_eval_ref before invoking mutate.`
+      });
+      validateRequiredMutationInputStringArray(errors, reason && reason.evidence_refs, {
+        code: 'missing_mutation_finding_field',
+        field: `findings.failure_reasons[${index}].evidence_refs`,
+        sourceField: `mutation_handoff.failure_reasons[${index}].evidence_refs`,
+        actionInstruction: `Persist at least one mutation_handoff.failure_reasons[${index}].evidence_refs[] entry before invoking mutate.`
+      });
+      validateRequiredMutationInputStringArray(errors, reason && reason.supporting_item_refs, {
+        code: 'missing_mutation_finding_field',
+        field: `findings.failure_reasons[${index}].supporting_item_refs`,
+        sourceField: `mutation_handoff.failure_reasons[${index}].supporting_item_refs`,
+        actionInstruction: `Persist at least one mutation_handoff.failure_reasons[${index}].supporting_item_refs[] entry before invoking mutate.`
+      });
+      validateRequiredMutationInputNumber(errors, reason && reason.missed_weight_share, {
+        code: 'missing_mutation_finding_field',
+        field: `findings.failure_reasons[${index}].missed_weight_share`,
+        sourceField: `mutation_handoff.failure_reasons[${index}].missed_weight_share`,
+        actionInstruction: `Persist mutation_handoff.failure_reasons[${index}].missed_weight_share before invoking mutate.`,
+        normalizer: normalizeOptionalScore
+      });
+      validateRequiredMutationInputStringArray(errors, reason && reason.mapped_target_ids, {
+        code: 'missing_mutation_finding_field',
+        field: `findings.failure_reasons[${index}].mapped_target_ids`,
+        sourceField: `mutation_handoff.failure_reasons[${index}].mapped_target_ids`,
+        actionInstruction: `Persist at least one mutation_handoff.failure_reasons[${index}].mapped_target_ids[] entry before invoking mutate.`
+      });
+    });
+  }
+
+  if (!mutationTargetsPresent || !hasMutationInputArrayRows(mutationTargets)) {
+    pushMutationInputValidationError(errors, {
+      code: 'missing_mutation_target_block',
+      field: 'findings.mutation_targets',
+      sourceField: 'mutation_handoff.mutation_targets',
+      actionInstruction: 'Persist at least one mutation_handoff.mutation_targets[] row before invoking mutate.'
+    });
+  } else {
+    mutationTargets.forEach((target, index) => {
+      validateRequiredMutationInputString(errors, target && target.target_id, {
+        code: 'missing_mutation_target_field',
+        field: `findings.mutation_targets[${index}].target_id`,
+        sourceField: `mutation_handoff.mutation_targets[${index}].target_id`,
+        actionInstruction: `Persist mutation_handoff.mutation_targets[${index}].target_id before invoking mutate.`
+      });
+      validateRequiredMutationInputString(errors, target && target.target_location, {
+        code: 'missing_mutation_target_field',
+        field: `findings.mutation_targets[${index}].target_location`,
+        sourceField: `mutation_handoff.mutation_targets[${index}].target_location`,
+        actionInstruction: `Persist mutation_handoff.mutation_targets[${index}].target_location before invoking mutate.`
+      });
+      validateRequiredMutationInputString(errors, target && target.recommended_mutation_type, {
+        code: 'missing_mutation_target_field',
+        field: `findings.mutation_targets[${index}].recommended_mutation_type`,
+        sourceField: `mutation_handoff.mutation_targets[${index}].recommended_mutation_type`,
+        actionInstruction: `Persist mutation_handoff.mutation_targets[${index}].recommended_mutation_type before invoking mutate.`
+      });
+      validateRequiredMutationInputNumber(errors, target && target.priority, {
+        code: 'missing_mutation_target_field',
+        field: `findings.mutation_targets[${index}].priority`,
+        sourceField: `mutation_handoff.mutation_targets[${index}].priority`,
+        actionInstruction: `Persist mutation_handoff.mutation_targets[${index}].priority before invoking mutate.`,
+        normalizer: normalizeOptionalInteger
+      });
+      validateRequiredMutationInputStringArray(errors, target && target.source_eval_ids, {
+        code: 'missing_mutation_target_field',
+        field: `findings.mutation_targets[${index}].source_eval_ids`,
+        sourceField: `mutation_handoff.mutation_targets[${index}].source_eval_ids`,
+        actionInstruction: `Persist at least one mutation_handoff.mutation_targets[${index}].source_eval_ids[] entry before invoking mutate.`
+      });
+      validateRequiredMutationInputStringArray(errors, target && target.source_reason_ids, {
+        code: 'missing_mutation_target_field',
+        field: `findings.mutation_targets[${index}].source_reason_ids`,
+        sourceField: `mutation_handoff.mutation_targets[${index}].source_reason_ids`,
+        actionInstruction: `Persist at least one mutation_handoff.mutation_targets[${index}].source_reason_ids[] entry before invoking mutate.`
+      });
+      validateRequiredMutationInputString(errors, target && target.strategy_alignment, {
+        code: 'missing_mutation_target_field',
+        field: `findings.mutation_targets[${index}].strategy_alignment`,
+        sourceField: `mutation_handoff.mutation_targets[${index}].strategy_alignment`,
+        actionInstruction: `Persist mutation_handoff.mutation_targets[${index}].strategy_alignment before invoking mutate.`
+      });
+      validateRequiredMutationInputString(errors, target && target.rationale, {
+        code: 'missing_mutation_target_field',
+        field: `findings.mutation_targets[${index}].rationale`,
+        sourceField: `mutation_handoff.mutation_targets[${index}].rationale`,
+        actionInstruction: `Persist mutation_handoff.mutation_targets[${index}].rationale before invoking mutate.`
+      });
+      validateRequiredMutationInputString(errors, target && target.expected_effect, {
+        code: 'missing_mutation_target_field',
+        field: `findings.mutation_targets[${index}].expected_effect`,
+        sourceField: `mutation_handoff.mutation_targets[${index}].expected_effect`,
+        actionInstruction: `Persist mutation_handoff.mutation_targets[${index}].expected_effect before invoking mutate.`
+      });
+    });
+  }
+
+  if (!lineageMetadata) {
+    pushMutationInputValidationError(errors, {
+      code: 'missing_mutation_lineage_block',
+      field: 'lineage_metadata',
+      sourceField: 'experiment',
+      actionInstruction: 'Persist experiment lineage metadata (experiment.id, experiment.version_label, experiment.status, experiment.input_set_id, experiment.input_set_ref, experiment.input_ids[], evaluation_metadata.dataset.split_id, and evaluation_metadata.phase1_context.selected_eval_strategy_id) before invoking mutate.'
+    });
+  } else {
+    validateRequiredMutationInputNumber(errors, lineageMetadata.experiment_id, {
+      code: 'missing_mutation_lineage_field',
+      field: 'lineage_metadata.experiment_id',
+      sourceField: 'experiment.id',
+      actionInstruction: 'Persist experiment.id before invoking mutate.',
+      normalizer: normalizeOptionalInteger
+    });
+    validateRequiredMutationInputString(errors, lineageMetadata.version_label, {
+      code: 'missing_mutation_lineage_field',
+      field: 'lineage_metadata.version_label',
+      sourceField: 'experiment.version_label',
+      actionInstruction: 'Persist experiment.version_label before invoking mutate.'
+    });
+    validateRequiredMutationInputString(errors, lineageMetadata.experiment_status, {
+      code: 'missing_mutation_lineage_field',
+      field: 'lineage_metadata.experiment_status',
+      sourceField: 'experiment.status',
+      actionInstruction: 'Persist experiment.status before invoking mutate.'
+    });
+    validateRequiredMutationInputString(errors, lineageMetadata.input_set_id, {
+      code: 'missing_mutation_lineage_field',
+      field: 'lineage_metadata.input_set_id',
+      sourceField: 'experiment.input_set_id',
+      actionInstruction: 'Persist experiment.input_set_id before invoking mutate.'
+    });
+    validateRequiredMutationInputString(errors, lineageMetadata.input_set_ref, {
+      code: 'missing_mutation_lineage_field',
+      field: 'lineage_metadata.input_set_ref',
+      sourceField: 'experiment.input_set_ref',
+      actionInstruction: 'Persist experiment.input_set_ref before invoking mutate.'
+    });
+    validateRequiredMutationInputStringArray(errors, lineageMetadata.input_ids, {
+      code: 'missing_mutation_lineage_field',
+      field: 'lineage_metadata.input_ids',
+      sourceField: 'experiment.input_ids',
+      actionInstruction: 'Persist at least one experiment.input_ids[] entry before invoking mutate.'
+    });
+    validateRequiredMutationInputString(errors, lineageMetadata.dataset_split_id, {
+      code: 'missing_mutation_lineage_field',
+      field: 'lineage_metadata.dataset_split_id',
+      sourceField: 'evaluation_metadata.dataset.split_id',
+      actionInstruction: 'Persist evaluation_metadata.dataset.split_id before invoking mutate.'
+    });
+    validateRequiredMutationInputString(errors, lineageMetadata.selected_eval_strategy_id, {
+      code: 'missing_mutation_lineage_field',
+      field: 'lineage_metadata.selected_eval_strategy_id',
+      sourceField: 'evaluation_metadata.phase1_context.selected_eval_strategy_id',
+      actionInstruction: 'Persist evaluation_metadata.phase1_context.selected_eval_strategy_id before invoking mutate.'
+    });
+  }
+
+  return errors;
+}
+
+function buildMutationInputValidationException(errors) {
+  const validationErrors = Array.isArray(errors)
+    ? errors.map(cloneStructuredValue)
+    : [];
+  const fieldPreview = validationErrors
+    .map(error => error && error.field)
+    .filter(hasNonEmptyString)
+    .slice(0, 3)
+    .join(', ');
+  const error = new Error(
+    fieldPreview
+      ? `Mutation cannot start until the eval-to-mutate handoff is repaired: ${fieldPreview}.`
+      : 'Mutation cannot start until the eval-to-mutate handoff is repaired.'
+  );
+
+  error.name = 'MutationInputValidationError';
+  error.validation_errors = validationErrors;
+  return error;
+}
+
+function buildMutationPhaseScoreModel(resolvedMutationHandoff) {
+  const normalizedEvaluationScores = (
+    resolvedMutationHandoff &&
+    resolvedMutationHandoff.normalized_evaluation_scores &&
+    typeof resolvedMutationHandoff.normalized_evaluation_scores === 'object'
+  )
+    ? cloneStructuredValue(resolvedMutationHandoff.normalized_evaluation_scores)
+    : null;
+
+  return {
+    normalized_evaluation_scores: normalizedEvaluationScores,
+    combined_score: normalizeOptionalScore(normalizedEvaluationScores && normalizedEvaluationScores.combined_score),
+    combined_score_pct: normalizeScorePercentage(
+      normalizedEvaluationScores && normalizedEvaluationScores.combined_score_pct
+    ),
+    threshold: normalizeOptionalScore(normalizedEvaluationScores && normalizedEvaluationScores.threshold),
+    gap_to_threshold: normalizeOptionalScore(
+      normalizedEvaluationScores && normalizedEvaluationScores.gap_to_threshold
+    ),
+    per_eval: Array.isArray(normalizedEvaluationScores && normalizedEvaluationScores.per_eval)
+      ? cloneStructuredValue(normalizedEvaluationScores.per_eval)
+      : []
+  };
+}
+
+function buildMutationPhaseFindingsModel(resolvedMutationHandoff, mutationTargets) {
+  const failureReasons = Array.isArray(resolvedMutationHandoff && resolvedMutationHandoff.failure_reasons)
+    ? resolvedMutationHandoff.failure_reasons.map(cloneStructuredValue)
+    : [];
+  const nextTarget = mutationTargets.length > 0 ? cloneStructuredValue(mutationTargets[0]) : null;
+
+  return {
+    failure_reasons: failureReasons,
+    mutation_targets: mutationTargets,
+    next_target: nextTarget
+  };
+}
+
+function validateMutationPhaseDirectTargetInput(experiment, options = {}) {
+  const storedDecisionBreakdown = options.storedDecisionBreakdown || getStoredDecisionBreakdown(experiment);
+  const storedEvaluationMetadata = options.storedEvaluationMetadata || getStoredEvaluationMetadata(experiment);
+  const storedEvalResults = Array.isArray(options.storedEvalResults)
+    ? options.storedEvalResults
+    : getStoredEvalResults(experiment);
+  const storedMutationHandoff = options.storedMutationHandoff || getStoredMutationHandoff(experiment);
+  const resolvedMutationHandoff = storedMutationHandoff || buildDerivedMutationHandoff(experiment, {
+    storedDecisionBreakdown,
+    storedEvaluationMetadata,
+    storedEvalResults
+  });
+
+  if (!resolvedMutationHandoff || typeof resolvedMutationHandoff !== 'object') {
+    return {
+      ok: true,
+      errors: [],
+      direct_input: null,
+      resolved_mutation_handoff: null
+    };
+  }
+
+  const normalizedScoresPresent = Object.prototype.hasOwnProperty.call(
+    resolvedMutationHandoff,
+    'normalized_evaluation_scores'
+  );
+  const failureReasonsPresent = Object.prototype.hasOwnProperty.call(
+    resolvedMutationHandoff,
+    'failure_reasons'
+  );
+  const mutationTargetsPresent = Object.prototype.hasOwnProperty.call(
+    resolvedMutationHandoff,
+    'mutation_targets'
+  );
+  const hasFailureReasons = hasMutationInputArrayRows(resolvedMutationHandoff.failure_reasons);
+  const hasMutationTargets = hasMutationInputArrayRows(resolvedMutationHandoff.mutation_targets);
+
+  if (!hasFailureReasons && !hasMutationTargets) {
+    return {
+      ok: true,
+      errors: [],
+      direct_input: null,
+      resolved_mutation_handoff: resolvedMutationHandoff
+    };
+  }
+
+  const mutationTargets = Array.isArray(resolvedMutationHandoff.mutation_targets)
+    ? resolvedMutationHandoff.mutation_targets.map(cloneStructuredValue)
+    : [];
+  const scoreModel = buildMutationPhaseScoreModel(resolvedMutationHandoff);
+  const findingsModel = buildMutationPhaseFindingsModel(resolvedMutationHandoff, mutationTargets);
+  const directInput = {
+    schema_version: normalizeOptionalInteger(resolvedMutationHandoff.schema_version) ?? 1,
+    source_artifact_role: firstNonEmptyString([
+      resolvedMutationHandoff.artifact_role,
+      'phase7_eval_to_mutate_handoff'
+    ]),
+    source_artifact_schema_version: normalizeOptionalInteger(resolvedMutationHandoff.schema_version) ?? 1,
+    scores: scoreModel,
+    findings: findingsModel,
+    lineage_metadata: buildMutationPhaseLineageMetadata(experiment, storedEvaluationMetadata),
+    normalized_evaluation_scores: scoreModel.normalized_evaluation_scores,
+    failure_reasons: findingsModel.failure_reasons,
+    mutation_targets: findingsModel.mutation_targets,
+    next_target: findingsModel.next_target
+  };
+  const errors = collectMutationPhaseDirectTargetInputErrors(directInput, {
+    resolvedMutationHandoff,
+    normalizedScoresPresent,
+    failureReasonsPresent,
+    mutationTargetsPresent
+  });
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    direct_input: directInput,
+    resolved_mutation_handoff: resolvedMutationHandoff
+  };
+}
+
+// Consume stored mutation_targets directly from the eval artifact.
+// Do not insert a transformation layer between eval and mutate when the stored handoff is present.
+function buildMutationPhaseDirectTargetInput(experiment, options = {}) {
+  const validation = validateMutationPhaseDirectTargetInput(experiment, options);
+
+  if (!validation.direct_input) {
+    return null;
+  }
+
+  if (!validation.ok) {
+    throw buildMutationInputValidationException(validation.errors);
+  }
+
+  return validation.direct_input;
+}
+
+function buildMutationPhaseDirectTargetInputFromEvalArtifact(evalArtifact, options = {}) {
+  if (!evalArtifact || typeof evalArtifact !== 'object') {
+    return null;
+  }
+
+  return buildMutationPhaseDirectTargetInput(
+    { stored_evaluation_result: evalArtifact },
+    {
+      storedDecisionBreakdown: options.storedDecisionBreakdown || (
+        evalArtifact.decision_breakdown &&
+        typeof evalArtifact.decision_breakdown === 'object'
+          ? evalArtifact.decision_breakdown
+          : null
+      ),
+      storedEvaluationMetadata: options.storedEvaluationMetadata || (
+        evalArtifact.evaluation_metadata &&
+        typeof evalArtifact.evaluation_metadata === 'object'
+          ? evalArtifact.evaluation_metadata
+          : null
+      ),
+      storedEvalResults: Array.isArray(options.storedEvalResults)
+        ? options.storedEvalResults
+        : (Array.isArray(evalArtifact.eval_results) ? evalArtifact.eval_results : []),
+      storedMutationHandoff: options.storedMutationHandoff || (
+        evalArtifact.mutation_handoff &&
+        typeof evalArtifact.mutation_handoff === 'object'
+          ? evalArtifact.mutation_handoff
+          : null
+      )
+    }
+  );
+}
+
+function normalizeMutationCandidateSimilarityLabel(label, overallSimilarity) {
+  if (hasNonEmptyString(label)) {
+    return label.trim();
+  }
+
+  if (typeof overallSimilarity !== 'number' || !Number.isFinite(overallSimilarity)) {
+    return null;
+  }
+
+  if (overallSimilarity >= 0.75) {
+    return 'high';
+  }
+
+  if (overallSimilarity >= 0.5) {
+    return 'medium';
+  }
+
+  return 'low';
+}
+
+function buildMutationCandidateEvaluationArtifact(patternObservation, options = {}) {
+  if (!patternObservation || typeof patternObservation !== 'object' || Array.isArray(patternObservation)) {
+    return null;
+  }
+
+  const typePayload = (
+    patternObservation.type_payload &&
+    typeof patternObservation.type_payload === 'object' &&
+    !Array.isArray(patternObservation.type_payload)
+  )
+    ? patternObservation.type_payload
+    : {};
+  const sourceEvidenceReference = (
+    options.sourceEvidenceReference &&
+    typeof options.sourceEvidenceReference === 'object' &&
+    !Array.isArray(options.sourceEvidenceReference)
+  )
+    ? cloneStructuredValue(options.sourceEvidenceReference)
+    : (
+      typePayload.evidence_reference &&
+      typeof typePayload.evidence_reference === 'object' &&
+      !Array.isArray(typePayload.evidence_reference)
+    )
+      ? cloneStructuredValue(typePayload.evidence_reference)
+      : null;
+  const matchedDimensions = (
+    options.similarityAssessment &&
+    Array.isArray(options.similarityAssessment.matched_dimensions)
+  )
+    ? options.similarityAssessment.matched_dimensions
+        .filter(item => item && typeof item === 'object' && !Array.isArray(item))
+        .map(cloneStructuredValue)
+    : [];
+  const evidenceItems = Array.isArray(patternObservation.evidence)
+    ? patternObservation.evidence.filter(item => item && typeof item === 'object' && !Array.isArray(item))
+    : [];
+  const sourceTimestamps = (
+    patternObservation.source_timestamps &&
+    typeof patternObservation.source_timestamps === 'object' &&
+    !Array.isArray(patternObservation.source_timestamps)
+  )
+    ? patternObservation.source_timestamps
+    : {};
+  const retrievalStartedAt = hasNonEmptyString(sourceTimestamps.retrieval_started_at)
+    ? Date.parse(sourceTimestamps.retrieval_started_at)
+    : NaN;
+  const retrievalCompletedAt = hasNonEmptyString(sourceTimestamps.retrieval_completed_at)
+    ? Date.parse(sourceTimestamps.retrieval_completed_at)
+    : NaN;
+  const retrievalSpanSeconds = Number.isFinite(retrievalStartedAt) && Number.isFinite(retrievalCompletedAt)
+    ? Math.max(0, Math.round((retrievalCompletedAt - retrievalStartedAt) / 1000))
+    : null;
+  const hasStructuredEvidenceReference = Boolean(
+    sourceEvidenceReference && (
+      hasNonEmptyString(sourceEvidenceReference.source_hash) ||
+      (
+        sourceEvidenceReference.source_location &&
+        typeof sourceEvidenceReference.source_location === 'object' &&
+        !Array.isArray(sourceEvidenceReference.source_location)
+      ) ||
+      (
+        sourceEvidenceReference.span &&
+        typeof sourceEvidenceReference.span === 'object' &&
+        !Array.isArray(sourceEvidenceReference.span)
+      ) ||
+      hasNonEmptyString(sourceEvidenceReference.retrieval_fingerprint)
+    )
+  );
+  const sourceRef = (
+    patternObservation.source_ref &&
+    typeof patternObservation.source_ref === 'object' &&
+    !Array.isArray(patternObservation.source_ref)
+  )
+    ? cloneStructuredValue(patternObservation.source_ref)
+    : null;
+  const traceability = (
+    patternObservation.traceability &&
+    typeof patternObservation.traceability === 'object' &&
+    !Array.isArray(patternObservation.traceability)
+  )
+    ? cloneStructuredValue(patternObservation.traceability)
+    : null;
+  const retrievalContext = (
+    patternObservation.retrieval_context &&
+    typeof patternObservation.retrieval_context === 'object' &&
+    !Array.isArray(patternObservation.retrieval_context)
+  )
+    ? patternObservation.retrieval_context
+    : null;
+  const provenanceComplete = Boolean(
+    sourceRef &&
+    hasNonEmptyString(sourceRef.source_id) &&
+    retrievalContext &&
+    hasNonEmptyString(retrievalContext.retrieval_id) &&
+    traceability &&
+    hasStructuredEvidenceReference
+  );
+  const sourceSnapshotPinned = Boolean(
+    sourceRef && hasNonEmptyString(sourceRef.content_hash) ||
+    (
+      sourceEvidenceReference &&
+      hasNonEmptyString(sourceEvidenceReference.source_hash)
+    )
+  );
+  const overallSimilarity = (
+    options.similarityAssessment &&
+    typeof options.similarityAssessment.overall_similarity === 'number' &&
+    Number.isFinite(options.similarityAssessment.overall_similarity)
+  )
+    ? options.similarityAssessment.overall_similarity
+    : null;
+  const overfittingSignals = (
+    options.overfittingSignals &&
+    typeof options.overfittingSignals === 'object' &&
+    !Array.isArray(options.overfittingSignals)
+  )
+    ? options.overfittingSignals
+    : {};
+  const recommendation = (
+    options.recommendation &&
+    typeof options.recommendation === 'object' &&
+    !Array.isArray(options.recommendation)
+  )
+    ? options.recommendation
+    : {};
+  const targetSkillContext = (
+    options.targetSkillContext &&
+    typeof options.targetSkillContext === 'object' &&
+    !Array.isArray(options.targetSkillContext)
+  )
+    ? options.targetSkillContext
+    : {};
+  const sourcePattern = {};
+  [
+    'pattern_label',
+    'pattern_statement',
+    'transfer_type',
+    'applicability_reason',
+    'mutation_leverage'
+  ].forEach(key => {
+    if (Object.prototype.hasOwnProperty.call(typePayload, key)) {
+      sourcePattern[key] = cloneStructuredValue(typePayload[key]);
+    }
+  });
+
+  return {
+    schema_version: normalizeOptionalInteger(options.schemaVersion) ?? 1,
+    artifact_role: firstNonEmptyString([
+      options.artifactRole,
+      'phase7_mutation_candidate_evaluation'
+    ]),
+    candidate_source: {
+      entry_id: hasNonEmptyString(patternObservation.entry_id) ? patternObservation.entry_id.trim() : null,
+      entry_type: hasNonEmptyString(patternObservation.entry_type) ? patternObservation.entry_type.trim() : null,
+      source_kind: hasNonEmptyString(patternObservation.source_kind) ? patternObservation.source_kind.trim() : null,
+      source_ref: sourceRef,
+      source_pattern: sourcePattern,
+      source_evidence_reference: sourceEvidenceReference,
+      traceability
+    },
+    target_skill_context: {
+      skill_path: hasNonEmptyString(targetSkillContext.skill_path) ? targetSkillContext.skill_path.trim() : null,
+      skill_pattern: hasNonEmptyString(targetSkillContext.skill_pattern) ? targetSkillContext.skill_pattern.trim() : null,
+      selected_eval_strategy_id: hasNonEmptyString(targetSkillContext.selected_eval_strategy_id)
+        ? targetSkillContext.selected_eval_strategy_id.trim()
+        : null,
+      target_section: hasNonEmptyString(targetSkillContext.target_section)
+        ? targetSkillContext.target_section.trim()
+        : null,
+      agent_target: hasNonEmptyString(targetSkillContext.agent_target) ? targetSkillContext.agent_target.trim() : null,
+      scenario_target: hasNonEmptyString(targetSkillContext.scenario_target)
+        ? targetSkillContext.scenario_target.trim()
+        : null
+    },
+    similarity_assessment: {
+      overall_similarity: overallSimilarity,
+      similarity_label: normalizeMutationCandidateSimilarityLabel(
+        options.similarityAssessment && options.similarityAssessment.similarity_label,
+        overallSimilarity
+      ),
+      matched_dimensions: matchedDimensions,
+      rationale: hasNonEmptyString(options.similarityAssessment && options.similarityAssessment.rationale)
+        ? options.similarityAssessment.rationale.trim()
+        : null
+    },
+    trust_signals: {
+      confidence: hasNonEmptyString(patternObservation.confidence) ? patternObservation.confidence.trim() : null,
+      status: hasNonEmptyString(patternObservation.status) ? patternObservation.status.trim() : null,
+      evidence_count: evidenceItems.length,
+      provenance_complete: provenanceComplete,
+      has_structured_evidence_reference: hasStructuredEvidenceReference,
+      source_snapshot_pinned: sourceSnapshotPinned,
+      retrieval_span_seconds: retrievalSpanSeconds
+    },
+    overfitting_signals: {
+      same_skill_lineage: overfittingSignals.same_skill_lineage === true
+        ? true
+        : (overfittingSignals.same_skill_lineage === false ? false : null),
+      same_input_set_verified: overfittingSignals.same_input_set_verified === true
+        ? true
+        : (overfittingSignals.same_input_set_verified === false ? false : null),
+      evaluation_corpus_overlap_status: hasNonEmptyString(overfittingSignals.evaluation_corpus_overlap_status)
+        ? overfittingSignals.evaluation_corpus_overlap_status.trim()
+        : null,
+      holdout_exposure_status: hasNonEmptyString(overfittingSignals.holdout_exposure_status)
+        ? overfittingSignals.holdout_exposure_status.trim()
+        : null,
+      noise_floor_dependency: hasNonEmptyString(overfittingSignals.noise_floor_dependency)
+        ? overfittingSignals.noise_floor_dependency.trim()
+        : null,
+      risk_flags: Array.isArray(overfittingSignals.risk_flags)
+        ? overfittingSignals.risk_flags
+            .filter(flag => flag != null && (!(typeof flag === 'string') || hasNonEmptyString(flag)))
+            .map(cloneStructuredValue)
+        : []
+    },
+    recommendation: {
+      status: hasNonEmptyString(recommendation.status) ? recommendation.status.trim() : null,
+      target_section: hasNonEmptyString(recommendation.target_section)
+        ? recommendation.target_section.trim()
+        : null,
+      reason: hasNonEmptyString(recommendation.reason) ? recommendation.reason.trim() : null,
+      expected_effect: hasNonEmptyString(recommendation.expected_effect)
+        ? recommendation.expected_effect.trim()
+        : null
+    }
+  };
+}
+
+// Convert the structured eval-to-mutate handoff into one candidate SKILL.md revision artifact.
+// Persist the full revised skill body inside the artifact so downstream consumers do not have to
+// reopen sibling files just to inspect the candidate revision produced for this experiment.
+function buildMutationPhaseCandidateRevisionArtifact(directTargetInput, revisedSkillContent, options = {}) {
+  if (!directTargetInput || typeof directTargetInput !== 'object') {
+    return null;
+  }
+
+  if (!hasNonEmptyString(revisedSkillContent)) {
+    throw new Error('Mutation candidate revision artifact requires revised skill content.');
+  }
+
+  const selectedMutationTarget = (
+    directTargetInput.next_target &&
+    typeof directTargetInput.next_target === 'object'
+  )
+    ? cloneStructuredValue(directTargetInput.next_target)
+    : null;
+
+  if (!selectedMutationTarget) {
+    throw new Error('Mutation candidate revision artifact requires a selected mutation target.');
+  }
+
+  const versionArtifact = (
+    options.versionArtifact &&
+    typeof options.versionArtifact === 'object' &&
+    !Array.isArray(options.versionArtifact)
+  )
+    ? cloneStructuredValue(options.versionArtifact)
+    : null;
+
+  return {
+    schema_version: normalizeOptionalInteger(options.schemaVersion) ?? 1,
+    artifact_role: firstNonEmptyString([
+      options.artifactRole,
+      'phase7_mutation_candidate_revision'
+    ]),
+    source_artifact_role: firstNonEmptyString([
+      directTargetInput.source_artifact_role,
+      'phase7_eval_to_mutate_handoff'
+    ]),
+    source_artifact_schema_version: normalizeOptionalInteger(
+      directTargetInput.source_artifact_schema_version
+    ) ?? 1,
+    lineage_metadata: (
+      directTargetInput.lineage_metadata &&
+      typeof directTargetInput.lineage_metadata === 'object'
+    )
+      ? cloneStructuredValue(directTargetInput.lineage_metadata)
+      : null,
+    selected_mutation_target: selectedMutationTarget,
+    candidate_skill_revision: {
+      format: 'SKILL.md',
+      content_type: 'text/markdown',
+      content: revisedSkillContent
+    },
+    ...(versionArtifact ? { version_artifact: versionArtifact } : {})
+  };
+}
+
+function buildMutationPhaseCandidateRevisionArtifactFromEvalArtifact(
+  evalArtifact,
+  revisedSkillContent,
+  options = {}
+) {
+  const directTargetInput = buildMutationPhaseDirectTargetInputFromEvalArtifact(evalArtifact, options);
+
+  if (!directTargetInput) {
+    return null;
+  }
+
+  return buildMutationPhaseCandidateRevisionArtifact(
+    directTargetInput,
+    revisedSkillContent,
+    options
+  );
+}
+
+// Build the mutate->test handoff payload from the finalized mutation output.
+// This keeps the test phase on the same immutable candidate version snapshot and
+// the same frozen eval corpus instead of reconstructing launch inputs from scans.
+function buildMutationPhaseTestLaunchPayload(mutationCandidateArtifact, options = {}) {
+  if (
+    !mutationCandidateArtifact ||
+    typeof mutationCandidateArtifact !== 'object' ||
+    Array.isArray(mutationCandidateArtifact)
+  ) {
+    return null;
+  }
+
+  const versionArtifact = (
+    mutationCandidateArtifact.version_artifact &&
+    typeof mutationCandidateArtifact.version_artifact === 'object' &&
+    !Array.isArray(mutationCandidateArtifact.version_artifact)
+  )
+    ? cloneStructuredValue(mutationCandidateArtifact.version_artifact)
+    : (
+      options.versionArtifact &&
+      typeof options.versionArtifact === 'object' &&
+      !Array.isArray(options.versionArtifact)
+    )
+      ? cloneStructuredValue(options.versionArtifact)
+      : null;
+
+  if (!versionArtifact) {
+    throw new Error('Mutation test launch payload requires candidate version metadata.');
+  }
+
+  const candidateVersionId = firstNonEmptyString([
+    versionArtifact.version_id,
+    versionArtifact.versionId
+  ]);
+  const candidateSnapshotPath = firstNonEmptyString([
+    versionArtifact.snapshot_path,
+    versionArtifact.snapshotPath
+  ]);
+
+  if (!candidateVersionId || !candidateSnapshotPath) {
+    throw new Error('Mutation test launch payload requires candidate version_id and snapshot_path.');
+  }
+
+  const lineageMetadata = (
+    mutationCandidateArtifact.lineage_metadata &&
+    typeof mutationCandidateArtifact.lineage_metadata === 'object' &&
+    !Array.isArray(mutationCandidateArtifact.lineage_metadata)
+  )
+    ? cloneStructuredValue(mutationCandidateArtifact.lineage_metadata)
+    : null;
+  const inputSetRef = firstNonEmptyString([
+    options.inputSetRef,
+    lineageMetadata && lineageMetadata.input_set_ref
+  ]);
+  const inputIds = normalizeUniqueStringList(
+    Array.isArray(options.inputIds)
+      ? options.inputIds
+      : (
+        lineageMetadata && Array.isArray(lineageMetadata.input_ids)
+          ? lineageMetadata.input_ids
+          : []
+      )
+  );
+
+  if (!inputSetRef) {
+    throw new Error('Mutation test launch payload requires input_set_ref from the source eval artifact.');
+  }
+
+  if (inputIds.length === 0) {
+    throw new Error('Mutation test launch payload requires at least one stable input_id.');
+  }
+
+  const runId = firstNonEmptyString([
+    options.runId,
+    options.run_id,
+    versionArtifact.run_id,
+    versionArtifact.runId
+  ]);
+  const experimentId = normalizeOptionalInteger(
+    options.experimentId ??
+    options.experiment_id ??
+    versionArtifact.experiment_id ??
+    versionArtifact.experimentId ??
+    (lineageMetadata && lineageMetadata.experiment_id)
+  );
+  const experimentSuffix = buildSkillVersionExperimentSuffix(experimentId);
+  const sourceIterationPath = firstNonEmptyString([
+    options.sourceIterationPath,
+    options.source_iteration_path,
+    versionArtifact.source_iteration_path,
+    versionArtifact.sourceIterationPath,
+    (runId && experimentSuffix ? `${joinRelativePath(['runs', runId, `iteration_${experimentSuffix}`])}/` : null)
+  ]);
+  const evalResultsRef = firstNonEmptyString([
+    options.evalResultsRef,
+    options.eval_results_ref,
+    (sourceIterationPath ? `${sourceIterationPath}eval_results.json` : null)
+  ]);
+  const mutationArtifactRef = firstNonEmptyString([
+    options.mutationArtifactRef,
+    options.mutation_artifact_ref,
+    (sourceIterationPath ? `${sourceIterationPath}mutation.md#mutation_artifact` : null)
+  ]);
+  const candidateRevisionArtifactRef = firstNonEmptyString([
+    options.candidateRevisionArtifactRef,
+    options.candidate_revision_artifact_ref,
+    (sourceIterationPath ? `${sourceIterationPath}mutation.md#candidate_skill_revision` : null)
+  ]);
+  const versionArtifactRef = firstNonEmptyString([
+    options.versionArtifactRef,
+    options.version_artifact_ref,
+    versionArtifact.source_mutation_artifact_ref,
+    versionArtifact.sourceMutationArtifactRef,
+    (sourceIterationPath ? `${sourceIterationPath}mutation.md#version_artifact` : null)
+  ]);
+  const skillAfterRef = firstNonEmptyString([
+    options.skillAfterRef,
+    options.skill_after_ref,
+    (sourceIterationPath ? `${sourceIterationPath}skill_after.md` : null)
+  ]);
+  const mutationHandoffRef = firstNonEmptyString([
+    options.mutationHandoffRef,
+    options.mutation_handoff_ref,
+    (evalResultsRef ? `${evalResultsRef}#mutation_handoff` : null)
+  ]);
+  const decisionBreakdownRef = firstNonEmptyString([
+    options.decisionBreakdownRef,
+    options.decision_breakdown_ref,
+    (evalResultsRef ? `${evalResultsRef}#decision_breakdown` : null)
+  ]);
+  const runPath = firstNonEmptyString([
+    options.runPath,
+    options.run_path,
+    (runId ? `${joinRelativePath(['runs', runId])}/` : null)
+  ]);
+
+  return {
+    schema_version: normalizeOptionalInteger(options.schemaVersion) ?? 1,
+    artifact_role: firstNonEmptyString([
+      options.artifactRole,
+      'phase7_mutation_to_test_launch'
+    ]),
+    source_artifact_role: firstNonEmptyString([
+      mutationCandidateArtifact.artifact_role,
+      'phase7_mutation_candidate_revision'
+    ]),
+    source_artifact_schema_version: normalizeOptionalInteger(
+      mutationCandidateArtifact.schema_version
+    ) ?? 1,
+    candidate_version: versionArtifact,
+    source_artifact_refs: {
+      source_iteration_path: sourceIterationPath,
+      mutation_artifact_ref: mutationArtifactRef,
+      candidate_revision_artifact_ref: candidateRevisionArtifactRef,
+      version_artifact_ref: versionArtifactRef,
+      skill_after_ref: skillAfterRef
+    },
+    eval_artifact_refs: {
+      eval_results_ref: evalResultsRef,
+      mutation_handoff_ref: mutationHandoffRef,
+      decision_breakdown_ref: decisionBreakdownRef,
+      input_set_id: firstNonEmptyString([
+        options.inputSetId,
+        lineageMetadata && lineageMetadata.input_set_id
+      ]),
+      input_set_ref: inputSetRef,
+      input_ids: inputIds
+    },
+    test_bootstrap_metadata: {
+      run_id: runId,
+      run_path: runPath,
+      experiment_id: experimentId,
+      dataset_split_id: firstNonEmptyString([
+        options.datasetSplitId,
+        lineageMetadata && lineageMetadata.dataset_split_id
+      ]),
+      selected_eval_strategy_id: firstNonEmptyString([
+        options.selectedEvalStrategyId,
+        lineageMetadata && lineageMetadata.selected_eval_strategy_id
+      ]),
+      active_phase: firstNonEmptyString([
+        options.activePhase,
+        options.active_phase,
+        'test'
+      ]),
+      phase_status: firstNonEmptyString([
+        options.phaseStatus,
+        options.phase_status,
+        'ready'
+      ]),
+      next_action: firstNonEmptyString([
+        options.nextAction,
+        options.next_action,
+        'phase7_test_phase'
+      ]),
+      bootstrap_generated_at: firstNonEmptyString([
+        options.bootstrapGeneratedAt,
+        options.bootstrap_generated_at,
+        versionArtifact.created_at,
+        versionArtifact.createdAt,
+        new Date().toISOString()
+      ])
+    }
+  };
+}
+
+function buildMutationPhaseTestLaunchPayloadFromEvalArtifact(
+  evalArtifact,
+  revisedSkillContent,
+  options = {}
+) {
+  const mutationCandidateArtifact = buildMutationPhaseCandidateRevisionArtifactFromEvalArtifact(
+    evalArtifact,
+    revisedSkillContent,
+    options
+  );
+
+  if (!mutationCandidateArtifact) {
+    return null;
+  }
+
+  return buildMutationPhaseTestLaunchPayload(
+    mutationCandidateArtifact,
+    options
+  );
+}
+
+function normalizeSkillVersionHash(value) {
+  if (!hasNonEmptyString(value)) {
+    return null;
+  }
+
+  const trimmedValue = value.trim();
+  return trimmedValue.startsWith('sha256:')
+    ? trimmedValue
+    : `sha256:${trimmedValue}`;
+}
+
+function buildSkillVersionExperimentSuffix(experimentId) {
+  const normalizedExperimentId = normalizeOptionalInteger(experimentId);
+
+  if (normalizedExperimentId === null || normalizedExperimentId < 0) {
+    return null;
+  }
+
+  return String(normalizedExperimentId).padStart(3, '0');
+}
+
+function trimTrailingPathSeparators(value) {
+  if (!hasNonEmptyString(value)) {
+    return null;
+  }
+
+  return value.trim().replace(/[\\/]+$/, '');
+}
+
+function joinRelativePath(parts) {
+  const normalizedParts = parts
+    .filter(hasNonEmptyString)
+    .map(part => part.trim().replace(/^[\\/]+|[\\/]+$/g, ''))
+    .filter(Boolean);
+
+  return normalizedParts.join('/');
+}
+
+function resolveArtifactAbsolutePath(basePath, relativePath, pathModule) {
+  const normalizedRelativePath = hasNonEmptyString(relativePath) ? relativePath.trim() : null;
+
+  if (!normalizedRelativePath) {
+    return null;
+  }
+
+  if (pathModule && typeof pathModule.isAbsolute === 'function' && pathModule.isAbsolute(normalizedRelativePath)) {
+    return normalizedRelativePath;
+  }
+
+  const normalizedBasePath = trimTrailingPathSeparators(basePath);
+  if (!normalizedBasePath) {
+    return normalizedRelativePath;
+  }
+
+  if (pathModule && typeof pathModule.join === 'function') {
+    return pathModule.join(normalizedBasePath, normalizedRelativePath);
+  }
+
+  return `${normalizedBasePath}/${normalizedRelativePath}`;
+}
+
+function buildSkillVersionLineageStorePath(options = {}) {
+  return firstNonEmptyString([
+    options.lineageStorePath,
+    options.lineage_store_path,
+    joinRelativePath(['skill-versions', 'lineage.json'])
+  ]);
+}
+
+function buildEmptySkillVersionLineageStore(options = {}) {
+  return {
+    schema_version: normalizeOptionalInteger(options.schemaVersion) ?? 1,
+    artifact_type: firstNonEmptyString([
+      options.artifactType,
+      'skill_version_lineage_store'
+    ]),
+    artifact_path: buildSkillVersionLineageStorePath(options),
+    nodes: {}
+  };
+}
+
+function parsePersistedJsonFile(filePath, options = {}) {
+  const fileSystem = options.fs;
+
+  if (
+    !fileSystem ||
+    typeof fileSystem.existsSync !== 'function' ||
+    typeof fileSystem.readFileSync !== 'function'
+  ) {
+    throw new Error('Persisted JSON file access requires fs.existsSync and fs.readFileSync.');
+  }
+
+  if (!hasNonEmptyString(filePath) || !fileSystem.existsSync(filePath)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(fileSystem.readFileSync(filePath, 'utf8'));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not parse persisted JSON file ${filePath}: ${message}`);
+  }
+}
+
+function normalizeSkillVersionLineageNode(node) {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) {
+    return null;
+  }
+
+  const versionId = firstNonEmptyString([
+    node.version_id,
+    node.versionId
+  ]);
+  if (!versionId) {
+    return null;
+  }
+
+  const childVersionIds = normalizeUniqueStringList(
+    Array.isArray(node.child_version_ids)
+      ? node.child_version_ids
+      : (Array.isArray(node.childVersionIds) ? node.childVersionIds : [])
+  );
+
+  return {
+    version_id: versionId,
+    run_id: firstNonEmptyString([node.run_id, node.runId]),
+    experiment_id: normalizeOptionalInteger(node.experiment_id ?? node.experimentId),
+    lineage_label: hasNonEmptyString(node.lineage_label)
+      ? node.lineage_label.trim()
+      : (hasNonEmptyString(node.lineageLabel) ? node.lineageLabel.trim() : null),
+    parent_version_id: firstNonEmptyString([
+      node.parent_version_id,
+      node.parentVersionId
+    ]),
+    child_version_ids: childVersionIds,
+    root_version_id: firstNonEmptyString([
+      node.root_version_id,
+      node.rootVersionId
+    ]),
+    lineage_depth: normalizeOptionalInteger(node.lineage_depth ?? node.lineageDepth),
+    artifact_path: firstNonEmptyString([node.artifact_path, node.artifactPath]),
+    snapshot_path: firstNonEmptyString([node.snapshot_path, node.snapshotPath]),
+    version_manifest_path: firstNonEmptyString([
+      node.version_manifest_path,
+      node.versionManifestPath
+    ]),
+    created_at: firstNonEmptyString([node.created_at, node.createdAt])
+  };
+}
+
+function readSkillVersionLineageStore(options = {}) {
+  const fileSystem = options.fs;
+  if (
+    !fileSystem ||
+    typeof fileSystem.existsSync !== 'function' ||
+    typeof fileSystem.readFileSync !== 'function'
+  ) {
+    throw new Error('Skill version lineage store access requires fs.existsSync and fs.readFileSync.');
+  }
+
+  const pathModule = options.path && typeof options.path === 'object'
+    ? options.path
+    : null;
+  const workspaceRoot = firstNonEmptyString([options.workspaceRoot, options.workspace_root]) || '.';
+  const lineageStorePath = buildSkillVersionLineageStorePath(options);
+  const absoluteLineageStorePath = resolveArtifactAbsolutePath(
+    workspaceRoot,
+    lineageStorePath,
+    pathModule
+  );
+  const persistedStore = parsePersistedJsonFile(absoluteLineageStorePath, options);
+
+  if (!persistedStore || typeof persistedStore !== 'object' || Array.isArray(persistedStore)) {
+    return buildEmptySkillVersionLineageStore(options);
+  }
+
+  const nodes = {};
+  if (persistedStore.nodes && typeof persistedStore.nodes === 'object' && !Array.isArray(persistedStore.nodes)) {
+    Object.values(persistedStore.nodes).forEach((node) => {
+      const normalizedNode = normalizeSkillVersionLineageNode(node);
+      if (!normalizedNode) {
+        return;
+      }
+
+      nodes[normalizedNode.version_id] = normalizedNode;
+    });
+  }
+
+  return {
+    schema_version: normalizeOptionalInteger(persistedStore.schema_version) ?? 1,
+    artifact_type: firstNonEmptyString([
+      persistedStore.artifact_type,
+      'skill_version_lineage_store'
+    ]),
+    artifact_path: firstNonEmptyString([
+      persistedStore.artifact_path,
+      lineageStorePath
+    ]),
+    nodes
+  };
+}
+
+function readSkillVersionArtifactByVersionId(versionId, options = {}) {
+  if (!hasNonEmptyString(versionId)) {
+    return null;
+  }
+
+  const pathModule = options.path && typeof options.path === 'object'
+    ? options.path
+    : null;
+  const workspaceRoot = firstNonEmptyString([options.workspaceRoot, options.workspace_root]) || '.';
+  const manifestPath = resolveArtifactAbsolutePath(
+    workspaceRoot,
+    joinRelativePath(['skill-versions', versionId, 'version.json']),
+    pathModule
+  );
+  const persistedArtifact = parsePersistedJsonFile(manifestPath, options);
+
+  if (!persistedArtifact || typeof persistedArtifact !== 'object' || Array.isArray(persistedArtifact)) {
+    return null;
+  }
+
+  return cloneStructuredValue(persistedArtifact);
+}
+
+function mergeSkillVersionLineageStoreNode(existingNode, versionArtifact, versionManifestPath) {
+  const normalizedExistingNode = normalizeSkillVersionLineageNode(existingNode) || {};
+
+  return {
+    ...normalizedExistingNode,
+    version_id: versionArtifact.version_id,
+    run_id: versionArtifact.run_id,
+    experiment_id: versionArtifact.experiment_id,
+    lineage_label: versionArtifact.lineage_label,
+    parent_version_id: versionArtifact.parent_version_id,
+    child_version_ids: normalizeUniqueStringList(normalizedExistingNode.child_version_ids || []),
+    root_version_id: versionArtifact.root_version_id,
+    lineage_depth: versionArtifact.lineage_depth,
+    artifact_path: versionArtifact.artifact_path,
+    snapshot_path: versionArtifact.snapshot_path,
+    version_manifest_path: versionManifestPath,
+    created_at: versionArtifact.created_at
+  };
+}
+
+function prepareSkillVersionLineageStoreUpdate(versionArtifact, options = {}) {
+  if (!versionArtifact || typeof versionArtifact !== 'object' || Array.isArray(versionArtifact)) {
+    throw new Error('Skill version lineage store preparation requires version artifact metadata.');
+  }
+
+  const fileSystem = options.fs;
+  if (
+    !fileSystem ||
+    typeof fileSystem.existsSync !== 'function' ||
+    typeof fileSystem.readFileSync !== 'function'
+  ) {
+    throw new Error('Skill version lineage store preparation requires fs.existsSync and fs.readFileSync.');
+  }
+
+  const pathModule = options.path && typeof options.path === 'object'
+    ? options.path
+    : null;
+  const workspaceRoot = firstNonEmptyString([options.workspaceRoot, options.workspace_root]) || '.';
+  const lineageStore = readSkillVersionLineageStore(options);
+  const lineageStorePath = buildSkillVersionLineageStorePath(options);
+  const absoluteLineageStorePath = resolveArtifactAbsolutePath(
+    workspaceRoot,
+    lineageStorePath,
+    pathModule
+  );
+  const lineageStoreDirectory = absoluteLineageStorePath && pathModule && typeof pathModule.dirname === 'function'
+    ? pathModule.dirname(absoluteLineageStorePath)
+    : trimTrailingPathSeparators(resolveArtifactAbsolutePath(workspaceRoot, 'skill-versions', pathModule));
+  const versionManifestPath = joinRelativePath([versionArtifact.artifact_path, 'version.json']);
+  const normalizedParentVersionId = firstNonEmptyString([
+    versionArtifact.parent_version_id,
+    versionArtifact.parentVersionId
+  ]);
+  const parentNode = normalizedParentVersionId
+    ? (
+      lineageStore.nodes[normalizedParentVersionId] ||
+      normalizeSkillVersionLineageNode(
+        readSkillVersionArtifactByVersionId(normalizedParentVersionId, options)
+      )
+    )
+    : null;
+  const rootVersionId = firstNonEmptyString([
+    versionArtifact.root_version_id,
+    parentNode && parentNode.root_version_id,
+    normalizedParentVersionId,
+    versionArtifact.version_id
+  ]);
+  const lineageDepth = normalizeOptionalInteger(versionArtifact.lineage_depth)
+    ?? (
+      parentNode && Number.isInteger(parentNode.lineage_depth)
+        ? parentNode.lineage_depth + 1
+        : (normalizedParentVersionId ? 1 : 0)
+    );
+  const normalizedVersionArtifact = {
+    ...cloneStructuredValue(versionArtifact),
+    root_version_id: rootVersionId,
+    lineage_depth: lineageDepth,
+    lineage_store_path: firstNonEmptyString([
+      versionArtifact.lineage_store_path,
+      lineageStorePath
+    ])
+  };
+  const updatedStore = cloneStructuredValue(lineageStore);
+  updatedStore.nodes[normalizedVersionArtifact.version_id] = mergeSkillVersionLineageStoreNode(
+    updatedStore.nodes[normalizedVersionArtifact.version_id],
+    normalizedVersionArtifact,
+    versionManifestPath
+  );
+
+  if (normalizedParentVersionId) {
+    const fallbackParentArtifact = readSkillVersionArtifactByVersionId(normalizedParentVersionId, options);
+    const fallbackParentNode = normalizeSkillVersionLineageNode(fallbackParentArtifact) || {
+      version_id: normalizedParentVersionId,
+      run_id: fallbackParentArtifact && fallbackParentArtifact.run_id ? fallbackParentArtifact.run_id : null,
+      experiment_id: normalizeOptionalInteger(
+        fallbackParentArtifact && fallbackParentArtifact.experiment_id
+      ),
+      lineage_label: fallbackParentArtifact && hasNonEmptyString(fallbackParentArtifact.lineage_label)
+        ? fallbackParentArtifact.lineage_label.trim()
+        : null,
+      parent_version_id: fallbackParentArtifact
+        ? firstNonEmptyString([fallbackParentArtifact.parent_version_id])
+        : null,
+      child_version_ids: [],
+      root_version_id: fallbackParentArtifact
+        ? firstNonEmptyString([
+          fallbackParentArtifact.root_version_id,
+          normalizedParentVersionId
+        ])
+        : normalizedParentVersionId,
+      lineage_depth: fallbackParentArtifact
+        ? (normalizeOptionalInteger(fallbackParentArtifact.lineage_depth) ?? 0)
+        : 0,
+      artifact_path: fallbackParentArtifact
+        ? firstNonEmptyString([fallbackParentArtifact.artifact_path])
+        : `${joinRelativePath(['skill-versions', normalizedParentVersionId])}/`,
+      snapshot_path: fallbackParentArtifact
+        ? firstNonEmptyString([fallbackParentArtifact.snapshot_path])
+        : joinRelativePath(['skill-versions', normalizedParentVersionId, 'SKILL.md']),
+      version_manifest_path: joinRelativePath(['skill-versions', normalizedParentVersionId, 'version.json']),
+      created_at: fallbackParentArtifact
+        ? firstNonEmptyString([fallbackParentArtifact.created_at])
+        : null
+    };
+
+    updatedStore.nodes[normalizedParentVersionId] = {
+      ...fallbackParentNode,
+      child_version_ids: normalizeUniqueStringList([
+        ...(fallbackParentNode.child_version_ids || []),
+        normalizedVersionArtifact.version_id
+      ])
+    };
+  }
+
+  return {
+    version_artifact: normalizedVersionArtifact,
+    lineage_store: updatedStore,
+    lineage_store_path: absoluteLineageStorePath,
+    lineage_store_directory: lineageStoreDirectory
+  };
+}
+
+function updateSkillVersionLineageStore(versionArtifact, options = {}) {
+  const fileSystem = options.fs;
+  if (
+    !fileSystem ||
+    typeof fileSystem.existsSync !== 'function' ||
+    typeof fileSystem.readFileSync !== 'function' ||
+    typeof fileSystem.mkdirSync !== 'function' ||
+    typeof fileSystem.writeFileSync !== 'function'
+  ) {
+    throw new Error('Skill version lineage store update requires fs.existsSync, fs.readFileSync, fs.mkdirSync, and fs.writeFileSync.');
+  }
+
+  const preparedUpdate = prepareSkillVersionLineageStoreUpdate(versionArtifact, options);
+
+  if (
+    preparedUpdate.lineage_store_directory &&
+    !fileSystem.existsSync(preparedUpdate.lineage_store_directory)
+  ) {
+    fileSystem.mkdirSync(preparedUpdate.lineage_store_directory, { recursive: true });
+  }
+
+  fileSystem.writeFileSync(
+    preparedUpdate.lineage_store_path,
+    JSON.stringify(preparedUpdate.lineage_store, null, 2),
+    'utf8'
+  );
+
+  return {
+    version_artifact: preparedUpdate.version_artifact,
+    lineage_store: preparedUpdate.lineage_store,
+    lineage_store_path: preparedUpdate.lineage_store_path
+  };
+}
+
+function querySkillVersionLineage(versionId, options = {}) {
+  if (!hasNonEmptyString(versionId)) {
+    return null;
+  }
+
+  const lineageStore = (
+    options.lineageStore &&
+    typeof options.lineageStore === 'object' &&
+    !Array.isArray(options.lineageStore)
+  )
+    ? cloneStructuredValue(options.lineageStore)
+    : readSkillVersionLineageStore(options);
+  const nodes = (
+    lineageStore.nodes &&
+    typeof lineageStore.nodes === 'object' &&
+    !Array.isArray(lineageStore.nodes)
+  )
+    ? lineageStore.nodes
+    : {};
+  const currentNode = normalizeSkillVersionLineageNode(nodes[versionId]);
+
+  if (!currentNode) {
+    return null;
+  }
+
+  const ancestorVersionIds = [];
+  const lineagePath = [];
+  const seenAncestorIds = new Set([currentNode.version_id]);
+  let cursor = currentNode;
+
+  while (cursor) {
+    lineagePath.unshift(cursor.version_id);
+    const parentVersionId = firstNonEmptyString([cursor.parent_version_id]);
+    if (!parentVersionId || seenAncestorIds.has(parentVersionId)) {
+      break;
+    }
+
+    ancestorVersionIds.unshift(parentVersionId);
+    seenAncestorIds.add(parentVersionId);
+    cursor = normalizeSkillVersionLineageNode(nodes[parentVersionId]);
+  }
+
+  const descendantVersionIds = [];
+  const pendingVersionIds = [...(currentNode.child_version_ids || [])];
+  const seenDescendantIds = new Set([currentNode.version_id]);
+
+  while (pendingVersionIds.length > 0) {
+    const childVersionId = pendingVersionIds.shift();
+    if (!hasNonEmptyString(childVersionId) || seenDescendantIds.has(childVersionId)) {
+      continue;
+    }
+
+    seenDescendantIds.add(childVersionId);
+    descendantVersionIds.push(childVersionId);
+    const childNode = normalizeSkillVersionLineageNode(nodes[childVersionId]);
+    if (childNode && Array.isArray(childNode.child_version_ids)) {
+      pendingVersionIds.push(...childNode.child_version_ids);
+    }
+  }
+
+  return {
+    version_id: currentNode.version_id,
+    parent_version_id: currentNode.parent_version_id,
+    child_version_ids: normalizeUniqueStringList(currentNode.child_version_ids || []),
+    root_version_id: firstNonEmptyString([
+      currentNode.root_version_id,
+      lineagePath[0],
+      currentNode.version_id
+    ]),
+    lineage_depth: normalizeOptionalInteger(currentNode.lineage_depth),
+    lineage_path: lineagePath,
+    ancestor_version_ids: ancestorVersionIds,
+    descendant_version_ids: descendantVersionIds
+  };
+}
+
+function computeSkillVersionSnapshotSha256(snapshotContent, options = {}) {
+  if (!hasNonEmptyString(snapshotContent)) {
+    throw new Error('Skill version artifact requires snapshot content.');
+  }
+
+  const providedHash = normalizeSkillVersionHash(options.snapshotSha256);
+  if (providedHash) {
+    return providedHash;
+  }
+
+  if (typeof options.hashText === 'function') {
+    return normalizeSkillVersionHash(options.hashText(snapshotContent));
+  }
+
+  throw new Error('Skill version artifact requires snapshotSha256 or hashText.');
+}
+
+function buildSkillVersionArtifact(options = {}) {
+  const snapshotContent = hasNonEmptyString(options.snapshotContent)
+    ? options.snapshotContent
+    : null;
+
+  if (!snapshotContent) {
+    throw new Error('Skill version artifact requires snapshotContent.');
+  }
+
+  const runId = firstNonEmptyString([
+    options.runId,
+    options.currentRunId,
+    options.current_run_id
+  ]);
+  if (!runId) {
+    throw new Error('Skill version artifact requires runId.');
+  }
+
+  const experimentId = normalizeOptionalInteger(options.experimentId);
+  if (experimentId === null || experimentId < 0) {
+    throw new Error('Skill version artifact requires experimentId.');
+  }
+
+  const experimentSuffix = buildSkillVersionExperimentSuffix(experimentId);
+  const versionId = firstNonEmptyString([
+    options.versionId,
+    `skill_version__${runId}__exp_${experimentSuffix}`
+  ]);
+  const artifactPath = firstNonEmptyString([
+    options.artifactPath,
+    `${joinRelativePath(['skill-versions', versionId])}/`
+  ]);
+  const snapshotPath = firstNonEmptyString([
+    options.snapshotPath,
+    joinRelativePath(['skill-versions', versionId, 'SKILL.md'])
+  ]);
+  const sourceIterationPath = firstNonEmptyString([
+    options.sourceIterationPath,
+    `${joinRelativePath(['runs', runId, `iteration_${experimentSuffix}`])}/`
+  ]);
+  const sourceMutationArtifactRef = firstNonEmptyString([
+    options.sourceMutationArtifactRef,
+    sourceIterationPath ? `${sourceIterationPath}mutation.md#version_artifact` : null
+  ]);
+
+  return {
+    schema_version: normalizeOptionalInteger(options.schemaVersion) ?? 1,
+    artifact_type: firstNonEmptyString([
+      options.artifactType,
+      'skill_version_artifact'
+    ]),
+    version_id: versionId,
+    run_id: runId,
+    experiment_id: experimentId,
+    lineage_label: hasNonEmptyString(options.lineageLabel)
+      ? options.lineageLabel.trim()
+      : null,
+    parent_version_id: firstNonEmptyString([
+      options.parentVersionId,
+      options.parent_version_id
+    ]),
+    root_version_id: firstNonEmptyString([
+      options.rootVersionId,
+      options.root_version_id,
+      firstNonEmptyString([
+        options.parentVersionId,
+        options.parent_version_id
+      ])
+        ? null
+        : versionId
+    ]),
+    lineage_depth: normalizeOptionalInteger(
+      options.lineageDepth ?? options.lineage_depth
+    )
+      ?? (
+        firstNonEmptyString([options.parentVersionId, options.parent_version_id])
+          ? null
+          : 0
+      ),
+    lineage_store_path: buildSkillVersionLineageStorePath(options),
+    artifact_path: artifactPath,
+    snapshot_path: snapshotPath,
+    snapshot_sha256: computeSkillVersionSnapshotSha256(snapshotContent, options),
+    source_iteration_path: sourceIterationPath,
+    source_mutation_artifact_ref: sourceMutationArtifactRef,
+    created_at: firstNonEmptyString([
+      options.createdAt,
+      options.created_at,
+      new Date().toISOString()
+    ])
+  };
+}
+
+function persistSkillVersionArtifact(versionArtifact, snapshotContent, options = {}) {
+  if (!versionArtifact || typeof versionArtifact !== 'object' || Array.isArray(versionArtifact)) {
+    throw new Error('Skill version artifact persistence requires version artifact metadata.');
+  }
+
+  if (!hasNonEmptyString(snapshotContent)) {
+    throw new Error('Skill version artifact persistence requires snapshot content.');
+  }
+
+  const fileSystem = options.fs;
+  if (
+    !fileSystem ||
+    typeof fileSystem.existsSync !== 'function' ||
+    typeof fileSystem.readFileSync !== 'function' ||
+    typeof fileSystem.mkdirSync !== 'function' ||
+    typeof fileSystem.writeFileSync !== 'function'
+  ) {
+    throw new Error('Skill version artifact persistence requires fs.existsSync, fs.readFileSync, fs.mkdirSync, and fs.writeFileSync.');
+  }
+
+  const pathModule = options.path && typeof options.path === 'object'
+    ? options.path
+    : null;
+  const workspaceRoot = firstNonEmptyString([options.workspaceRoot, options.workspace_root]) || '.';
+  const artifactDirectory = resolveArtifactAbsolutePath(
+    workspaceRoot,
+    versionArtifact.artifact_path,
+    pathModule
+  );
+  const normalizedArtifactDirectory = trimTrailingPathSeparators(artifactDirectory) || artifactDirectory;
+  const snapshotPath = resolveArtifactAbsolutePath(
+    workspaceRoot,
+    versionArtifact.snapshot_path,
+    pathModule
+  );
+  const versionManifestPath = resolveArtifactAbsolutePath(
+    workspaceRoot,
+    joinRelativePath([versionArtifact.artifact_path, 'version.json']),
+    pathModule
+  );
+  const lineagePersistence = prepareSkillVersionLineageStoreUpdate(versionArtifact, options);
+  const persistedVersionArtifact = cloneStructuredValue(lineagePersistence.version_artifact);
+
+  if (fileSystem.existsSync(normalizedArtifactDirectory)) {
+    throw new Error(`Skill version artifact collision: ${normalizedArtifactDirectory} already exists.`);
+  }
+
+  fileSystem.mkdirSync(normalizedArtifactDirectory, { recursive: true });
+  fileSystem.writeFileSync(snapshotPath, snapshotContent, 'utf8');
+  fileSystem.writeFileSync(versionManifestPath, JSON.stringify(persistedVersionArtifact, null, 2), 'utf8');
+
+  const persistedLineage = updateSkillVersionLineageStore(persistedVersionArtifact, options);
+
+  return {
+    artifact_directory: normalizedArtifactDirectory,
+    snapshot_path: snapshotPath,
+    version_manifest_path: versionManifestPath,
+    lineage_store_path: persistedLineage.lineage_store_path,
+    lineage_store: cloneStructuredValue(persistedLineage.lineage_store),
+    version_artifact: cloneStructuredValue(persistedVersionArtifact)
+  };
+}
+
+function persistMutationPhaseCandidateVersionArtifactFromEvalArtifact(
+  evalArtifact,
+  revisedSkillContent,
+  options = {}
+) {
+  const mutationCandidateArtifact = buildMutationPhaseCandidateRevisionArtifactFromEvalArtifact(
+    evalArtifact,
+    revisedSkillContent,
+    options
+  );
+
+  if (!mutationCandidateArtifact) {
+    return null;
+  }
+
+  const experimentIdCandidates = [
+    options.experimentId,
+    mutationCandidateArtifact.lineage_metadata && mutationCandidateArtifact.lineage_metadata.experiment_id,
+    evalArtifact && evalArtifact.experiment_id
+  ];
+  const normalizedExperimentId = experimentIdCandidates.reduce(
+    (resolvedValue, candidate) => resolvedValue ?? normalizeOptionalInteger(candidate),
+    null
+  );
+
+  const versionArtifact = buildSkillVersionArtifact({
+    ...options,
+    experimentId: normalizedExperimentId,
+    snapshotContent: revisedSkillContent
+  });
+  const persistedPaths = persistSkillVersionArtifact(
+    versionArtifact,
+    revisedSkillContent,
+    options
+  );
+  const persistedVersionArtifact = (
+    persistedPaths.version_artifact &&
+    typeof persistedPaths.version_artifact === 'object' &&
+    !Array.isArray(persistedPaths.version_artifact)
+  )
+    ? persistedPaths.version_artifact
+    : versionArtifact;
+
+  mutationCandidateArtifact.version_artifact = cloneStructuredValue(persistedVersionArtifact);
+
+  return {
+    mutation_candidate_artifact: mutationCandidateArtifact,
+    version_artifact: cloneStructuredValue(persistedVersionArtifact),
+    persisted_paths: persistedPaths
+  };
+}
+
 function getStoredEvalResults(experiment) {
   if (Array.isArray(experiment.eval_results)) {
     return experiment.eval_results;
@@ -7628,6 +10569,11 @@ function serializeExperiment(experiment) {
   const storedDecisionBreakdown = getStoredDecisionBreakdown(experiment);
   const storedDecisionExplanation = getStoredDecisionExplanation(experiment);
   const storedMutationHandoff = getStoredMutationHandoff(experiment);
+  const derivedMutationHandoff = storedMutationHandoff || buildDerivedMutationHandoff(experiment, {
+    storedDecisionBreakdown,
+    storedEvaluationMetadata,
+    storedEvalResults
+  });
   const storedHumanReviewJudgments = getStoredHumanReviewJudgments(experiment);
   const storedHumanJudgmentComparisonDataset = getStoredHumanJudgmentComparisonDataset(experiment);
   const humanJudgmentComparisonDataset = storedHumanJudgmentComparisonDataset
@@ -7763,7 +10709,8 @@ function serializeExperiment(experiment) {
     decision_explanation: getStoredDecisionExplanation(experiment),
     // Read the persisted eval-to-mutate handoff from the stored evaluation result.
     // Do not rebuild it on the retrieval path from eval_results, scoring helpers, or mutation heuristics.
-    mutation_handoff: storedMutationHandoff ? cloneStructuredValue(storedMutationHandoff) : null
+    // If the stored handoff is missing, synthesize it once from the current eval-phase artifact so mutate still receives concrete targets.
+    mutation_handoff: derivedMutationHandoff ? cloneStructuredValue(derivedMutationHandoff) : null
   };
 }
 

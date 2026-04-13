@@ -16,6 +16,8 @@ After install, invoke it with:
 /autorefine /full/path/to/your-skill
 ```
 
+The shipped shell also includes the Phase 1 design-audit dimensions, including anti-railroading and description quality, before Gulf 2 and Gulf 3 build on that state.
+
 ## Bundle Contents
 
 - `SKILL.md` — the main action script

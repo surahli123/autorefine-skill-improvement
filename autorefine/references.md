@@ -8,9 +8,11 @@ Templates, schemas, methodology rationale, and detailed rubrics. SKILL.md refere
 
 Read when: Initialize Workspace or resuming a session.
 
+Workspace directories for new runs are `traces/`, `judges/`, `runs/`, and `skill-versions/`. `skill-versions/` stores immutable per-version `SKILL.md` snapshots for rollback, comparison, and external replay.
+
 ### state.json
 ```json
-{"schema_version":4,"skill_name":"<name>","skill_path":"<path>","original_skill_path":"<path>","workspace_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null,"consecutive_discards":0,"circuit_breaker":null,"current_run_id":null,"current_run_path":null,"current_experiment":null,"iteration_state":null,"completion_cadence":null,"skill_pattern":null,"phase1_context":null,"mutation_stage_split_access_policy":null,"meta_learnings_path":null,"research_intake":null,"research_intake_path":null,"final_only_evaluation":null,"quick_start":null}
+{"schema_version":4,"skill_name":"<name>","skill_path":"<path>","original_skill_path":"<path>","workspace_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null,"consecutive_discards":0,"circuit_breaker":null,"current_run_id":null,"current_run_path":null,"current_experiment":null,"iteration_state":null,"completion_cadence":null,"pending_user_override_scan":null,"mid_session_preference_signals":null,"mid_session_preference_signals_path":null,"skill_pattern":null,"phase1_context":null,"mutation_stage_split_access_policy":null,"meta_learnings_path":null,"research_intake":null,"research_intake_path":null,"final_only_evaluation":null,"quick_start":null}
 ```
 - `schema_version`: 4 for v2.3 workspaces. Legacy: 2 = Standard/Deep (v2.1), 3 = Quick Start (v2.2). New fields default to null when reading v2/v3 workspaces.
 - `loop_iteration`: tracks Phase 7→5 loop-backs (0 = first run)
@@ -34,6 +36,16 @@ Read when: Initialize Workspace or resuming a session.
 - When loading or resuming a workspace, deserialize `iteration_state` into the active run context before Phase 7 routing. Treat it as authoritative over directory scans when deciding whether the current run is in eval, mutate, test, session_close-ready, or a terminal completed/blocked state.
 - `completion_cadence`: null, or `{"scope_type":"experiment_series|skill","scope_id":"<stable-scope-id>","completed_experiments":N,"last_finalized_experiment_id":N,"last_finalized_status":"baseline|keep|discard","incremented_at":"<ISO-timestamp>"}`. Default scope is the active Phase 7 run directory (`experiment_series` via `state.json.current_run_path`); use `skill` only when one cadence counter should span multiple Phase 7 runs for the same skill.
 - Increment `completion_cadence.completed_experiments` exactly once when an experiment reaches its finalized state. Finalized means: baseline after `iteration_000/` artifacts are written, keep after the user-confirmed keep verdict and iteration write, discard after discard autopsy plus iteration write. Do not increment for provisional scores, regression checks, or pre-autopsy discard proposals.
+- `pending_user_override_scan`: null, or the active-loop cadence task from `User Override Scan Task Schema`. Queue or update it whenever the post-finalization `completion_cadence.completed_experiments` value is divisible by 3 and `iteration_state.phase_status` remains `running` or `ready`. The scan window is the last 3 finalized experiments in the current active refinement loop.
+- `mid_session_preference_signals`: null, or `{"status":"not_detected|pending_confirmation|confirmed|applied|skipped","source_task_ref":"checkpoint-tasks/exp6-user-override-scan.json|null","source_window_experiment_ids":[4,5,6],"signals":[{"preference_key":"verbosity","preference_value":"concise", "...":"preference_signal payload"}],"detected_signal_count":N,"confirmed_signal_count":N,"last_detected_at":"<ISO-timestamp>|null","last_confirmed_experiment_id":N|null}`. Session-level ledger for style-preference signals detected from the cadence-triggered override scan. `signals[]` stores normalized `preference_signal` payloads so later mutation steps and exports can reuse the same explainable records without reparsing markdown.
+- `mid_session_preference_signals_path`: null, or `[workspace]/preferences.md`. Refresh this mirrored path whenever the override scan runs so the session keeps one stable human-facing preference ledger location, even while the latest scan is still `not_detected`, `pending_confirmation`, or `skipped`. Confirmed detections append rules to that file and keep mirroring the same resolved path here so resume-time mutation steps can reopen the same artifact without guessing.
+- Whenever the cadence-triggered override scan runs, write or refresh `mid_session_preference_signals` and `mid_session_preference_signals_path` in both `state.json` and `results.json` from that scan's latest window. Overwrite stale `source_task_ref`, `source_window_experiment_ids`, counts, and `last_detected_at` with the current scan result. If no reusable rule is found, persist `status:"not_detected"` with `signals: []` instead of carrying older confirmed signals forward as if they were freshly detected.
+- When serializing `state.json` for checkpoint writes, phase boundaries, or any other state rewrite, preserve `mid_session_preference_signals` and `mid_session_preference_signals_path` unchanged so detected style-preference signals survive resume.
+- When deserializing or loading `state.json` on startup/resume, restore `mid_session_preference_signals` and `mid_session_preference_signals_path` into the loaded run context before Phase 7 mutation analysis. If `mid_session_preference_signals.status` is `confirmed` or `applied`, treat its `signals[]` entries as the current run's machine-readable mid-session preference ledger and use the mirrored path to reopen `[workspace]/preferences.md` only when the human-readable file is needed.
+- After restoring `mid_session_preference_signals` and `mid_session_preference_signals_path`, immediately rebuild the normalized active-loop `style_preferences` payload using `Style Preferences Payload` and keep that envelope in the loaded run context across eval, mutate, test, and session_close. Mid-loop stages should read `style_preferences.active_signals` and `style_preferences.resolved_preferences_path` instead of reparsing raw state or rescanning override sources ad hoc.
+- When serializing `state.json` for phase boundaries, checkpoint writes, or any other state rewrite, preserve the full `phase1_context` object unchanged so the chosen pattern survives persistence.
+- When deserializing or loading `state.json` on startup/resume, restore `phase1_context` into the loaded run context before routing or resuming later phases.
+- `phase1_context`: null, or `{"selected_skill_pattern":"<pattern_id>","selection_scope":"current_run","source_skill_path":"skill-under-test/SKILL.md"}`. Minimal run-scoped Phase 1 context shape used by downstream pattern-state checks.
 - `phase1_context`: null, or `{"selected_skill_pattern":"<pattern_id>","selected_eval_strategy_id":"<strategy_id>","selection_scope":"current_run","source_skill_path":"skill-under-test/SKILL.md"}`. Run-scoped Phase 1 context persisted immediately after pattern classification + strategy selection and overwritten whenever Phase 1 reruns for the active workspace copy.
 - When serializing `state.json` for phase boundaries, checkpoint writes, or any other state rewrite, preserve the full `phase1_context` object unchanged so the chosen pattern and resolved evaluation strategy survive persistence.
 - When deserializing or loading `state.json` on startup/resume, restore `phase1_context` into the loaded run context before routing or resuming later phases. Later phases must read the chosen pattern and resolved evaluation strategy from the loaded context rather than recomputing classification ad hoc.
@@ -68,12 +80,17 @@ Read when: Initialize Workspace or resuming a session.
 
 ### results.json
 ```json
-{"skill_name":"<name>","status":"running","current_experiment":0,"iteration_state":null,"baseline_score":null,"noise_floor":null,"best_score":null,"completion_cadence":null,"iteration_runs":[],"meta_learning_outcomes":[],"meta_learning_audit_records":[],"experiments":[],"eval_breakdown":[]}
+{"skill_name":"<name>","status":"running","current_experiment":0,"iteration_state":null,"baseline_score":null,"noise_floor":null,"best_score":null,"completion_cadence":null,"pending_user_override_scan":null,"mid_session_preference_signals":null,"mid_session_preference_signals_path":null,"iteration_runs":[],"meta_learning_outcomes":[],"meta_learning_audit_records":[],"experiments":[],"eval_breakdown":[]}
 ```
 Result retrieval consumers must also preserve the root-level `noise_floor` when they serialize or return this payload. Do not strip the derived session baseline-variance summary from the returned payload.
 If the payload already stores `noise_floor`, return the stored object unchanged. Otherwise derive it from the Experiment 0 `baseline_trials[]` collection and publish it alongside `baseline_score` as the baseline-run summary for the session output.
 `noise_floor` is a derived summary over Experiment 0 `baseline_trials[]`, not a second authoritative baseline artifact. Preserve the stored summary when present, but treat `baseline_trials[]` as the source record that produced it.
 Result retrieval consumers must also preserve the root-level `iteration_state` object unchanged. Do not rebuild the eval-vs-mutate runner state from `current_experiment`, directory scans, or dashboard timers when the persisted handoff record is already present.
+Result retrieval consumers must also preserve the root-level `pending_user_override_scan` cadence hook when it is present. If the writer has not materialized it yet, retrieval consumers may derive the same hook from the persisted `completion_cadence`, the active `iteration_state`, and the last 3 finalized experiments while the refinement loop is still active.
+`pending_user_override_scan` is a session-level checkpoint task, not an experiment-level verdict field. Its job is to surface the last-3-experiment override window at every third completed experiment without reopening session-log history.
+Result retrieval consumers must also preserve the root-level `mid_session_preference_signals` ledger unchanged when it is present. Do not collapse confirmed signals into prose-only summaries, rebuild them heuristically from `preferences.md`, or drop the typed `signals[]` payload that explains what the scan detected.
+Result retrieval consumers must also preserve the root-level `mid_session_preference_signals_path` unchanged when it is present. That mirrored path is the authoritative human-readable persistence location for the current session's detected style preferences.
+Serialized reporting payloads should also expose the normalized root-level `style_preferences` envelope from `Style Preferences Payload`. If the stored payload only has `mid_session_preference_signals` and `mid_session_preference_signals_path`, rebuild `style_preferences` on retrieval so downstream stage handoffs, dashboards, and production consumers all read one stable active-loop preference context.
 Result retrieval consumers must also preserve the root-level `iteration_runs[]` ledger unchanged. Do not collapse it into `current_run_path`, derive it from directory scans, or drop the run-start metadata needed by production systems.
 `iteration_runs[]` is the append-only run-start ledger written by the single iteration-start trigger at Phase 7 start. Each row uses `Iteration Run Record Schema` and links one unique `run_id` to the target skill/version snapshot that baseline scoring will evaluate.
 Result retrieval consumers must also preserve the root-level `meta_learning_bootstrap_context` when it is present in the stored run output. Do not strip `curator_source`, `curator_version`, `transfer_parameters`, or `transfer_traceability` from the returned payload.
@@ -81,6 +98,24 @@ If an older run output only stores `meta_learnings_path`, `target_context`, and 
 Result retrieval consumers may additionally derive `meta_learning_filter_index` for export/filter flows. This additive index should expose deduplicated `curator_sources[]`, `curator_versions[]`, `transfer_signatures[]`, and `filter_refs[]` copied from `meta_learning_bootstrap_context.transfer_traceability` without mutating the stored run payload.
 Result retrieval consumers must also preserve the root-level `meta_learning_outcomes[]` ledger unchanged when present. Do not drop per-run meta-learning effectiveness rows or rebuild them heuristically from version deltas.
 Each `meta_learning_outcomes[]` row must follow `Meta-Learning Outcome Record Schema` and stay keyed to the original `run_id` plus `meta_learning_id`.
+
+### Style Preferences Payload
+
+Use this normalized payload as the active refinement-loop context for mid-session style steering. Build or rebuild it from `state.json.mid_session_preference_signals` plus `state.json.mid_session_preference_signals_path` on every start/resume and after any loop-iteration state refresh; then keep the same envelope available to all mid-loop stages instead of recomputing active signals ad hoc.
+
+```json
+{"schema_version":1,"payload_type":"style_preferences","status":"not_detected|pending_confirmation|confirmed|applied|skipped|null","source_task_ref":"checkpoint-tasks/exp6-user-override-scan.json|null","source_window_experiment_ids":[4,5,6],"signals":[{"preference_key":"verbosity","preference_value":"concise","...":"preference_signal payload"}],"active_signals":[{"preference_key":"verbosity","preference_value":"concise","...":"preference_signal payload"}],"detected_signal_count":1,"confirmed_signal_count":1,"last_detected_at":"<ISO-timestamp>|null","last_confirmed_experiment_id":6,"mid_session_preference_signals_path":"[workspace]/preferences.md|null","resolved_preferences_path":"/abs/path/to/preferences.md|null"}
+```
+
+- `schema_version`: currently `1`.
+- `payload_type`: always `style_preferences`.
+- `signals[]`: the full normalized ledger restored from `mid_session_preference_signals`.
+- `active_signals[]`: identical to `signals[]` only when `status` is `confirmed` or `applied`; otherwise `[]`.
+- `mid_session_preference_signals_path`: the stable human-facing path reference, usually `[workspace]/preferences.md`.
+- `resolved_preferences_path`: absolute reopen path for the same ledger when the workspace root is known.
+- Keep this payload in the loaded run context as `style_preferences` across eval, mutate, test, and session_close so all mid-loop stages read the same explainable preference envelope.
+- Mid-loop refinement must consume `style_preferences.active_signals` directly and must not rescan raw override tasks, raw `mid_session_preference_signals`, or `[workspace]/preferences.md` once the hydrated payload is present.
+- Serialized reporting payloads should expose the same root-level `style_preferences` envelope unchanged when it is already present, or synthesize it deterministically from the persisted ledger fields when it is not.
 Result retrieval consumers must also preserve the root-level `meta_learning_audit_records[]` ledger unchanged when present. Do not collapse skipped rows away, rebuild applied/skip status heuristically from prose, or strip the evidence/helpfulness fields that explain why a curated rule did or did not steer the run.
 Each `meta_learning_audit_records[]` row must follow `Meta-Learning Audit Record Schema` and stay keyed to the original `run_id` plus `meta_learning_id`.
 Dashboard and human-readable campaign report renderers should render a dedicated `Curated Meta-Learnings` section from `meta_learning_audit.entries[]`, listing each rule's applied/skip status, evidence metrics, and helpfulness verdict so reviewers can audit transfer decisions without reopening raw markdown or artifacts.
@@ -128,7 +163,7 @@ If the retrieval layer reads a nested stored evaluation result (for example iter
 
 Each experiment in `experiments[]`:
 ```json
-{"id":N,"input_set_id":"phase4-dev-7f3c91ad","input_set_ref":"input-sets.json#phase4-dev-7f3c91ad","input_ids":["phase4-dev-7f3c91ad-I03","phase4-dev-7f3c91ad-I05","phase4-dev-7f3c91ad-I08"],"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","final_score":78.7,"description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}],"baseline_trials":[],"evaluation_metadata":{"dataset":{"input_set_id":"phase4-adversarial_holdout-91ab77ce","input_set_ref":"input-sets.json#phase4-adversarial_holdout-91ab77ce","input_ids":["phase4-adversarial_holdout-91ab77ce-I01"],"split_metadata":{"split_id":"adversarial_holdout","display_label":"Adversarial Holdout","evaluation_only":true,"hidden_until":"session_close","used_for":["session_close_holdout_validation"],"blocked_from":["phase5_judge_examples","phase6_judge_refinement","phase7_mutation_scoring","phase7_mutation_analysis"],"separate_from":["train","dev","test"]}},"config":{"scoring_scope":"session_close_holdout_validation","freeze_split_boundaries":true,"require_same_split_metadata_on_resume":true,"human_spot_check_calibration":{"sample_count":2},"mutation_refinement_split_datasets":[{"split_id":"train","input_set_id":"phase4-train-42be3101","input_ids":["phase4-train-42be3101-I01"]},{"split_id":"dev","input_set_id":"phase4-dev-7f3c91ad","input_ids":["phase4-dev-7f3c91ad-I03","phase4-dev-7f3c91ad-I05"]},{"split_id":"test","input_set_id":"phase4-test-6ca1b7d2","input_ids":["phase4-test-6ca1b7d2-I02"]}]}},"evaluation_metadata_validation":{"status":"valid","checked_split_ids":["train","dev","test"],"overlap_count":0,"issues":[]},"eval_results":[{"eval":"E1","pass_fail":"pass","reasoning_trace":"1. Criterion check: the required gotchas section is present. 2. Evidence: the output contains a gotchas heading and 3 specific warnings. 3. Verdict link: because the rubric requires a gotchas section with concrete warnings, this passes.","evidence":[{"kind":"output_excerpt","source":"skill_output","locator":"input_id:phase4-dev-7f3c91ad-I03 output lines 12-18","excerpt":"## Gotchas\\n- Never run rm -rf without checking the target path.","metric":null,"artifact_ref":null},{"kind":"metric","source":"scoring_metric","locator":"warnings_found","excerpt":"3 concrete warnings found in the gotchas section.","metric":{"name":"warnings_found","value":3,"unit":"count"},"artifact_ref":null}],"supporting_items":[{"stage":"criterion_check","decision":"required gotchas section is present","outcome":"met","evidence_refs":[0]},{"stage":"evidence_check","decision":"gotchas section includes 3 concrete warnings","outcome":"met","evidence_refs":[1]},{"stage":"verdict_link","decision":"the rubric passes when the gotchas section and concrete warnings are both present","outcome":"supports_pass","evidence_refs":[0,1]}],"weight":1.0,"weight_source":"code_eval_fixed","weighted_points":1.0,"normalized_contribution":0.25},{"eval":"E2","pass_fail":"fail","reasoning_trace":"1. Criterion check: the disclosure instruction is missing. 2. Evidence: no 'Read when:' pointer appears and the disclosure section is absent. 3. Verdict link: because the rubric requires explicit disclosure guidance, this fails.","evidence":[{"kind":"output_excerpt","source":"skill_output","locator":"input_id:phase4-dev-7f3c91ad-I03 output lines 1-9","excerpt":"No 'Read when:' pointer or disclosure section appears in the output.","metric":null,"artifact_ref":null},{"kind":"artifact_ref","source":"workspace_artifact","locator":"runs/run_2026-04-10T10-00-00/iteration_000/eval_results.json","excerpt":"Stored verdict artifact for replay and dashboard inspection.","metric":null,"artifact_ref":{"path":"runs/run_2026-04-10T10-00-00/iteration_000/eval_results.json","label":"baseline eval results"}}],"supporting_items":[{"stage":"criterion_check","decision":"disclosure guidance is missing","outcome":"not_met","evidence_refs":[0]},{"stage":"verdict_link","decision":"the rubric fails when disclosure guidance is absent","outcome":"supports_fail","evidence_refs":[0,1]}],"weight":0.9,"weight_source":"phase_6_validation_average","weighted_points":0.0,"normalized_contribution":0.0}],"decision_breakdown":{"components":[{"eval":"E1","pass_fail":"pass","weight":1.0,"weight_source":"code_eval_fixed","weighted_points":1.0,"normalized_contribution":0.213},{"eval":"E2","pass_fail":"fail","weight":0.9,"weight_source":"phase_6_validation_average","weighted_points":0.0,"normalized_contribution":0.0}],"formula":"combined_score = weighted_points / total_weight","weighted_points":3.7,"total_weight":4.7,"combined_score":0.787,"combined_score_pct":78.7,"threshold":0.8,"proposed_decision":"discard"},"decision_explanation":{"final_decision":"discard","summary":"E2 withheld 19.1% of the available score, while E1 added 21.3%; the mutation still finished below threshold.","strongest_outcomes":[{"eval":"E2","pass_fail":"fail","impact":"supports_discard","impact_magnitude":0.191,"impact_basis":"missed_weight_share","summary":"The failed high-weight eval withheld 19.1% of the available score."},{"eval":"E1","pass_fail":"pass","impact":"supports_keep","impact_magnitude":0.213,"impact_basis":"normalized_contribution","summary":"The strongest pass added 21.3% toward keep, but the experiment still missed threshold."}]},"regression_check":null,"discard_autopsy":null,"requires_human_spot_check":false,"pending_human_spot_check_task":null}
+{"id":N,"input_set_id":"phase4-dev-7f3c91ad","input_set_ref":"input-sets.json#phase4-dev-7f3c91ad","input_ids":["phase4-dev-7f3c91ad-I03","phase4-dev-7f3c91ad-I05","phase4-dev-7f3c91ad-I08"],"score":X,"max_score":Y,"pass_rate":Z,"status":"keep|discard|baseline","final_score":78.7,"description":"...","changes":[{"type":"added|modified|removed","location":"section","snippet":"1-3 lines"}],"baseline_trials":[],"version_artifact":{"version_id":"skill_version__run_2026-04-11T09-00-00__exp_003","artifact_path":"skill-versions/skill_version__run_2026-04-11T09-00-00__exp_003/","snapshot_path":"skill-versions/skill_version__run_2026-04-11T09-00-00__exp_003/SKILL.md","snapshot_sha256":"sha256:4b2859d8c0f1f1a9...","parent_version_id":"skill_version__run_2026-04-11T09-00-00__exp_002","created_at":"2026-04-11T09:05:00Z"},"evaluation_metadata":{"dataset":{"input_set_id":"phase4-adversarial_holdout-91ab77ce","input_set_ref":"input-sets.json#phase4-adversarial_holdout-91ab77ce","input_ids":["phase4-adversarial_holdout-91ab77ce-I01"],"split_metadata":{"split_id":"adversarial_holdout","display_label":"Adversarial Holdout","evaluation_only":true,"hidden_until":"session_close","used_for":["session_close_holdout_validation"],"blocked_from":["phase5_judge_examples","phase6_judge_refinement","phase7_mutation_scoring","phase7_mutation_analysis"],"separate_from":["train","dev","test"]}},"config":{"scoring_scope":"session_close_holdout_validation","freeze_split_boundaries":true,"require_same_split_metadata_on_resume":true,"human_spot_check_calibration":{"sample_count":2},"mutation_refinement_split_datasets":[{"split_id":"train","input_set_id":"phase4-train-42be3101","input_ids":["phase4-train-42be3101-I01"]},{"split_id":"dev","input_set_id":"phase4-dev-7f3c91ad","input_ids":["phase4-dev-7f3c91ad-I03","phase4-dev-7f3c91ad-I05"]},{"split_id":"test","input_set_id":"phase4-test-6ca1b7d2","input_ids":["phase4-test-6ca1b7d2-I02"]}]}},"evaluation_metadata_validation":{"status":"valid","checked_split_ids":["train","dev","test"],"overlap_count":0,"issues":[]},"eval_results":[{"eval":"E1","pass_fail":"pass","reasoning_trace":"1. Criterion check: the required gotchas section is present. 2. Evidence: the output contains a gotchas heading and 3 specific warnings. 3. Verdict link: because the rubric requires a gotchas section with concrete warnings, this passes.","evidence":[{"kind":"output_excerpt","source":"skill_output","locator":"input_id:phase4-dev-7f3c91ad-I03 output lines 12-18","excerpt":"## Gotchas\\n- Never run rm -rf without checking the target path.","metric":null,"artifact_ref":null},{"kind":"metric","source":"scoring_metric","locator":"warnings_found","excerpt":"3 concrete warnings found in the gotchas section.","metric":{"name":"warnings_found","value":3,"unit":"count"},"artifact_ref":null}],"supporting_items":[{"stage":"criterion_check","decision":"required gotchas section is present","outcome":"met","evidence_refs":[0]},{"stage":"evidence_check","decision":"gotchas section includes 3 concrete warnings","outcome":"met","evidence_refs":[1]},{"stage":"verdict_link","decision":"the rubric passes when the gotchas section and concrete warnings are both present","outcome":"supports_pass","evidence_refs":[0,1]}],"weight":1.0,"weight_source":"code_eval_fixed","weighted_points":1.0,"normalized_contribution":0.25},{"eval":"E2","pass_fail":"fail","reasoning_trace":"1. Criterion check: the disclosure instruction is missing. 2. Evidence: no 'Read when:' pointer appears and the disclosure section is absent. 3. Verdict link: because the rubric requires explicit disclosure guidance, this fails.","evidence":[{"kind":"output_excerpt","source":"skill_output","locator":"input_id:phase4-dev-7f3c91ad-I03 output lines 1-9","excerpt":"No 'Read when:' pointer or disclosure section appears in the output.","metric":null,"artifact_ref":null},{"kind":"artifact_ref","source":"workspace_artifact","locator":"runs/run_2026-04-10T10-00-00/iteration_000/eval_results.json","excerpt":"Stored verdict artifact for replay and dashboard inspection.","metric":null,"artifact_ref":{"path":"runs/run_2026-04-10T10-00-00/iteration_000/eval_results.json","label":"baseline eval results"}}],"supporting_items":[{"stage":"criterion_check","decision":"disclosure guidance is missing","outcome":"not_met","evidence_refs":[0]},{"stage":"verdict_link","decision":"the rubric fails when disclosure guidance is absent","outcome":"supports_fail","evidence_refs":[0,1]}],"weight":0.9,"weight_source":"phase_6_validation_average","weighted_points":0.0,"normalized_contribution":0.0}],"decision_breakdown":{"components":[{"eval":"E1","pass_fail":"pass","weight":1.0,"weight_source":"code_eval_fixed","weighted_points":1.0,"normalized_contribution":0.213},{"eval":"E2","pass_fail":"fail","weight":0.9,"weight_source":"phase_6_validation_average","weighted_points":0.0,"normalized_contribution":0.0}],"formula":"combined_score = weighted_points / total_weight","weighted_points":3.7,"total_weight":4.7,"combined_score":0.787,"combined_score_pct":78.7,"threshold":0.8,"proposed_decision":"discard"},"decision_explanation":{"final_decision":"discard","summary":"E2 withheld 19.1% of the available score, while E1 added 21.3%; the mutation still finished below threshold.","strongest_outcomes":[{"eval":"E2","pass_fail":"fail","impact":"supports_discard","impact_magnitude":0.191,"impact_basis":"missed_weight_share","summary":"The failed high-weight eval withheld 19.1% of the available score."},{"eval":"E1","pass_fail":"pass","impact":"supports_keep","impact_magnitude":0.213,"impact_basis":"normalized_contribution","summary":"The strongest pass added 21.3% toward keep, but the experiment still missed threshold."}]},"regression_check":null,"discard_autopsy":null,"requires_human_spot_check":false,"pending_human_spot_check_task":null}
 ```
 - For baseline noise measurement, persist the three unchanged-skill executions inside `baseline_trials[]` on Experiment 0 instead of overwriting one shared baseline slot.
 - Baseline trial row example: `{"trial_index":1,"trial_id":"baseline-trial-001","run_index":1,"score":72.3,"pass_rate":72.3,"timestamps":{"started_at":"2026-04-11T09:00:00Z","completed_at":"2026-04-11T09:00:08Z"},"raw_outputs":[{"input_id":"phase4-dev-7f3c91ad-I03","output_text":"Trial 1 output for fixture I03"}],"trial_metadata":{"requested_operation":"baseline_scoring","requested_split_id":"dev","input_set_id":"phase4-dev-7f3c91ad","input_set_ref":"input-sets.json#phase4-dev-7f3c91ad","input_ids":["phase4-dev-7f3c91ad-I03"]}}`.
@@ -165,6 +200,8 @@ Each experiment in `experiments[]`:
 - `input_ids`: stable input IDs actually scored for this experiment, stored in finalized set order. Version comparisons are only valid when both `input_set_id` and the full `input_ids` list match across experiments.
 - `completion_cadence`: finalized snapshot of the cadence counter for this experiment. Copy the active root counter into the experiment record only after the experiment reaches its final state so production systems can tell which completed-experiment slot this version occupied without replaying the run.
 - `baseline_trials`: baseline-only array of unchanged-skill execution records. Preserve one row per baseline invocation with stable `trial_index` / `trial_id` / `run_index` identifiers so repeated baseline evaluations do not overwrite each other. Each row should also preserve `timestamps`, `raw_outputs[]`, and `trial_metadata` so later comparisons can inspect what the unchanged skill produced, when it ran, and which dev input set backed the sample.
+- `version_artifact`: immutable version snapshot metadata for this experiment. Use `Skill Version Artifact Schema`. Preserve `version_id`, `artifact_path`, `snapshot_path`, `snapshot_sha256`, `parent_version_id`, and `created_at` unchanged on retrieval. Do not rebuild this object from `iteration_path`, `skill_after.md`, or derived version labels when the stored artifact is already present.
+- `test_launch_payload`: mutate-to-test handoff payload emitted from the finalized mutation output. Use `Mutation Test Launch Payload`. Preserve `candidate_version`, `source_artifact_refs`, `eval_artifact_refs`, and `test_bootstrap_metadata` unchanged whenever the mutation artifact already stored them.
 
 ### Meta-Learning Outcome Record Schema
 
@@ -328,6 +365,32 @@ Usage rules:
 - Do not rewrite `judge_decision` after the fact. It is the frozen snapshot of what the human reviewer actually saw.
 - Preserve `human_review_judgments[]` unchanged on retrieval. Do not backfill or infer missing rationale, agreement, reviewer identity, or timestamps from other files.
 
+### User Override Scan Task Schema
+
+Use this schema for the session-level cadence hook that batches the last 3 finalized experiments into a mid-loop user-override scan. Queue or update it whenever the post-finalization `completion_cadence.completed_experiments` value is divisible by 3 and the refinement loop remains active (`iteration_state.phase_status = running|ready`).
+
+```json
+{"task_type":"user_override_scan","trigger":"completion_cadence","status":"pending","completed_experiment_slot":6,"trigger_experiment_id":6,"scan_window_size":3,"scan_window_status":"ready","scan_scope":"last_3_finalized_experiments","override_count":2,"override_detected":true,"scan_window_experiment_ids":[4,5,6],"experiment_window":[{"experiment_id":4,"agent_verdict":"keep","user_verdict":"discard","final_status":"discard","override_detected":true,"override_direction":"keep_to_discard","changed_locations":["## Gotchas"],"mutation_types":["added"],"description":"Expanded gotchas section.","completion_cadence":{"scope_type":"experiment_series","scope_id":"runs/run_2026-04-11T09-00-00/","completed_experiments":4}},{"experiment_id":5,"agent_verdict":"keep","user_verdict":"discard","final_status":"discard","override_detected":true,"override_direction":"keep_to_discard","changed_locations":["## Gotchas"],"mutation_types":["added"],"description":"Added more gotchas reminders.","completion_cadence":{"scope_type":"experiment_series","scope_id":"runs/run_2026-04-11T09-00-00/","completed_experiments":5}},{"experiment_id":6,"agent_verdict":"keep","user_verdict":"keep","final_status":"keep","override_detected":false,"override_direction":null,"changed_locations":["## Examples"],"mutation_types":["modified"],"description":"Tightened example wording.","completion_cadence":{"scope_type":"experiment_series","scope_id":"runs/run_2026-04-11T09-00-00/","completed_experiments":6}}],"completion_cadence":{"scope_type":"experiment_series","scope_id":"runs/run_2026-04-11T09-00-00/","completed_experiments":6,"last_finalized_experiment_id":6,"last_finalized_status":"keep","incremented_at":"2026-04-11T18:25:00Z"}}
+```
+
+- `task_type`: always `user_override_scan`.
+- `trigger`: `completion_cadence` for the every-third-experiment checkpoint hook.
+- `status`: `pending`, `completed`, or `skipped`.
+- `completed_experiment_slot`: the post-increment cadence slot that triggered the scan.
+- `trigger_experiment_id`: finalized experiment ID that closed the cadence window.
+- `scan_window_size`: required integer window size. v4.2 default is `3`.
+- `scan_window_status`: `ready`, `underfilled`, or `empty` depending on how many finalized experiments were available to scan.
+- `scan_scope`: required string; use `last_3_finalized_experiments`.
+- `override_count`: number of experiments in `experiment_window[]` whose `agent_verdict` and `user_verdict` differ.
+- `override_detected`: boolean shortcut for whether `override_count > 0`.
+- `scan_window_experiment_ids`: stable ordered experiment IDs in the scan window.
+- `experiment_window[]`: compact, replayable scan inputs copied from the last finalized experiments. `agent_verdict` comes from `decision_breakdown.proposed_decision`; `user_verdict` comes from the finalized experiment status; `override_detected` is true only when both are `keep|discard` and they differ.
+- `experiment_window[].changed_locations`: unique `changes[].location` values for the experiment. Preserve these so later preference extraction can detect section-level patterns without reopening diffs.
+- `experiment_window[].mutation_types`: unique `changes[].type` values for the experiment (`added`, `modified`, `removed`).
+- `completion_cadence`: root cadence snapshot at the moment the scan task was queued or updated.
+- Session-level only: store this object at the root of `state.json` / `results.json` as `pending_user_override_scan`. Do not copy it onto every experiment row.
+- Active-loop guardrail: do not queue or keep this task active once `iteration_state.phase_status` becomes `completed` or `blocked`. Session Close and terminal states clear or leave the hook null instead of surfacing a stale checkpoint.
+
 ### results.tsv
 Header: `experiment\tscore\tmax_score\tpass_rate\tstatus\tdescription`
 
@@ -476,6 +539,7 @@ Entry types:
 - Iteration run started: `{"phase":"7","type":"iteration_run_started","run_id":"run_2026-04-03T14-30-00","path":"runs/run_2026-04-03T14-30-00/","target_version_label":"baseline_candidate|vN"}`
 - Iteration phase transition: `{"phase":"7","type":"iteration_phase_transition","run_id":"run_2026-04-03T14-30-00","experiment":0,"from":"eval","to":"mutate","last_eval_status":"completed","last_eval_results_ref":"runs/run_.../iteration_000/eval_results.json","next_action":"phase7_mutation_analysis"}`
 - Completion cadence increment: `{"phase":"7","type":"completion_cadence","experiment":N,"scope_type":"experiment_series","scope_id":"runs/run_.../","completed_experiments":N,"status":"baseline|keep|discard"}`
+- User override scan queued: `{"phase":"7","type":"user_override_scan_queued","experiment":N,"completed_experiment_slot":N,"window":[N-2,N-1,N],"override_count":M}`
 - Input set registration: `{"phase":"3","type":"input_set_registered","set_id":"phase3-fixtures-7f3c91ad","kind":"phase3_fixtures","input_count":18,"canonical_hash":"7f3c91adf2f0f96f..."}`
 - Eval strategy resolution: `{"phase":"1","type":"eval_strategy_resolution","skill_pattern":"pipeline","strategy_id":"pipeline_eval_strategy","reasoning":"Pattern requires gate-aware, resume-safe downstream evaluation."}`
 - Research intake started: `{"phase":"6.5","type":"research_intake_started","target_skill_path":"skill-under-test/SKILL.md","target_domain":"<one-sentence target job>","requested_sources":3}`
@@ -915,7 +979,10 @@ Use this canonical ordering whenever a Phase 1 audit is represented structurally
 
 ### Canonical structured payload
 
-When Phase 1 emits a structured audit payload, include the chosen primary pattern as a top-level `selected_skill_pattern` field and the resolved downstream selector as a top-level `selected_eval_strategy_id` field. Source both from the active run's `state.json.phase1_context` values rather than inferring them from prose or requiring downstream consumers to reopen state.
+When Phase 1 emits a structured audit payload, include the chosen primary pattern as a top-level `selected_skill_pattern` field.
+Include the resolved downstream selector as a top-level `selected_eval_strategy_id` field.
+Source it from `state.json.phase1_context.selected_skill_pattern` for the active run rather than inferring it from prose or rereading state later.
+Source both fields from the active run's `state.json.phase1_context` values rather than inferring them from prose or requiring downstream consumers to reopen state.
 If Phase 1 replays the production routing fixtures, aggregate the full ordered batch under top-level `phase1_routing_fixture_result_collection` so downstream comparisons can read one comparable collection keyed by `input_id`. That wrapper must also expose `per_skill_trigger_precision` so humans can inspect grouped trigger precision and every incorrect route decision by expected routed skill.
 `description_quality` should also expose per-skill trigger-precision reports with `score`, `evidence`, and `mismatches` when routing fixtures are replayed.
 
@@ -1558,6 +1625,8 @@ Any result retrieval response schema or serializer that returns experiment recor
 - `input_set_ref`: exact pointer back to the registered set entry in `input-sets.json`.
 - `input_ids`: exact stable inputs scored for this experiment, listed in finalized set order. Version comparisons are only valid when this matches across experiments.
 - `validation_results`: Phase 6 judge validation summaries. Store aggregate dev/test TPR/TNR mean/range fields on each row, mirror them inside `aggregated_tpr_tnr_summary`, include structured `tpr_confidence_range` / `tnr_confidence_range` interval objects in the dev summary, persist the aggregate `confusion_matrix` plus reviewer-readable `confusion_examples`, and keep fold-level TPR/TNR outputs in `phase6_dev_fold_metrics` instead of flattening them into the aggregate mean/range fields.
+- Return the stored verdict objects unchanged so each `pass_fail` decision stays attached to its own `evidence[]` and `supporting_items[]`.
+- return the stored verdict objects unchanged so each `pass_fail` decision stays attached to its own `evidence[]` and `supporting_items[]`
 
 ## Judge Verdict Evidence Schema
 
@@ -1588,6 +1657,8 @@ Usage rules:
 - Prefer stable locators (`input_id:...`, `output lines 12-18`, `decision_breakdown.total_weight`, `runs/.../eval_results.json`) over vague prose.
 - Store quoted inputs and outputs as `input_excerpt` or `output_excerpt`, numeric checks as `metric`, and replay/debug links as `artifact_ref`.
 - Do not store opaque strings like `"looks good"` or `"seems wrong"` inside `evidence[]`.
+- A Pass/Fail verdict without at least one concrete evidence item is invalid judge output.
+- If a verdict is missing evidence, it must be flagged and rejected from scoring/storage until the judge is rerun or fixed.
 
 ## Judge Decision Support Schema
 
@@ -2481,7 +2552,7 @@ Do NOT include: baseline output, mutation hypothesis, Phase 1-3 findings, or any
 
 ### Preferences File Format (Ambient Learning)
 
-Read when: Ambient learning check on resume, or Phase 7 step 2a.
+Read when: Ambient learning check on resume, or Phase 7 step 2a when the already-hydrated `style_preferences.resolved_preferences_path` needs human-readable wording/evidence.
 
 `[workspace]/preferences.md`:
 ```markdown
@@ -2496,7 +2567,8 @@ CONFIDENCE: high | medium
 ...
 ```
 
-Phase 7 reads this file before hypothesizing mutations — do NOT propose changes that contradict learned preferences.
+Phase 7 should steer mutation hypotheses from the hydrated `style_preferences` envelope first. Reopen this file only through `style_preferences.resolved_preferences_path` when the human-readable wording/evidence must be shown or cited, and do NOT propose changes that contradict learned preferences.
+Whenever mid-session preference detection runs, refresh `state.json.mid_session_preference_signals_path` and `results.json.mid_session_preference_signals_path` to this ledger location so later scan passes, resumes, and exports reopen the same artifact without guessing. When a new rule is confirmed, append it here immediately and keep mirroring the same human-readable artifact path.
 
 ---
 
@@ -3191,11 +3263,64 @@ Each item in `parsed_meta_learnings.entries[]` must preserve the markdown semant
 Use when override behavior or confirmed preferences should influence future mutations.
 
 Required `type_payload` fields:
+- `preference_key`
+- `preference_value`
 - `preference_statement`
 - `detected_from`
 - `confirmation_state`
 - `preference_scope`
 - `expiry_policy`
+
+`preference_key` is the stable machine-readable style/direction dimension for the signal. Allowed values:
+- Canonical `preference_key` values: `verbosity`, `structure_change`, `mutation_operation`, `section_focus`, `voice_style`, `instruction_density`, `example_density`, or `reference_usage`.
+- `verbosity`
+- `structure_change`
+- `mutation_operation`
+- `section_focus`
+- `voice_style`
+- `instruction_density`
+- `example_density`
+- `reference_usage`
+
+`preference_value` is the normalized value paired with `preference_key`:
+- `verbosity`: `terse`, `balanced`, or `detailed`
+- `structure_change`: `preserve`, `allow_local`, or `allow_major`
+- `mutation_operation`: `prefer_add`, `prefer_modify`, `prefer_remove`, `avoid_add`, `avoid_modify`, or `avoid_remove`
+- `section_focus`: `prefer`, `avoid`, or `deprioritize`; when used, `preference_scope.section_ids[]` must name the targeted `##` sections
+- `voice_style`: `instructional`, `descriptive`, or `neutral`
+- `instruction_density`: `lighter`, `balanced`, or `heavier`
+- `example_density`: `fewer`, `balanced`, or `more`
+- `reference_usage`: `inline`, `read_when`, or `minimal`
+
+`detected_from` is a typed provenance object, not a free-form sentence. Required fields:
+- `detection_mode`: `ambient_diff`, `mid_session_override_scan`, or `manual_entry`
+- `source_kind`: `preferences_md`, `user_override_scan_task`, or `human_confirmation`
+- `source_ref`: artifact ref or markdown anchor for the source record
+- `support_count`: integer count of supporting signals used to produce the normalized preference
+- `normalized_override_entries[]`: replayable supporting override rows. Required and non-empty when `detection_mode = mid_session_override_scan`; otherwise it may be empty
+- `confidence_metadata`: aggregate confidence explanation for the normalized preference
+
+Each `normalized_override_entries[]` row must preserve one supporting override in a replayable shape:
+- `experiment_id`
+- `completed_experiment_slot`
+- `source_kind`
+- `source_ref`
+- `agent_verdict`
+- `user_verdict`
+- `override_direction`
+- `changed_locations[]`
+- `mutation_types[]`
+- `preference_key`
+- `preference_value`
+- `source_confidence`
+- `confidence_reason`
+
+`confidence_metadata` fields:
+- `signal_confidence`: `high`, `medium`, or `low`
+- `source_confidence`: `high`, `medium`, or `low`
+- `confidence_reason`
+- `confirmation_bonus_applied`
+- `support_count`
 
 Guardrail: preference signals are local steering input. Do not auto-promote them into cross-campaign rules without human review.
 
@@ -3329,6 +3454,7 @@ Read when: updating state.json after a phase.
 
 | Phase | Fields to record |
 |-------|-----------------|
+| 1 | `design_audit: "complete"`, `skill_pattern`, `phase1_context.selected_skill_pattern` |
 | 1 | `design_audit: "complete"`, `skill_pattern`, `phase1_context.selected_skill_pattern`, `phase1_context.selected_eval_strategy_id` |
 | 2 | `eval_audit: "complete"` |
 | 3 | `traces_reviewed, sampled_trace_ids, sampling_strategy, taxonomy_summary` |
@@ -3629,8 +3755,10 @@ To resume, paste this prompt into a new autorefine session.
 When reading state.json on startup:
 1. If `checkpoint` is not null and `checkpoint.next_action` exists → resume mode
 2. Read all files listed in `checkpoint.files_to_read_on_resume`. If any file is missing, skip it and note: "Missing file: {filename} — may have been deleted between sessions."
-3. Deserialize `state.json.phase1_context`, `state.json.mutation_stage_split_access_policy`, and `state.json.iteration_state` into the loaded run context before routing or resuming later phases. If `phase1_context.selected_skill_pattern` and/or `phase1_context.selected_eval_strategy_id` exist, restore them unchanged so later phases can read the chosen pattern + resolved strategy from the loaded context. If the restored pattern and `state.json.skill_pattern` differ, treat it as state corruption and rerun Phase 1 Step 0 instead of continuing. If the restored strategy is missing or no longer maps back to the restored pattern through `Skill Pattern Eval Strategy > Pattern-to-Evaluation-Strategy Selector`, treat it as state corruption and rerun strategy selection before continuing. If split-scoped Phase 7 work is active and `mutation_stage_split_access_policy` is missing, read the same policy from `fixtures-manifest.md` or a stored Phase 4 `evaluation_metadata.config.mutation_stage_split_access_policy` snapshot, restore it into the loaded run context, and stop if the sources disagree. If `iteration_state` is present, resume from its persisted `next_action` and continue automatic eval->mutate->test->session_close progression until terminal success (`phase_status = "completed"`) or terminal failure (`phase_status = "blocked"`), without manual handoff.
+3. Deserialize `state.json.phase1_context` and `state.json.mutation_stage_split_access_policy` into the loaded run context before routing or resuming later phases.
+3. Deserialize `state.json.phase1_context`, `state.json.mutation_stage_split_access_policy`, and `state.json.iteration_state` into the loaded run context before routing or resuming later phases. If `phase1_context.selected_skill_pattern` and/or `phase1_context.selected_eval_strategy_id` exist, restore them unchanged so later phases can read the chosen pattern + resolved strategy from the loaded context. If `phase1_context.selected_skill_pattern` exists, restore it unchanged so later phases can read the chosen pattern from the loaded context. If the restored pattern and `state.json.skill_pattern` differ, treat it as state corruption and rerun Phase 1 Step 0 instead of continuing. If the restored strategy is missing or no longer maps back to the restored pattern through `Skill Pattern Eval Strategy > Pattern-to-Evaluation-Strategy Selector`, treat it as state corruption and rerun strategy selection before continuing. If split-scoped Phase 7 work is active and `mutation_stage_split_access_policy` is missing, read the same policy from `fixtures-manifest.md` or a stored Phase 4 `evaluation_metadata.config.mutation_stage_split_access_policy` snapshot, restore it into the loaded run context, and stop if the sources disagree. If `iteration_state` is present, resume from its persisted `next_action` and continue automatic eval->mutate->test->session_close progression until terminal success (`phase_status = "completed"`) or terminal failure (`phase_status = "blocked"`), without manual handoff.
 4. Print resume context: "Resuming from checkpoint: {next_action}"
+5. Set `checkpoint` to null (clear the checkpoint — it's been consumed). Preserve all non-checkpoint state, including `phase1_context`, when writing the updated `state.json`.
 5. Set `checkpoint` to null (clear the checkpoint — it's been consumed). Preserve all non-checkpoint state, including `phase1_context` and `mutation_stage_split_access_policy`, when writing the updated `state.json`.
 6. Proceed from `checkpoint.next_action`
 
@@ -3804,7 +3932,7 @@ A new `run_*` directory is created each time Phase 7 starts (including after loo
 ### File Formats
 
 **mutation.md** — What was changed and why.
-```markdown
+~~~markdown
 # Experiment N — [mutation description]
 
 ## Hypothesis
@@ -3815,7 +3943,67 @@ A new `run_*` directory is created each time Phase 7 starts (including after loo
 
 ## Mutation Type
 [add | modify | delete]
+
+## Mutation Artifact
+```json
+{
+  "schema_version": 1,
+  "artifact_role": "phase7_mutation_candidate_revision",
+  "source_artifact_role": "phase7_eval_to_mutate_handoff",
+  "source_artifact_schema_version": 1,
+  "lineage_metadata": {
+    "experiment_id": 3,
+    "version_label": "v3"
+  },
+  "selected_mutation_target": {
+    "target_id": "target-progressive-disclosure-read-when",
+    "target_location": "Progressive Disclosure",
+    "recommended_mutation_type": "modify"
+  },
+  "candidate_skill_revision": {
+    "format": "SKILL.md",
+    "content_type": "text/markdown",
+    "content": "# AutoRefine\n\nRead when: before expanding the answer, inspect the linked reference section."
+  },
+  "version_artifact": {
+    "version_id": "skill_version__run_2026-04-11T09-00-00__exp_003",
+    "snapshot_path": "skill-versions/skill_version__run_2026-04-11T09-00-00__exp_003/SKILL.md"
+  }
+}
 ```
+
+## Test Launch Payload
+```json
+{
+  "schema_version": 1,
+  "artifact_role": "phase7_mutation_to_test_launch",
+  "candidate_version": {
+    "version_id": "skill_version__run_2026-04-11T09-00-00__exp_003",
+    "snapshot_path": "skill-versions/skill_version__run_2026-04-11T09-00-00__exp_003/SKILL.md"
+  },
+  "source_artifact_refs": {
+    "mutation_artifact_ref": "runs/run_2026-04-11T09-00-00/iteration_003/mutation.md#mutation_artifact",
+    "candidate_revision_artifact_ref": "runs/run_2026-04-11T09-00-00/iteration_003/mutation.md#candidate_skill_revision",
+    "version_artifact_ref": "runs/run_2026-04-11T09-00-00/iteration_003/mutation.md#version_artifact",
+    "skill_after_ref": "runs/run_2026-04-11T09-00-00/iteration_003/skill_after.md"
+  },
+  "eval_artifact_refs": {
+    "eval_results_ref": "runs/run_2026-04-11T09-00-00/iteration_003/eval_results.json",
+    "mutation_handoff_ref": "runs/run_2026-04-11T09-00-00/iteration_003/eval_results.json#mutation_handoff",
+    "input_set_ref": "input-sets.json#phase4-dev-7f3c91ad",
+    "input_ids": [
+      "phase4-dev-7f3c91ad-I03",
+      "phase4-dev-7f3c91ad-I05"
+    ]
+  },
+  "test_bootstrap_metadata": {
+    "active_phase": "test",
+    "phase_status": "ready",
+    "next_action": "phase7_test_phase"
+  }
+}
+```
+~~~
 For baseline (iteration_000):
 ~~~markdown
 # Experiment 0 — Baseline
@@ -3826,7 +4014,7 @@ No mutation applied. This is the initial scoring run.
 **skill_before.md** — Full skill content before mutation was applied.
 For baseline: content is `N/A — this is the baseline scoring run.`
 
-**skill_after.md** — Full skill content after mutation (or current skill for baseline).
+**skill_after.md** — Full skill content after mutation (or current skill for baseline). For mutation iterations, `skill_after.md` must exactly mirror `mutation.md > Mutation Artifact > candidate_skill_revision.content`.
 
 **eval_results.json** — Per-eval results for this experiment.
 ```json
@@ -4055,6 +4243,451 @@ combined_score: [Z]%  |  threshold: [T]%
 | `<skill>-optimized-prev.md` | Single-level undo backup | No — iteration dir archives all versions |
 
 The iteration directory is the **forensic record** — it has everything. The other artifacts remain the **operational interfaces** for the dashboard, session resume, and undo.
+
+---
+
+## Challenger Mode Configuration Schema
+
+Read when: Phase 7 mutation analysis is about to branch into bounded challenger search for the current experiment.
+
+`challenger_mode` is the Phase 7 candidate-generation contract for the v4.2 research loop. It is not a second promotion system, not a new experiment lineage, and not a trust surface. Its job is to generate bounded candidate revisions on the same trusted dev-scored surface before one shortlisted winner re-enters the existing experiment path.
+
+### Authoritative Home
+
+Persist the configuration for one experiment at:
+
+```text
+runs/run_<timestamp>/iteration_<NNN>/challengers/challenger_mode.json
+```
+
+- This artifact is the single authoritative home for challenger search configuration for that experiment.
+- `state.json`, `results.json`, iteration `eval_results.json`, or dashboard payloads may store refs to this artifact, but must not duplicate the full config payload as a second authoritative copy.
+- The challenger config must never store `trust_gate`, holdout rows, or any promotion outcome. Final promotion remains authoritative only in `session_close_holdout/variant_results.json#trust_gate`.
+
+### challenger_mode.json
+
+```json
+{
+  "schema_version": 1,
+  "artifact_type": "challenger_mode_config",
+  "run_id": "run_2026-04-12T16-00-00",
+  "iteration_id": 4,
+  "authoritative_home": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/challenger_mode.json",
+  "enabled": true,
+  "execution_model": "isolated_pseudo_parallel",
+  "execution_backend": "sequential_copy_on_write",
+  "lane_count": 3,
+  "lane_order": [
+    "lane_01_incremental_cleanup",
+    "lane_02_simplification",
+    "lane_03_from_scratch"
+  ],
+  "lane_definitions": [
+    {
+      "lane_id": "lane_01_incremental_cleanup",
+      "lane_label": "Incremental Cleanup",
+      "lane_type": "incremental_cleanup",
+      "candidate_home": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/lane_01_incremental_cleanup/",
+      "enabled": true
+    },
+    {
+      "lane_id": "lane_02_simplification",
+      "lane_label": "Simplification",
+      "lane_type": "simplification",
+      "candidate_home": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/lane_02_simplification/",
+      "enabled": true
+    },
+    {
+      "lane_id": "lane_03_from_scratch",
+      "lane_label": "From Scratch",
+      "lane_type": "from_scratch",
+      "candidate_home": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/lane_03_from_scratch/",
+      "enabled": true
+    }
+  ],
+  "shared_input_surface": {
+    "dataset_split_id": "dev",
+    "input_set_id": "phase4-dev-7f3c91ad",
+    "input_set_ref": "input-sets.json#phase4-dev-7f3c91ad",
+    "input_ids": [
+      "phase4-dev-7f3c91ad-I03",
+      "phase4-dev-7f3c91ad-I05"
+    ],
+    "baseline_eval_results_ref": "runs/run_2026-04-12T16-00-00/iteration_003/eval_results.json",
+    "research_intake_ref": "research-intake.md",
+    "meta_learning_context_ref": "parsed_meta_learnings"
+  },
+  "plateau_breaker": {
+    "enabled": true,
+    "lane_id": "lane_03_from_scratch",
+    "trigger_mode": "in_run_only",
+    "trigger_conditions": [
+      "no_kept_candidate_in_current_run",
+      "repeated_discard_autopsy_classification"
+    ]
+  },
+  "shortlist_policy": {
+    "selection_mode": "automatic",
+    "approval_model": "reuse_existing_experiment_confirmation_flow",
+    "selection_formula": "dev_score_plus_stability",
+    "max_shortlist_size": 1
+  },
+  "lineage_policy": {
+    "lane_outputs_are_experiments": false,
+    "shortlist_winner_enters_experiment_lineage": true,
+    "shortlist_winner_may_create_version_artifact": true,
+    "rejected_lanes_remain_lane_local": true
+  },
+  "promotion_boundary": {
+    "mutation_time_surface": "iteration_<NNN>/challengers/shortlist.json",
+    "final_promotion_surface": "session_close_holdout/variant_results.json#trust_gate",
+    "holdout_access_during_lane_search": "forbidden"
+  }
+}
+```
+
+- `execution_model` is `isolated_pseudo_parallel` for v4.2. Lane logic is logically parallel but operationally isolated.
+- `execution_backend` may be `sequential_copy_on_write` for deterministic first-slice execution. True concurrent shared-file mutation is out of scope.
+- `lane_count` is fixed at `3` for the v4.2 slice.
+- `lane_order` is fixed and explicit for replay.
+- `shared_input_surface` is the authoritative statement that all lanes read the same trusted dev-scored surface. Do not attach holdout refs here.
+- `plateau_breaker.trigger_mode` must remain `in_run_only` for this slice. Do not trigger from holdout outcomes or cross-run trust behavior.
+- `shortlist_policy.selection_mode` is `automatic` for this slice. Do not add a second human gate before the existing experiment confirmation flow.
+- `lineage_policy.lane_outputs_are_experiments` must stay `false`. Lane artifacts are candidate-generation artifacts only.
+- `promotion_boundary.final_promotion_surface` must always point to the existing holdout artifact's `trust_gate` and must not be redefined anywhere in challenger-mode storage.
+
+## Challenger Lane Artifact Schema
+
+Read when: Phase 7 executes bounded challenger lanes for the current experiment.
+
+Each lane writes into its own copy-on-write directory under the current experiment iteration. Lane artifacts are candidate-generation artifacts only. They do not append directly to `results.json.experiments[]`, they do not create version labels, and they do not enter final promotion unless chosen by the shortlist.
+
+### Authoritative Homes
+
+Per-lane authoritative homes:
+
+```text
+runs/run_<timestamp>/iteration_<NNN>/challengers/lane_0N_<lane_type>/
+  candidate_SKILL.md
+  candidate_revision.json
+  lane_eval.json
+  lane_summary.md
+```
+
+- `candidate_SKILL.md` is the human-readable lane candidate snapshot for that lane only.
+- `candidate_revision.json` is the machine-readable canonical lane-candidate payload.
+- `lane_eval.json` is the machine-readable lane-local evaluation and shortlist-input payload.
+- `lane_summary.md` is a human-readable explanation surface only.
+- No lane artifact may write `trust_gate`, mutate `state.json.final_only_evaluation`, or claim promotion.
+
+### candidate_revision.json
+
+```json
+{
+  "schema_version": 1,
+  "artifact_type": "challenger_lane_candidate_revision",
+  "run_id": "run_2026-04-12T16-00-00",
+  "iteration_id": 4,
+  "lane_id": "lane_02_simplification",
+  "lane_type": "simplification",
+  "candidate_id": "candidate-run_2026-04-12T16-00-00-exp_004-lane_02_simplification",
+  "authoritative_home": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/lane_02_simplification/candidate_revision.json",
+  "source_candidate_kind": "shared_experiment_input",
+  "source_experiment_id": 3,
+  "source_eval_results_ref": "runs/run_2026-04-12T16-00-00/iteration_003/eval_results.json",
+  "mutation_family": "simplification",
+  "plateau_breaker_candidate": false,
+  "candidate_skill_ref": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/lane_02_simplification/candidate_SKILL.md",
+  "candidate_skill_sha256": "sha256:cbf0d699af9c6d7b...",
+  "inputs_used": {
+    "input_set_id": "phase4-dev-7f3c91ad",
+    "input_set_ref": "input-sets.json#phase4-dev-7f3c91ad",
+    "input_ids": [
+      "phase4-dev-7f3c91ad-I03",
+      "phase4-dev-7f3c91ad-I05"
+    ],
+    "research_intake_ref": "research-intake.md",
+    "meta_learning_context_ref": "parsed_meta_learnings"
+  },
+  "change_summary": {
+    "mutation_type": "modify",
+    "changed_sections": [
+      "Progressive Disclosure",
+      "Mutation Handoff"
+    ],
+    "hypothesis": "Reduce instruction sprawl while preserving the current trusted phase boundaries."
+  }
+}
+```
+
+### lane_eval.json
+
+```json
+{
+  "schema_version": 1,
+  "artifact_type": "challenger_lane_eval",
+  "run_id": "run_2026-04-12T16-00-00",
+  "iteration_id": 4,
+  "lane_id": "lane_02_simplification",
+  "candidate_id": "candidate-run_2026-04-12T16-00-00-exp_004-lane_02_simplification",
+  "authoritative_home": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/lane_02_simplification/lane_eval.json",
+  "evaluation_surface": {
+    "split_id": "dev",
+    "input_set_id": "phase4-dev-7f3c91ad",
+    "input_set_ref": "input-sets.json#phase4-dev-7f3c91ad",
+    "input_ids": [
+      "phase4-dev-7f3c91ad-I03",
+      "phase4-dev-7f3c91ad-I05"
+    ],
+    "holdout_used": false
+  },
+  "selection_metrics": {
+    "dev_combined_score_pct": 81.2,
+    "baseline_delta_pct": 4.3,
+    "stability_signal": "stable",
+    "regression_flag": false
+  },
+  "selection_verdict": {
+    "eligible_for_shortlist": true,
+    "shortlist_rank": 1,
+    "selection_reason": "Highest dev-score gain without regression on the shared dev surface."
+  },
+  "lineage_boundary": {
+    "is_experiment_record": false,
+    "is_version_artifact": false,
+    "requires_shortlist_win_for_lineage_entry": true
+  }
+}
+```
+
+- Lane-local `selection_metrics` are directional shortlist inputs only. They are not final promotion metrics.
+- `evaluation_surface.holdout_used` must always be `false` for lane artifacts.
+- `lineage_boundary` makes the experiment/version boundary explicit in the artifact itself so retrieval consumers do not accidentally treat every lane as a first-class experiment.
+
+## Challenger Shortlist Artifact Schema
+
+Read when: Phase 7 finishes lane evaluation and needs one winner to re-enter the existing experiment path.
+
+The shortlist artifact is the only mutation-time machine-readable promotion surface inside challenger mode. It chooses at most one winner and defines how that winner re-enters the normal experiment/version lineage. This artifact does not contain or replace final promotion.
+
+### Authoritative Home
+
+Persist the shortlist artifact at:
+
+```text
+runs/run_<timestamp>/iteration_<NNN>/challengers/shortlist.json
+```
+
+- This is the single authoritative home for the mutation-time shortlist outcome.
+- Only the shortlist winner may be copied into the current experiment's normal mutation artifact and later become a version artifact.
+- Rejected lane candidates remain lane-local only and must never be injected directly into `results.json.experiments[]`.
+
+### shortlist.json
+
+```json
+{
+  "schema_version": 1,
+  "artifact_type": "challenger_shortlist",
+  "run_id": "run_2026-04-12T16-00-00",
+  "iteration_id": 4,
+  "authoritative_home": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/shortlist.json",
+  "challenger_mode_ref": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/challenger_mode.json",
+  "selection_mode": "automatic",
+  "selection_formula": "dev_score_plus_stability",
+  "selected_lane_id": "lane_02_simplification",
+  "selected_candidate_id": "candidate-run_2026-04-12T16-00-00-exp_004-lane_02_simplification",
+  "selected_candidate_refs": {
+    "candidate_revision_ref": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/lane_02_simplification/candidate_revision.json",
+    "lane_eval_ref": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/lane_02_simplification/lane_eval.json",
+    "candidate_skill_ref": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/lane_02_simplification/candidate_SKILL.md"
+  },
+  "ranked_candidates": [
+    {
+      "lane_id": "lane_02_simplification",
+      "candidate_id": "candidate-run_2026-04-12T16-00-00-exp_004-lane_02_simplification",
+      "rank": 1,
+      "eligible_for_shortlist": true
+    },
+    {
+      "lane_id": "lane_01_incremental_cleanup",
+      "candidate_id": "candidate-run_2026-04-12T16-00-00-exp_004-lane_01_incremental_cleanup",
+      "rank": 2,
+      "eligible_for_shortlist": true
+    },
+    {
+      "lane_id": "lane_03_from_scratch",
+      "candidate_id": "candidate-run_2026-04-12T16-00-00-exp_004-lane_03_from_scratch",
+      "rank": 3,
+      "eligible_for_shortlist": false
+    }
+  ],
+  "lineage_action": {
+    "enter_existing_experiment_lineage": true,
+    "lineage_entry_scope": "current_experiment_only",
+    "may_create_version_artifact_if_kept": true,
+    "rejected_candidates_remain_lane_local": true
+  },
+  "approval_flow": {
+    "adds_new_human_gate": false,
+    "reuse_existing_experiment_confirmation_flow": true
+  },
+  "final_promotion_boundary": {
+    "final_promotion_surface": "session_close_holdout/variant_results.json#trust_gate",
+    "trust_gate_written_here": false
+  }
+}
+```
+
+- `selected_candidate_refs` point to the winner's existing lane-local artifacts. Do not inline those payloads again here.
+- `lineage_action.enter_existing_experiment_lineage` means exactly one shortlisted winner may continue as Experiment `N`.
+- `approval_flow.adds_new_human_gate` must stay `false` for v4.2. Existing experiment confirmation remains the only human gate before Session Close.
+- `final_promotion_boundary.trust_gate_written_here` must stay `false`. `shortlist.json` never becomes a trust artifact.
+
+## Session Close Research-Memory Artifact Schema
+
+Read when: Session Close summarizes what the bounded challenger search learned during the active run.
+
+The research-memory artifact is run-local memory for the active Phase 7 run. It captures what challenger lanes were tried, which mutation families worked or failed, whether the plateau breaker helped, and how the shortlist resolved. It is not a curated cross-campaign rule store and it does not replace `meta-learnings.md`.
+
+### Authoritative Home
+
+Persist the artifact at:
+
+```text
+runs/run_<timestamp>/session_close/research-memory.json
+```
+
+- This is the single authoritative machine-readable home for run-local challenger research memory.
+- Session Close may summarize this artifact elsewhere for humans, but no second machine-readable copy becomes authoritative.
+- The artifact must not auto-promote itself into curated cross-campaign learnings. Human curation remains required before any rule enters `meta-learnings.md`.
+
+### research-memory.json
+
+```json
+{
+  "schema_version": 1,
+  "artifact_type": "challenger_research_memory",
+  "run_id": "run_2026-04-12T16-00-00",
+  "authoritative_home": "runs/run_2026-04-12T16-00-00/session_close/research-memory.json",
+  "challenger_mode_run": true,
+  "source_shortlist_ref": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/shortlist.json",
+  "iterations_with_challenger_mode": [
+    4
+  ],
+  "lane_outcomes": [
+    {
+      "iteration_id": 4,
+      "lane_id": "lane_01_incremental_cleanup",
+      "candidate_id": "candidate-run_2026-04-12T16-00-00-exp_004-lane_01_incremental_cleanup",
+      "mutation_family": "incremental_cleanup",
+      "activation_status": "executed",
+      "shortlisted": false,
+      "outcome": "rejected",
+      "failure_mode": "insufficient_gain",
+      "candidate_revision_ref": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/lane_01_incremental_cleanup/candidate_revision.json",
+      "lane_eval_ref": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/lane_01_incremental_cleanup/lane_eval.json"
+    },
+    {
+      "iteration_id": 4,
+      "lane_id": "lane_02_simplification",
+      "candidate_id": "candidate-run_2026-04-12T16-00-00-exp_004-lane_02_simplification",
+      "mutation_family": "simplification",
+      "activation_status": "executed",
+      "shortlisted": true,
+      "outcome": "winner",
+      "failure_mode": null,
+      "candidate_revision_ref": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/lane_02_simplification/candidate_revision.json",
+      "lane_eval_ref": "runs/run_2026-04-12T16-00-00/iteration_004/challengers/lane_02_simplification/lane_eval.json"
+    },
+    {
+      "iteration_id": 4,
+      "lane_id": "lane_03_from_scratch",
+      "candidate_id": null,
+      "mutation_family": "from_scratch",
+      "activation_status": "skipped",
+      "shortlisted": false,
+      "outcome": "skipped",
+      "failure_mode": null,
+      "candidate_revision_ref": null,
+      "lane_eval_ref": null
+    }
+  ],
+  "plateau_breaker_summary": {
+    "triggered": false,
+    "trigger_mode": "in_run_only",
+    "trigger_reason": null,
+    "lane_id": "lane_03_from_scratch",
+    "helpfulness": "not_triggered"
+  },
+  "shortlist_summary": {
+    "selected_lane_id": "lane_02_simplification",
+    "selected_candidate_id": "candidate-run_2026-04-12T16-00-00-exp_004-lane_02_simplification",
+    "selection_mode": "automatic",
+    "selection_formula": "dev_score_plus_stability"
+  },
+  "final_trust_review": {
+    "evaluated": true,
+    "selected_candidate_experiment_id": 4,
+    "trust_gate_outcome": "review_required",
+    "dev_gain_survived_final_trust_review": false,
+    "holdout_artifact_ref": "runs/run_2026-04-12T16-00-00/session_close_holdout/variant_results.json",
+    "reason": "Selected candidate improved the dev score but did not clear final trust promotion."
+  },
+  "promotion_boundary": {
+    "run_local_memory_only": true,
+    "auto_promote_to_meta_learnings": false,
+    "final_promotion_surface": "session_close_holdout/variant_results.json#trust_gate"
+  }
+}
+```
+
+- `lane_outcomes[]` is the replayable lane-result ledger for the run.
+- `lane_outcomes[].activation_status` must record whether a lane executed or was skipped/dormant so replay/reporting does not have to infer lane absence from missing files.
+- `failure_mode` should stay compact and machine-readable; prefer bounded reason codes over long prose.
+- `plateau_breaker_summary` records the from-scratch challenger effect without turning it into a promotion rule.
+- `final_trust_review` records whether the selected candidate's dev gains survived the existing final trust path. This stays run-local memory only; it does not become a second promotion surface.
+- `promotion_boundary.auto_promote_to_meta_learnings` must remain `false`.
+- `promotion_boundary.final_promotion_surface` makes the trust boundary explicit: research memory may explain the run, but only the existing `trust_gate` decides final promotion.
+
+## Challenger Session-Log Entry Types
+
+Read when: Phase 7 challenger-mode orchestration or Session Close research-memory persistence needs a structured audit event.
+
+Use these additive session-log entry types when v4.2 challenger mode is active:
+
+### `challenger_mode_started`
+
+```json
+{"phase":"7","type":"challenger_mode_started","run_id":"run_2026-04-12T16-00-00","iteration_id":4,"config_ref":"runs/run_2026-04-12T16-00-00/iteration_004/challengers/challenger_mode.json","execution_model":"isolated_pseudo_parallel","lane_ids":["lane_01_incremental_cleanup","lane_02_simplification","lane_03_from_scratch"]}
+```
+
+### `challenger_lane_completed`
+
+```json
+{"phase":"7","type":"challenger_lane_completed","run_id":"run_2026-04-12T16-00-00","iteration_id":4,"lane_id":"lane_02_simplification","candidate_id":"candidate-run_2026-04-12T16-00-00-exp_004-lane_02_simplification","candidate_revision_ref":"runs/run_2026-04-12T16-00-00/iteration_004/challengers/lane_02_simplification/candidate_revision.json","lane_eval_ref":"runs/run_2026-04-12T16-00-00/iteration_004/challengers/lane_02_simplification/lane_eval.json","eligible_for_shortlist":true}
+```
+
+### `challenger_plateau_breaker_triggered`
+
+```json
+{"phase":"7","type":"challenger_plateau_breaker_triggered","run_id":"run_2026-04-12T16-00-00","iteration_id":4,"lane_id":"lane_03_from_scratch","trigger_mode":"in_run_only","trigger_reason":"repeated_discard_autopsy_classification"}
+```
+
+### `challenger_shortlist_selected`
+
+```json
+{"phase":"7","type":"challenger_shortlist_selected","run_id":"run_2026-04-12T16-00-00","iteration_id":4,"shortlist_ref":"runs/run_2026-04-12T16-00-00/iteration_004/challengers/shortlist.json","selected_lane_id":"lane_02_simplification","selected_candidate_id":"candidate-run_2026-04-12T16-00-00-exp_004-lane_02_simplification","enters_existing_experiment_lineage":true}
+```
+
+### `challenger_research_memory_written`
+
+```json
+{"phase":"7","type":"challenger_research_memory_written","run_id":"run_2026-04-12T16-00-00","research_memory_ref":"runs/run_2026-04-12T16-00-00/session_close/research-memory.json","auto_promote_to_meta_learnings":false,"final_promotion_surface":"session_close_holdout/variant_results.json#trust_gate"}
+```
+
+- These entries are audit events only. They do not replace the authoritative JSON artifacts.
+- `challenger_shortlist_selected.enters_existing_experiment_lineage = true` is the session-log mirror of the lineage boundary: only the shortlist winner enters the existing experiment/version path.
+- `challenger_research_memory_written.final_promotion_surface` must always point back to the existing holdout artifact's `trust_gate`, not to the new research-memory artifact.
 
 ---
 
@@ -4453,6 +5086,7 @@ Pattern-specific downstream rules:
 Valid values: `"tool_wrapper"`, `"generator"`, `"reviewer"`, `"inversion"`, or `"pipeline"`.
 Persist exactly one canonical pattern ID in `phase1_context.selected_skill_pattern` and exactly one canonical strategy ID in `phase1_context.selected_eval_strategy_id` for the active run. Do not write candidate arrays, hybrid labels, or secondary-pattern lists into the run-scoped Phase 1 context.
 Gate all downstream Phase 1 processing on `phase1_context.selected_skill_pattern` and `phase1_context.selected_eval_strategy_id` being captured for the active run.
+Gate all downstream Phase 1 processing on `phase1_context.selected_skill_pattern` being captured for the active run.
 If `phase1_context.selected_skill_pattern` is null, missing, empty, or mismatched with `state.json.skill_pattern`, stop Phase 1 immediately and rerun Step 0 before scoring any dimension.
 If `phase1_context.selected_eval_strategy_id` is null, missing, empty, or does not map back to the same `selected_skill_pattern` through `Pattern-to-Evaluation-Strategy Selector`, stop Phase 1 immediately and rerun strategy selection before scoring any dimension.
 When the classifier-orchestration boundary rejects a payload, emit a structured stop payload instead of silently repairing the result.
@@ -4547,7 +5181,7 @@ for category in ["structural", "task-completion", "quality"]:
 
 Read when: Phase 7 (after kept mutation) or Session Close (version summary).
 
-The version registry is a **derived view** — it is computed on demand from `results.json`, not stored as a separate file.
+The version registry is a **derived view** — it is computed on demand from `results.json`, not stored as a separate file. The derived registry assigns human-facing lineage labels (`v0`, `v1`, ...) over finalized baseline/keep experiments, while each underlying experiment still keeps its immutable `version_artifact.version_id` and stored snapshot path. Use `version_artifact.lineage_store_path` plus `skill-versions/lineage.json` whenever the caller needs parent-child traversal rather than the filtered baseline/keep timeline.
 
 ### Computation
 
@@ -4568,8 +5202,10 @@ for exp in sorted(experiments, key=lambda e: e["id"]):
     if exp["status"] in ("baseline", "keep"):
         run_path = exp_to_run.get(exp["id"], current_run)
         version_label = f"v{len(versions)}"
+        version_artifact = exp.get("version_artifact") or {}
         versions.append({
             "version": version_label,
+            "version_id": version_artifact.get("version_id"),
             "experiment_id": exp["id"],
             "status": exp["status"],
             "score": exp.get("decision_breakdown", {}).get("combined_score_pct"),
@@ -4577,12 +5213,17 @@ for exp in sorted(experiments, key=lambda e: e["id"]):
             "completion_cadence": exp.get("completion_cadence"),
             "requires_human_spot_check": exp.get("requires_human_spot_check"),
             "iteration_path": f"{run_path}iteration_{exp['id']:03d}/",
-            "skill_snapshot": f"{run_path}iteration_{exp['id']:03d}/skill_after.md"
+            "skill_snapshot": (
+                version_artifact.get("snapshot_path")
+                or f"{run_path}iteration_{exp['id']:03d}/skill_after.md"
+            ),
+            "version_artifact": version_artifact or None
         })
 ```
 
 Carry the stored `completion_cadence` snapshot through the derived view unchanged. This lets dashboards or production consumers read the finalized cadence position for each version without recomputing it from partial run history.
 Carry the stored `requires_human_spot_check` flag through the derived view unchanged. Do not recompute it from version index, cadence order, or filtered experiment order.
+Carry the stored `version_artifact` object through unchanged when it exists. Do not rebuild `version_id`, `artifact_path`, or `snapshot_sha256` from the derived label or iteration path on the retrieval path.
 
 ### Version Labels
 
@@ -4842,9 +5483,9 @@ Skill diff (v1 -> v3):  [expandable]
 
 ### Skill Diff
 
-Show a markdown diff of the skill content between versions. Use the `skill_after.md` files from each version's iteration directory:
-- Left: `runs/.../iteration_{left_exp}/skill_after.md`
-- Right: `runs/.../iteration_{right_exp}/skill_after.md`
+Show a markdown diff of the skill content between versions. Prefer the immutable `version_artifact.snapshot_path` from each derived registry row, falling back to the legacy iteration snapshot only when the version artifact is absent:
+- Left: `skill-versions/<left_version_id>/SKILL.md` (fallback: `runs/.../iteration_{left_exp}/skill_after.md`)
+- Right: `skill-versions/<right_version_id>/SKILL.md` (fallback: `runs/.../iteration_{right_exp}/skill_after.md`)
 
 Collapse by default — show only on user expansion. Highlight additions, deletions, and modifications.
 
