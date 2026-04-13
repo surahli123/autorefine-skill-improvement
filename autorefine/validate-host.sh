@@ -1,7 +1,8 @@
 #!/bin/bash
 # AutoRefine Host Validation
-# Tests whether your agent supports Read when: progressive disclosure.
-# Run once per agent platform. Result determines v2 line budget strategy.
+# Tests whether your agent respects `Read when:` progressive disclosure
+# inside a skill file. Run once per agent platform to understand how
+# much gated content the host may still load eagerly.
 #
 # Usage: bash autorefine/validate-host.sh
 
@@ -38,9 +39,9 @@ This section should only load when Phase 3 is active.
 AUTOREFINE_RW_PROBE_c4f9e2
 
 If you can see the line above, your agent loads the entire SKILL.md
-regardless of Read when: tags. This is not a bug — it just means
-AutoRefine v2 will use references.md for new content instead of
-progressive disclosure within SKILL.md.
+regardless of Read when: tags. This is not a bug — it means gated
+sections inside a single file are advisory for your host rather than
+strictly hidden until the matching phase is active.
 SKILL_EOF
 
 # --- Print instructions ---
@@ -79,15 +80,16 @@ HAS_HIDDEN=$(echo "$RESPONSE" | grep -c "$MARKER" || true)
 if [ "$HAS_VISIBLE" -gt 0 ] && [ "$HAS_HIDDEN" -eq 0 ]; then
     echo "  RESULT: PASS"
     echo ""
-    echo "  Your agent respects Read when: tags."
-    echo "  AutoRefine v2 will use progressive disclosure in SKILL.md."
-    echo "  Line budget: ~620 lines."
+    echo "  Your agent respects Read when: tags inside a skill file."
+    echo "  AutoRefine can rely on gated in-file progressive disclosure"
+    echo "  when support docs or long sections need phase-specific loading."
 elif [ "$HAS_VISIBLE" -gt 0 ] && [ "$HAS_HIDDEN" -gt 0 ]; then
     echo "  RESULT: FAIL (not a problem)"
     echo ""
     echo "  Your agent loads the entire SKILL.md regardless of Read when: tags."
-    echo "  AutoRefine v2 will put new content in references.md instead."
-    echo "  Line budget: ~500 lines for SKILL.md, overflow to references.md."
+    echo "  AutoRefine still works, but expect gated sections in a single file"
+    echo "  to be loaded eagerly. Prefer the shipped support docs under"
+    echo "  autorefine/references/ when you need to keep the entrypoint lean."
 elif [ "$HAS_VISIBLE" -eq 0 ]; then
     echo "  RESULT: INCONCLUSIVE"
     echo ""

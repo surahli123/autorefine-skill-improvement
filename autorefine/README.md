@@ -27,7 +27,6 @@ The shipped shell also includes the Phase 1 design-audit dimensions, including a
 - `references.md` — templates, schemas, rubrics, and detail contracts
 - `dashboard.html` — local run dashboard
 - `validate-host.sh` — host capability check
-- `hooks/` — bundle hooks
 - `lib/` — runtime helper code used by the bundle
 - `meta-learnings.md` — curated cross-campaign learning input
 
