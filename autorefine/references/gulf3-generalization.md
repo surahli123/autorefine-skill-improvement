@@ -215,7 +215,7 @@ Before showing any baseline → final or Version N → Version N+1 results, appl
 
 ### Per-Category Score Report (v4.0)
 
-If eval category tags are present (see `SKILL-gulf2.md > Phase 5`), report separate scores per category:
+If eval category tags are present (see `references/gulf2-specification.md > Phase 5`), report separate scores per category:
 ```
 Score by category:
   task-completion: 100% (3/3 evals passing)

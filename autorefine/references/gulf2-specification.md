@@ -40,7 +40,7 @@ Type: agent-as-judge | Category: task-completion
 ...
 ```
 
-These tags enable per-category score reporting at Session Close (see `SKILL-gulf3.md > Session Close`). Schema details: `references.md > Eval Category Tags Schema`.
+These tags enable per-category score reporting at Session Close (see `references/gulf3-generalization.md > Session Close`). Schema details: `references.md > Eval Category Tags Schema`.
 
 **Step 2: Build code-based evaluators.** One-liner or short script per eval. Test on 3 dev fixtures.
 
@@ -71,4 +71,4 @@ Generate `gate-report-gulf-2.md` with: classification, TPR/TNR per judge, code e
 
 ---
 
-After Gulf 2 gate is approved → read `SKILL-gulf3.md` for Phase 7 + Session Close.
+After Gulf 2 gate is approved → read `references/gulf3-generalization.md` for Phase 7 + Session Close.

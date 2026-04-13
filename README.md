@@ -52,9 +52,9 @@ Phase 1 audits the skill across gotchas, voice, progressive disclosure, anti-rai
 The installable runtime lives under [`autorefine/`](autorefine/). That bundle contains:
 
 - `SKILL.md`
-- `SKILL-gulf1.md`
-- `SKILL-gulf2.md`
-- `SKILL-gulf3.md`
+- `references/gulf1-comprehension.md`
+- `references/gulf2-specification.md`
+- `references/gulf3-generalization.md`
 - `references.md`
 - `dashboard.html`
 - `validate-host.sh`

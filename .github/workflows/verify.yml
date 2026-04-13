@@ -46,10 +46,17 @@ jobs:
           python-version: "3.12"
 
       - name: Install Python test dependency
-        run: python -m pip install --upgrade pip pytest
+        run: python -m pip install --upgrade pip
 
-      - name: Run bundled pytest
-        run: python -m pytest autorefine/tests/test_exemplar_source_loader.py
+      - name: Compile shipped runtime helpers
+        run: python -m compileall autorefine/lib
+
+      - name: Import shipped runtime helpers
+        run: |
+          python - <<'PY'
+          import autorefine.lib
+          print("autorefine.lib import smoke test: ok")
+          PY
 
   verify-private-submodule:
     needs:

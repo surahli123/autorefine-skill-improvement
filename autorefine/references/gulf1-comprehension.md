@@ -172,4 +172,4 @@ Generate `gate-report-gulf-1.md` with: sample stats, fail rate, categories, cons
 
 ---
 
-After Gulf 1 gate is approved → read `SKILL-gulf2.md` for Phases 4-6.
+After Gulf 1 gate is approved → read `references/gulf2-specification.md` for Phases 4-6.
