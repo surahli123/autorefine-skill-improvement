@@ -34,12 +34,12 @@ The shipped shell also includes the Phase 1 design-audit dimensions, including a
 
 Repo-maintenance shell tests, internal plans, handovers, and research notes are intentionally kept outside this directory.
 
-If you are looking for user-facing docs, start here:
+If you installed this bundle outside the repo, the broader user-facing docs live on GitHub:
 
-- [`../README.md`](../README.md)
-- [`../docs/quickstart.md`](../docs/quickstart.md)
-- [`../docs/methodology.md`](../docs/methodology.md)
-- [`../docs/trust-model.md`](../docs/trust-model.md)
+- [`README.md`](https://github.com/surahli123/autorefine-skill-improvement/blob/main/README.md)
+- [`docs/quickstart.md`](https://github.com/surahli123/autorefine-skill-improvement/blob/main/docs/quickstart.md)
+- [`docs/methodology.md`](https://github.com/surahli123/autorefine-skill-improvement/blob/main/docs/methodology.md)
+- [`docs/trust-model.md`](https://github.com/surahli123/autorefine-skill-improvement/blob/main/docs/trust-model.md)
 
 ## Notes
 
