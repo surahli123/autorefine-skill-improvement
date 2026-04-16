@@ -6,6 +6,166 @@ Downstream phase-entry contract: on entry to Quick Start QS Step 2-4, Phase 2, o
 
 ---
 
+## Phase 0.5: Contract Collection
+
+Read when: starting a new campaign with no contract, or `state.json.contract_status` is null, `"not_started"`, `"collecting"`, or `"inferred"`.
+
+> **Optional but transformative.** 9 examples take ~15 min and anchor every downstream eval. Skip if you want generic eval generation (current behavior).
+
+### Resume Detection
+
+On entry, read `state.json.contract_status`:
+- `null` or `"not_started"` → proceed to Step 1 (Offer Contract)
+- `"collecting"` → skip to mid-wizard resume: inspect which JSONL files exist in `[workspace]/contract/` and count rows. Resume at the next incomplete step (success/failure/DNT collection).
+- `"inferred"` → skip to Step 6 (Author Correction Loop), reading the existing `[workspace]/contract/inferred-contract.md`.
+- `"confirmed"` or `"skipped"` → do not enter Phase 0.5, proceed to Phase 1 (routing handled by SKILL.md).
+
+### Step 1: Offer Contract (1 min)
+
+Present to user:
+```
+Your skill is loaded. Before building evals, I can collect 9 examples that define
+what "effective" means for THIS skill:
+  - 3 success examples (what done-right looks like)
+  - 3 failure examples (what must never happen)
+  - 3 do-not-trigger examples (when the skill should stay quiet)
+
+This takes ~15 min and makes every downstream eval more targeted.
+
+A) Collect examples (recommended — 15 min)
+B) Skip — use generic eval generation
+```
+
+If user chooses B: set `state.json.contract_status = "skipped"`, log `{"phase":"0.5","type":"contract_skipped"}` to session-log.json, and proceed to Phase 1.
+
+If user chooses A: set `state.json.contract_status = "collecting"`, ensure `[workspace]/contract/` exists (created by workspace init in SKILL.md), then proceed to Step 2.
+
+### Step 2: Collect Success Examples (5 min)
+
+Collect 3 success examples one at a time. For each:
+
+1. Ask: "Describe a scenario where your skill works correctly. What's the input?"
+2. After user provides input, ask: "What should the output look like? Describe the shape (not exact text)."
+3. Ask: "Can you paste or write a concrete example output?" (This becomes `actual_output`.)
+4. Auto-generate `output_shape.schema` from the description + actual_output:
+   - If output looks structured (JSON, lists, tables): generate a JSON Schema draft and show it with: "I generated a schema from your example. Keep it, edit it, or skip?"
+   - If output is prose/unstructured: set `schema: null`, say: "Output is unstructured — I'll use the description for judging."
+5. Write row to `[workspace]/contract/success-examples.jsonl` using `references.md > Contract Example Schema > Success Example Row`. Assign `id: "success-N"` where N increments from 1.
+
+After 3 success examples, print: "Got 3 success examples. Next: 3 failure examples."
+
+### Step 3: Collect Failure Examples (5 min)
+
+Collect 3 failure examples one at a time. For each:
+
+1. Ask: "Describe a scenario where your skill fails or produces unacceptable output. What's the input?"
+2. Ask: "What did the skill produce (or what would bad output look like)?"
+3. Ask: "Why is this unacceptable? (one sentence)"
+4. Write row to `[workspace]/contract/failure-examples.jsonl` using `references.md > Contract Example Schema > Failure Example Row`. Assign `id: "failure-N"` where N increments from 1.
+
+After 3 failure examples, print: "Got 3 failure examples. Next: 3 do-not-trigger examples."
+
+### Step 4: Collect Do-Not-Trigger Examples (3 min)
+
+Collect 3 do-not-trigger examples one at a time. For each:
+
+1. Ask: "Describe an input that LOOKS like it's for your skill but should NOT activate it. What's the input?"
+2. Ask: "What should happen? (one of: decline / route_elsewhere / ignore)"
+3. Write row to `[workspace]/contract/do-not-trigger-examples.jsonl` using `references.md > Contract Example Schema > Do-Not-Trigger Example Row`. Assign `id: "dnt-N"` where N increments from 1.
+
+After 3 do-not-trigger examples: set `state.json.contract_status = "inferred"` to mark collection complete, then print: "Got all 9 examples. Generating your effectiveness contract..."
+
+### Step 5: Generate Inferred Contract (2 min)
+
+Read all 9 examples from the 3 JSONL files in `[workspace]/contract/`. Generate `[workspace]/contract/inferred-contract.md` using `references.md > Inferred Contract Template`.
+
+For each section, cite which example IDs informed it. Apply these inference rules:
+- **Intent**: synthesize from success examples — what common job do they describe?
+- **Success Criteria**: merge `output_shape.description` fields from success examples
+- **Non-Goals**: derive from do-not-trigger examples — what adjacent tasks are out of scope?
+- **Must-Catch Failure Modes**: rank failure examples by severity (from `failure_reason`), extract the pattern
+- **Trigger Conditions**: success inputs = should-fire, do-not-trigger inputs = should-not-fire
+- **Domain Metric**: run Phase 1 pattern classification on the skill. If pattern suggests a domain metric (see `references.md > Skill Pattern Eval Strategy`), propose it with threshold and reasoning. Otherwise set "null — no domain metric applies".
+- **Evaluation Dimensions**: propose which Phase 5 eval categories map to which contract sections (e.g., Success Criteria → task-completion evals, Must-Catch Failure Modes → quality evals)
+
+Save the generated file. Do NOT advance state yet — wait for Step 6 corrections.
+
+### Step 6: Author Correction Loop (2 min)
+
+Present inferred-contract.md to the user section by section. For each section:
+
+```
+--- INTENT ---
+[inferred intent text]
+
+Based on: success-1, success-2, success-3
+
+Correct? (y to accept / paste corrected text)
+```
+
+For each correction:
+- Record in the Correction Log section with `ORIGINAL:` (exact prior text, max 3 lines) and `CORRECTED:` (new text) blocks.
+- Check if dependent sections need updating:
+  - Corrected Intent → re-check Non-Goals alignment
+  - Corrected Success Criteria → re-check Evaluation Dimensions mapping
+  - Corrected Non-Goals → re-check Trigger Conditions
+- If a dependency check flags a mismatch, surface it: "Your correction to Intent may affect Non-Goals. Want me to re-infer? (y/n)"
+
+Log each correction to session-log.json:
+```
+{"phase":"0.5","type":"contract_correction","section":"intent|success_criteria|...","section_index":N}
+```
+
+### Step 7: Domain Eval Setup (optional, 2 min)
+
+If Step 5's inferred contract has a non-null Domain Metric section (pattern classification suggested one):
+
+Present to user:
+```
+Based on your skill's pattern (PATTERN_NAME), I think the right effectiveness metric is:
+  Metric: [suggested metric, e.g., NDCG@5]
+  Reasoning: [why this metric fits your skill's domain]
+  Threshold: [suggested pass threshold]
+
+Options:
+A) Use this metric — I'll generate the eval script, you provide labeled data
+B) Use a different metric — you specify
+C) Bring your own eval script + golden set — provide paths
+D) Skip domain eval — use LLM judges only (current default)
+```
+
+Handle each option:
+- **A**: generate `[workspace]/domain-eval/eval-metric.py` and `[workspace]/domain-eval/config.json` using `references.md > Domain Eval Config Schema`. Set `author_confirmed: true`. Tell user: "When you have labeled data, save it to `[workspace]/domain-eval/golden-set.jsonl` and domain eval will activate in Phase 7." Set `state.json.domain_eval_config_path = [workspace]/domain-eval/config.json`.
+- **B**: ask for metric name + threshold. Generate script + config.json with those values. Set `author_confirmed: true` and `suggested_by_autorefine: false`. Set `state.json.domain_eval_config_path`.
+- **C**: ask for paths to eval script + golden set. Validate the files exist. Generate config.json pointing at those paths with `suggested_by_autorefine: false` and `author_confirmed: true`. Set `state.json.domain_eval_config_path`.
+- **D**: leave `state.json.domain_eval_config_path = null`. Continue to Step 8.
+
+If Step 5 produced no Domain Metric (pattern classification found no applicable metric): skip Step 7 entirely, continue to Step 8.
+
+### Step 8: Finalize Contract
+
+Set `state.json.contract_status = "confirmed"`. Set `state.json.contract_path = "[workspace]/contract/"`.
+
+Log to session-log.json:
+```json
+{"phase":"0.5","type":"contract_confirmed","success_count":3,"failure_count":3,"dnt_count":3,"domain_eval":"configured|skipped","corrections":N,"pattern_classification":"pattern_name"}
+```
+
+Print:
+```
+Contract confirmed.
+  9 examples saved to [workspace]/contract/
+  Inferred contract: [workspace]/contract/inferred-contract.md
+  Domain eval: [configured with METRIC | skipped]
+  Author corrections: N
+
+Moving to Phase 1 Design Audit + Effectiveness Floor...
+```
+
+Proceed to Phase 1.
+
+---
+
 ## Quick Start Path
 
 Read when: Quick Start path active (State 1 from Preflight routing).
