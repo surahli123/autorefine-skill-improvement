@@ -13794,10 +13794,17 @@ async function fetchState() {
 // Render the Effectiveness Floor card from state.effectiveness_floor.
 // Card stays hidden (display:none) when the field is absent.
 function renderFloor(state) {
-  const floor = state && state.effectiveness_floor;
-  if (!floor) return;
   const card = document.getElementById('floor-card');
   if (!card) return;
+  const floor = state && state.effectiveness_floor;
+  if (!floor) {
+    card.style.display = 'none';
+    const tbody = document.getElementById('floor-dimensions');
+    if (tbody) tbody.innerHTML = '';
+    const overall = document.getElementById('floor-overall');
+    if (overall) { overall.textContent = ''; overall.className = 'floor-overall'; }
+    return;
+  }
   card.style.display = 'block';
 
   const overall = document.getElementById('floor-overall');
@@ -13811,9 +13818,9 @@ function renderFloor(state) {
     const name = d.name || d.id || 'Unknown';
     const status = d.status || 'unknown';
     const evidence = d.evidence || '';
-    row.innerHTML = '<td>' + name + '</td>' +
-                    '<td class="floor-' + status + '">' + status + '</td>' +
-                    '<td>' + evidence + '</td>';
+    row.innerHTML = '<td>' + escapeHtml(name) + '</td>' +
+                    '<td class="floor-' + escapeHtml(status) + '">' + escapeHtml(status) + '</td>' +
+                    '<td>' + escapeHtml(evidence) + '</td>';
     tbody.appendChild(row);
   });
 }
@@ -13822,11 +13829,19 @@ function renderFloor(state) {
 // Card stays hidden when contract_status !== 'confirmed' in state.json.
 // Detail table appears only when results.json has contract_effectiveness data.
 function renderContract(state, results) {
-  const status = state && state.contract_status;
-  if (status !== 'confirmed') return;
-
   const card = document.getElementById('contract-card');
   if (!card) return;
+  const status = state && state.contract_status;
+  if (status !== 'confirmed') {
+    card.style.display = 'none';
+    const summary = document.getElementById('contract-summary');
+    if (summary) summary.innerHTML = '';
+    const table = document.getElementById('contract-table');
+    if (table) table.style.display = 'none';
+    const tbody = document.getElementById('contract-details');
+    if (tbody) tbody.innerHTML = '';
+    return;
+  }
   card.style.display = 'block';
 
   const summary = document.getElementById('contract-summary');
@@ -13844,11 +13859,11 @@ function renderContract(state, results) {
   const domainMetric   = contractResult.domain_metric           || null;
 
   summary.innerHTML =
-    'Success: <strong>' + successPass + '/3</strong> &middot; ' +
-    'Failures caught: <strong>' + failureCaught + '/3</strong> &middot; ' +
-    'Trigger precision: <strong>' + triggerCorrect + '/' + triggerTotal + '</strong>' +
+    'Success: <strong>' + escapeHtml(successPass) + '/3</strong> &middot; ' +
+    'Failures caught: <strong>' + escapeHtml(failureCaught) + '/3</strong> &middot; ' +
+    'Trigger precision: <strong>' + escapeHtml(triggerCorrect) + '/' + escapeHtml(triggerTotal) + '</strong>' +
     (domainMetric
-      ? ' &middot; Domain metric: <strong>' + domainMetric.name + ' = ' + domainMetric.score + '</strong>'
+      ? ' &middot; Domain metric: <strong>' + escapeHtml(domainMetric.name) + ' = ' + escapeHtml(domainMetric.score) + '</strong>'
       : '');
 
   // Optional efficiency trend detail table
@@ -13860,7 +13875,7 @@ function renderContract(state, results) {
     const e = contractResult.efficiency_trend;
     const addRow = function(label, value) {
       const row = document.createElement('tr');
-      row.innerHTML = '<td>' + label + '</td><td>' + value + '</td>';
+      row.innerHTML = '<td>' + escapeHtml(label) + '</td><td>' + escapeHtml(value) + '</td>';
       tbody.appendChild(row);
     };
     addRow('Tokens (baseline → final)',
