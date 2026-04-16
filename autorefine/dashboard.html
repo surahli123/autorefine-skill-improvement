@@ -13856,7 +13856,7 @@ function renderContract(state, results) {
   const tbody = document.getElementById('contract-details');
   if (contractResult.efficiency_trend) {
     table.style.display = 'table';
-    tbody.innerHTML = '';
+    tbody.innerHTML = '';  // clear stale rows so 10s refresh doesn't double up
     const e = contractResult.efficiency_trend;
     const addRow = function(label, value) {
       const row = document.createElement('tr');
