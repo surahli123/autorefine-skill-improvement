@@ -264,6 +264,16 @@
     .charts { grid-template-columns: 1fr; }
     .comparison-output-grid { grid-template-columns: 1fr; }
   }
+  /* Effectiveness Floor & Contract Coverage cards */
+  .floor-pass, .contract-pass { color: #22c55e; font-weight: 600; }
+  .floor-concern, .contract-concern { color: #f59e0b; font-weight: 600; }
+  .floor-fail, .contract-fail { color: #ef4444; font-weight: 600; }
+  .floor-skipped { color: #94a3b8; font-style: italic; }
+  .floor-overall { font-size: 1.2em; font-weight: 700; padding: 8px 0; }
+  .floor-table, .contract-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .floor-table th, .floor-table td, .contract-table th, .contract-table td {
+    padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: left;
+  }
 </style>
 </head>
 <body>
@@ -340,6 +350,26 @@
 <div class="chart-container full">
   <h2>Per-Eval Breakdown</h2>
   <div id="evalBreakdown"></div>
+</div>
+
+<!-- Effectiveness Floor — hidden until state.json has effectiveness_floor -->
+<div class="chart-container full" id="floor-card" style="display:none; margin-bottom: 24px;">
+  <h2>Effectiveness Floor</h2>
+  <div class="floor-overall" id="floor-overall"></div>
+  <table class="floor-table">
+    <thead><tr><th>Dimension</th><th>Status</th><th>Evidence</th></tr></thead>
+    <tbody id="floor-dimensions"></tbody>
+  </table>
+</div>
+
+<!-- Contract Coverage — hidden until contract_status === 'confirmed' in state.json -->
+<div class="chart-container full" id="contract-card" style="display:none; margin-bottom: 24px;">
+  <h2>Contract Coverage</h2>
+  <div id="contract-summary"></div>
+  <table class="contract-table" id="contract-table" style="display:none">
+    <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+    <tbody id="contract-details"></tbody>
+  </table>
 </div>
 
 <div class="refresh-note">Auto-refreshes every 10 seconds &middot; Serve with: python3 -m http.server 8080</div>
@@ -13751,8 +13781,97 @@ function updateEvals(data) {
   }).join('');
 }
 
+// Fetch state.json (written by AutoRefine pipeline alongside results.json).
+// Returns parsed object or null if unavailable.
+async function fetchState() {
+  try {
+    const res = await fetch('state.json?' + Date.now());
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+// Render the Effectiveness Floor card from state.effectiveness_floor.
+// Card stays hidden (display:none) when the field is absent.
+function renderFloor(state) {
+  const floor = state && state.effectiveness_floor;
+  if (!floor) return;
+  const card = document.getElementById('floor-card');
+  if (!card) return;
+  card.style.display = 'block';
+
+  const overall = document.getElementById('floor-overall');
+  overall.textContent = 'Overall: ' + (floor.overall_status || 'unknown').toUpperCase();
+  overall.className = 'floor-overall floor-' + (floor.overall_status || 'unknown');
+
+  const tbody = document.getElementById('floor-dimensions');
+  tbody.innerHTML = '';
+  (floor.dimensions || []).forEach(function(d) {
+    const row = document.createElement('tr');
+    const name = d.name || d.id || 'Unknown';
+    const status = d.status || 'unknown';
+    const evidence = d.evidence || '';
+    row.innerHTML = '<td>' + name + '</td>' +
+                    '<td class="floor-' + status + '">' + status + '</td>' +
+                    '<td>' + evidence + '</td>';
+    tbody.appendChild(row);
+  });
+}
+
+// Render the Contract Coverage card.
+// Card stays hidden when contract_status !== 'confirmed' in state.json.
+// Detail table appears only when results.json has contract_effectiveness data.
+function renderContract(state, results) {
+  const status = state && state.contract_status;
+  if (status !== 'confirmed') return;
+
+  const card = document.getElementById('contract-card');
+  if (!card) return;
+  card.style.display = 'block';
+
+  const summary = document.getElementById('contract-summary');
+  const contractResult = results && results.contract_effectiveness;
+
+  if (!contractResult) {
+    summary.textContent = 'Contract confirmed — waiting for Session Close report.';
+    return;
+  }
+
+  const successPass    = contractResult.success_examples_pass  || 0;
+  const failureCaught  = contractResult.failure_examples_caught || 0;
+  const triggerCorrect = contractResult.trigger_correct         || 0;
+  const triggerTotal   = contractResult.trigger_total           || 0;
+  const domainMetric   = contractResult.domain_metric           || null;
+
+  summary.innerHTML =
+    'Success: <strong>' + successPass + '/3</strong> &middot; ' +
+    'Failures caught: <strong>' + failureCaught + '/3</strong> &middot; ' +
+    'Trigger precision: <strong>' + triggerCorrect + '/' + triggerTotal + '</strong>' +
+    (domainMetric
+      ? ' &middot; Domain metric: <strong>' + domainMetric.name + ' = ' + domainMetric.score + '</strong>'
+      : '');
+
+  // Optional efficiency trend detail table
+  const table = document.getElementById('contract-table');
+  const tbody = document.getElementById('contract-details');
+  if (contractResult.efficiency_trend) {
+    table.style.display = 'table';
+    tbody.innerHTML = '';
+    const e = contractResult.efficiency_trend;
+    const addRow = function(label, value) {
+      const row = document.createElement('tr');
+      row.innerHTML = '<td>' + label + '</td><td>' + value + '</td>';
+      tbody.appendChild(row);
+    };
+    addRow('Tokens (baseline → final)',
+           (e.baseline_tokens || '?') + ' → ' + (e.final_tokens || '?'));
+    addRow('Tool calls (baseline → final)',
+           (e.baseline_tool_calls || '?') + ' → ' + (e.final_tool_calls || '?'));
+  }
+}
+
 async function refresh() {
-  const data = await fetchData();
+  const [data, state] = await Promise.all([fetchData(), fetchState()]);
   if (!data) return;
   updateCards(data);
   updateBarChart(data);
@@ -13762,6 +13881,9 @@ async function refresh() {
   updateMetaLearningSummary(data);
   updateSessionCloseHoldout(data);
   updateEvals(data);
+  // New quality-signal cards (hidden gracefully when data absent)
+  renderFloor(state);
+  renderContract(state, data);
 }
 
 refresh();
