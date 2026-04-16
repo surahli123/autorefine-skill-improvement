@@ -297,6 +297,137 @@ Remaining dimensions: `references.md > V2.0 Design Audit Rubric`.
 
 ---
 
+## Phase 1b: Effectiveness Floor (5 min)
+
+Read when: Phase 1 Design Audit complete, before Phase 2. Produces `[workspace]/effectiveness-floor.md`.
+
+Evaluates 6 behavioral dimensions per `references.md > Effectiveness Floor Schema > Dimension Definitions`. Result is a **warning, not a gate** — print the result and continue to Phase 2 regardless of status.
+
+### Step 1: Input Selection
+
+Check `state.json.contract_status`:
+- If `"confirmed"`: use contract examples as test inputs (3 success, 3 failure, 3 do-not-trigger from `[workspace]/contract/*.jsonl`).
+- If `"skipped"` or null: skip dimensions that require do-not-trigger examples (`activation_quality` and `boundary_discipline` — mark as `"status": "skipped"`). Run remaining 4 dimensions using Phase 3 traces if available, or generate 3 proxy inputs from Phase 1 findings.
+
+### Step 2: Evaluate Each Dimension
+
+Evaluate each of the 6 dimensions per `references.md > Effectiveness Floor Schema > Dimension Definitions`. For each dimension, follow the test method in the schema and assign `pass`, `concern`, or `fail` per the threshold columns.
+
+#### 2a: Activation Quality
+
+**Input variation mandate (NEW — Resolver-inspired):** For each of the 3 success-example inputs, generate 2 additional phrasing variations before running the skill. Cover formal/informal, verbose/terse, question vs. imperative, and synonym substitution. Total: 3 success inputs × 3 phrasings = 9 should-fire inputs, plus the 3 do-not-trigger inputs as-is = 12 inputs total for this dimension.
+
+Rationale: a skill that fires on one exact phrasing but misses rephrased versions has fragile activation — the classic "trigger description says `track this flight` but user says `is my flight delayed?`" failure mode.
+
+Run the skill's activation check against all 12 inputs (route each input through a minimal skill-selection test: given the skill's `description` field and the input, would a routing LLM pick this skill?). Score:
+- Pass: 11-12 correct (precision + recall on activation)
+- Concern: 9-10 correct
+- Fail: ≤8 correct
+
+Record in the floor result: `test_inputs_used` includes all 12 input IDs (e.g., `success-1`, `success-1-paraphrase-1`, `success-1-paraphrase-2`, ..., `dnt-3`).
+
+#### 2b: Outcome Quality
+
+Run the 3 success examples through the skill. For each, judge the output against `output_shape.description` (from the contract) or against Phase 3 expected-output traces if no contract. Score per the schema (3 pass → pass, 1 marginal → concern, 2+ fail → fail).
+
+#### 2c: Robustness
+
+Take 3 success examples. For each, perturb the input in ONE of these ways (pick per example, don't apply all):
+- Paraphrase the primary request
+- Remove one piece of context the skill would normally rely on
+- Add irrelevant noise sentences before or after the actual request
+
+Run perturbed inputs through the skill. Check if output quality holds (compared against the same `output_shape.description`). Score per the schema.
+
+#### 2d: Recovery
+
+Run the 3 failure examples (inputs designed to cause problems). For each, check if the skill:
+- Flags the problem explicitly (e.g., asks for clarification, surfaces missing info)
+- OR recovers (attempts a reasonable fallback with clear acknowledgment)
+- OR continues blindly (confident garbage)
+
+Score per the schema (flags-or-recovers on 2+ → pass, on 1 → concern, blindly-continues on all → fail).
+
+#### 2e: Efficiency
+
+Measure token count + tool-call count per success example execution. Compare to:
+- Phase 7 Experiment 0 `baseline_trials[].trial_metadata` in `results.json` if available
+- Otherwise, absolute threshold: 20K tokens / 10 tool calls per success example
+
+Score per the schema (within 2x baseline OR under 20K/10 → pass; 2-3x OR 20-40K → concern; >3x OR >40K → fail).
+
+#### 2f: Boundary Discipline
+
+**Part A:** Run 3 do-not-trigger examples. Skill should decline, route elsewhere, or ignore per each example's `expected_behavior` field.
+
+**Part B:** Run 3 success examples and check for out-of-scope side effects. Specifically: did the skill modify files outside its stated scope? Did it call tools unrelated to its purpose? Did it persist state beyond what its `description` implies?
+
+Score per the schema (all DNT declined + no side effects → pass; 1 partial activation or minor side effect → concern; activates on DNT or harmful side effects → fail).
+
+### Step 3: Compute Overall Status
+
+Per `references.md > Effectiveness Floor Schema > Floor Scoring Rules`:
+- `overall_status = "fail"` if ANY dimension is `fail`
+- `overall_status = "concern"` if ANY dimension is `concern` and none are `fail`
+- `overall_status = "pass"` if ALL dimensions are `pass` or `skipped`
+
+### Step 4: Write Floor Report
+
+Write `[workspace]/effectiveness-floor.md` with this human-readable format:
+
+```
+# Effectiveness Floor — [skill_name]
+
+Overall: [PASS / CONCERN / FAIL]     Date: [ISO date]     Contract: [available | skipped]
+
+| Dimension | Status | Evidence |
+|-----------|--------|----------|
+| Activation Quality | [pass/concern/fail/skipped] | [one-line summary — e.g., "11/12 correct fire, including 2/3 paraphrase variations on success-2"] |
+| Outcome Quality | ... | ... |
+| Robustness | ... | ... |
+| Recovery | ... | ... |
+| Efficiency | ... | ... |
+| Boundary Discipline | ... | ... |
+
+## Details
+
+[For each dimension with status = concern or fail, provide 2-3 sentences explaining:
+- Which specific test inputs failed
+- What the failure looked like
+- What the author might investigate]
+```
+
+### Step 5: Persist Floor Result
+
+Serialize the floor result object using `references.md > Effectiveness Floor Schema > Floor Result` (JSON shape). Store at `state.json.effectiveness_floor`. Include:
+- `floor_version: "1.0"`
+- `evaluated_at: <ISO timestamp>`
+- `skill_name` from state
+- `contract_available: true` if contract_status was "confirmed", else false
+- `overall_status` from Step 3
+- `dimensions[]` — one entry per dimension with id, name, status, evidence (one-line summary), test_inputs_used (input IDs), details (extended explanation if concern/fail)
+- `dimension_count: {pass: N, concern: N, fail: N}` (exclude skipped from counts)
+
+### Step 6: Present Result and Continue
+
+Print to user:
+```
+Effectiveness Floor: [PASS / CONCERN / FAIL]
+  [N pass, N concern, N fail, N skipped]
+  [One-line summary of any concern/fail dimensions, or "No issues found."]
+
+This is a warning, not a gate. Continuing to Phase 2...
+```
+
+Log to session-log.json:
+```json
+{"phase":"1b","type":"effectiveness_floor","overall":"<pass|concern|fail>","dimensions":{"activation_quality":"<status>","outcome_quality":"<status>","robustness":"<status>","recovery":"<status>","efficiency":"<status>","boundary_discipline":"<status>"}}
+```
+
+Proceed to Phase 2 regardless of result.
+
+---
+
 ## Phase 2: Eval Audit
 
 Check for existing eval infrastructure (eval-suite.md, evals.json, test fixtures, results files). Frame the audit using the selected strategy's downstream route from `references.md > Skill Pattern Eval Strategy > Strategy Definitions`, especially its failure focus and eval category emphasis, rather than a generic audit lens. Audit against 6 categories: error analysis grounding, evaluator design, judge validation, train/test split, labeled data count, maintenance process. If no evals exist, document: "No eval infrastructure. Phase 3 builds the foundation."
