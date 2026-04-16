@@ -66,6 +66,32 @@ Also read the latest finalized `mutation_handoff` block from the current run's `
 
 Add a 4th optional step to the reasoning_trace format for the mutation hypothesis only: `4) flag any confounds — if none, state "no confounds detected"`. This step is mandatory to emit when confounds exist; absent or "no confounds detected" is acceptable when none exist. Persist in `mutation.md > Mutation Rationale` alongside the existing 3-step reasoning_trace.
 
+**Structured confound_check (forcing function):** Alongside the reasoning_trace, emit a structured block in `mutation.md > Mutation Rationale` that captures the 3 rule outcomes derivably, so "no confounds detected" is a derivable statement rather than a claim:
+
+```json
+{
+  "confound_check": {
+    "recent_edit_overlap": {
+      "checked_experiments": ["exp_N-1", "exp_N-2"],
+      "target_sections_edited_recently": ["section_id_list"],
+      "overlaps_current_target": true|false
+    },
+    "bundled_edit": {
+      "checked_experiment": "exp_N-1",
+      "section_edit_count_in_that_experiment": <int>,
+      "bundled": true|false  // true if count > 1
+    },
+    "target_saturation": {
+      "checked_discards": ["exp_N-1 (if discarded)", "exp_N-2 (if discarded)"],
+      "prior_wrong_target_classifications_for_current_target": <int>,
+      "saturated": true|false  // true if any prior wrong_target on same section
+    }
+  }
+}
+```
+
+Populate from `[workspace]/runs/run_*/iteration_*/mutation.md` (for prior edits) and `iteration_*/eval_results.json` `discard_autopsy.classification` (for target-saturation). If all 3 outcomes are false, the 4th reasoning_trace step may say "no confounds detected" and the proposer has the evidence to back the claim. If any outcome is true, the reasoning_trace 4th step must describe the confound concretely.
+
 **Save backup** (`[workspace]/<skill>-optimized-prev.md`) → mutate a copy
       **v4.2 challenger_mode (Phase 7 instruction slice):** When `challenger_mode` is enabled, treat the step-2a mutation search as a bounded research tournament before the normal experiment path continues. Use exactly the 3 bounded copy-on-write lane slots defined above. `lane_01_incremental_cleanup` should make the smallest targeted revision that follows the ordered `mutation_targets[]`. `lane_02_simplification` should pursue deletion, compression, or boundary repair while keeping the same objective and eval target. `lane_03_from_scratch` is reserved for the plateau-breaker path and must remain dormant unless the v1 in-run plateau trigger fires; if it is dormant, still record the lane as skipped in its lane summary and in the later `research-memory.json` lane roster so replay/reporting can distinguish a dormant lane from a missing artifact. The plateau-breaker may activate `lane_03_from_scratch` only from in-run signals: either no kept post-baseline candidate exists yet in the active run after at least 2 finalized challenger experiments, or the 2 most recent discarded experiments share the same dominant `discard_autopsy.classification`. Do not trigger the plateau-breaker from holdout outcomes, cross-run history, or any Session Close artifact. Every active lane must start from the same current baseline version, use the same dev-only `input_set_id` and `input_ids`, and reuse the same trusted dev-scored surface already approved for the current experiment. Lanes may vary the candidate revision strategy, but they must not vary the evaluation corpus, must not peek at holdout data, and must not create alternate keep/discard math. After writing the lane-local candidate revisions, run the same dev-scored mutation evaluation surface on each active lane candidate and write the lane-local results under that lane directory. Then compute the automatic shortlist in `challengers/shortlist.json` using only the existing mutation-time evidence: dev score, noise-relative improvement vs the current baseline, regression status, and stability/disagreement notes already available from the trusted dev-scored surface. The shortlist winner is the only lane output promoted into the canonical Experiment `N` candidate artifact, the canonical `mutation.md`, and the normal step-2b through step-2f flow. Rejected lanes remain lane-local for forensics only. Do not ask for a separate shortlist approval. Feed the selected shortlist winner directly into the existing experiment presentation and user verdict confirmation flow so the user still sees one experiment-level decision point per experiment.
    b. **Score mutation (with bias reduction for agent-as-judge evals):** Before reading fixture content or scored inputs for this experiment, route that read through `references.md > Restricted Mutation-Stage Dataset Access Path` by re-applying the active `mutation_stage_split_access_policy` with requested operation = `mutation_scoring`. Then re-apply the active `mutation_stage_split_access_policy` with requested operation = `mutation_scoring`; do not materialize blocked splits while scoring. Intermediate scoring must resolve the scoring split exclusively through the active `mutation_stage_split_access_policy`. Do not branch on raw split IDs, reopen split manifests, or bypass the accessor to recover the dev corpus. If `requested_operation = mutation_scoring` resolves to `adversarial_holdout`, explicitly deny the request and fail closed before reopening any stored dev corpus.
@@ -89,9 +115,9 @@ Add a 4th optional step to the reasoning_trace format for the mutation hypothesi
 - Add an entry to `decision_breakdown.components[]` with:
   - `eval_id: "domain-metric"`
   - `category: "domain-metric"`
-  - `weight: <base_weight>` (use the same base weight you'd assign any eval — typically 1.0)
-  - `weight_multiplier: <from config.json>` (default 2.0)
-  - `weighted_points: base_weight * weight_multiplier * score` (see `references.md > Domain Eval Config Schema` field rules for `weight_multiplier` for the exact integration formula)
+  - `weight: <base_weight> * <weight_multiplier>` — the effective weight is already multiplied per `references.md > Domain Eval Config Schema`. Example: base 1.0 × multiplier 2.0 → `weight: 2.0`. This keeps the canonical `weighted_points = weight * pass_fail_score` formula consistent with every other component.
+  - `weight_multiplier: <from config.json>` — kept as a provenance-only field (default 2.0), documenting how the effective `weight` was derived. Downstream math uses `weight` directly; do NOT re-multiply.
+  - `weighted_points: weight * pass_fail_score` — canonical formula, matches all other components. For a domain-metric eval with `weight=2.0` and `pass_fail_score=score` (0-1 continuous), `weighted_points` = `2.0 * score`.
   - `weight_source: "domain_eval_config"`
   - `pass_fail`: derived from `threshold_pass` and `threshold_concern` (see Phase 5 Step 1 domain-metric threshold rules)
   - `reasoning_trace`: 1) the computed score, 2) the threshold comparison, 3) the Pass/Fail derivation
@@ -105,7 +131,13 @@ As soon as scoring completes for the experiment, update the same run-scoped `sta
 - `tool_call_count`: total number of tool calls made across all inputs
 - `execution_time_ms`: wall-clock time for skill execution across all inputs
 
-Persist these 3 fields at the top level of `eval_results.json` for the experiment (sibling to `decision_breakdown`). Do NOT include them in `combined_score` — they are informational in v4.x, surfaced in the Aggregation Explainer and Session Close.
+Persist efficiency at TWO granularities in `eval_results.json`:
+- `efficiency_metrics.aggregate`: experiment-level totals with fields `token_count`, `tool_call_count`, `execution_time_ms`
+- `efficiency_metrics.per_input[]`: one row per scored input with fields `input_id`, `token_count`, `tool_call_count`, `execution_time_ms`
+
+Phase 1b floor reads `per_input[]` to compute per-example statistics (median, p95, max) against the threshold. The `aggregate` block stays for dashboard totals and quick scans. Both are derivable from the same instrumentation — cheap to capture now, expensive to add after baseline artifacts exist without them.
+
+Do NOT include these fields in `combined_score` — they are informational in v4.x, surfaced in the Aggregation Explainer and Session Close.
 
 These metrics feed the Phase 1b effectiveness floor (dimension 5: efficiency) on re-runs — Phase 1b compares against `baseline_trials[].trial_metadata` from Phase 7 Experiment 0 to compute efficiency pass/concern/fail.
 
