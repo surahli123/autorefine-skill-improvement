@@ -34,6 +34,9 @@ These seeded fixtures count toward the 30-40 total target. Step 2 continues with
 **Step 1: Classify evals** as code-based (counting, regex, field presence -> bash/python) or agent-as-judge (semantic judgment -> judge prompt file). Exhaust code options first. Before writing the split, read the current run's `selected_eval_strategy_id` in `references.md > Skill Pattern Eval Strategy > Strategy Definitions` and use that strategy's Phase 5/6 tactic bundle to decide which evals should dominate. The matching Phase 5/6 tactic bundle is the route, not an advisory weighting hint.
 
 **Domain-metric evals (NEW — v4 effectiveness criteria):** If `state.json.domain_eval_config_path` is not null, add one eval of type `domain-metric` using the configured metric. This eval:
+
+**Pre-use integrity check:** Before writing the domain-metric eval to `eval-suite.md`, re-run the Domain Eval Integrity Check (defined in `SKILL.md` Step A): verify `config.json` exists and parses, `eval_script_path` exists and is readable. If the check fails at Phase 5 time (file was deleted between Phase 0.5 and Phase 5), stop with the same 3-option blocking error from Step A. Do NOT silently fall back to LLM-judge-only. Golden-set at Phase 5 is still optional; absence is surfaced via the `inactive_pending_golden_set: true` flag, not via skipping.
+
 - Reads `[workspace]/domain-eval/config.json` for metric name, threshold, eval script path, and weight multiplier (see `references.md > Domain Eval Config Schema`).
 - Reads `[workspace]/domain-eval/golden-set.jsonl` for labeled inputs (when the file exists — if missing or empty, skip this eval with a log warning, do NOT error).
 - Runs the configured `eval_script_path` on each golden-set input with the skill's output as the prediction. The script returns a score 0-1 per input.
@@ -67,7 +70,18 @@ Type: agent-as-judge | Category: task-completion
 
 These tags enable per-category score reporting at Session Close (see `references/gulf3-generalization.md > Session Close`) across all four categories (`structural`, `task-completion`, `quality`, `domain-metric`). Schema details: `references.md > Eval Category Tags Schema`.
 
-**Step 2: Build code-based evaluators.** One-liner or short script per eval. Test on 3 dev fixtures.
+**Step 2: Build code-based evaluators.**
+
+**Consume `output_shape.schema` from contract examples (NEW — v4 effectiveness criteria):** If `state.json.contract_status = "confirmed"` AND any success/failure contract example has a non-null `output_shape.schema` object (see `Contract Example Schema`), generate a code-based validator from it:
+- For each contract example with `output_shape.schema`, write a validator script that parses the skill's output and validates it against the JSON Schema using a minimal Python validator (e.g., `jsonschema.validate(output_data, schema)`).
+- The validator returns exit code 0 (pass) if output matches schema, 1 (fail) otherwise.
+- Category tag: `structural`. Weight: 1.0 (standard).
+- File: `[workspace]/judges/code-E{N}-contract-schema-{example-id}.py`
+- Rationale: structured outputs should be validated deterministically, not judged semantically. This catches format regressions cheaply and provides a baseline signal that agent-as-judge evals cannot match.
+
+If no contract example has a non-null `output_shape.schema`: skip this step (author's contract has prose-only output descriptions — rely on agent-as-judge evaluation of `output_shape.description`). Current v4.0 behavior.
+
+One-liner or short script per eval. Test on 3 dev fixtures.
 
 **Step 3: Build agent-as-judge prompts.** Each judge has 4 components: task+criterion, Pass/Fail definitions, 3 few-shot examples (TRAIN split only — never dev/test), critique-before-verdict output format. The coding agent itself IS the judge — no external API needed. **Anti-rigidity rule:** Score on outcome achievement, not path matching. A judge that fails outputs for using different structure or wording than the reference is penalizing creativity, not catching errors. Multi-judge activation is `category + instability`, not category alone. `structural` evals remain single-judge. `task-completion` stays single-judge by default and escalates to panel mode only when `phase6_dev_fold_metrics` or human calibration shows instability. `quality` evals are eligible for panel review, but activate panel mode only when `phase6_dev_fold_metrics` or human calibration shows instability, or when the user explicitly forces it. When panel mode is used, write 2+ independent prompts with different framing and record `agreement_rule: unanimous` in the eval metadata so a single judge cannot decide the verdict alone. Keep the panel contract consistent with `references.md > Multi-Judge Verdict Schema`. Full template: `references.md > Judge Prompt Template`.
 

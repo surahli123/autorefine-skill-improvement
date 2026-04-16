@@ -89,7 +89,17 @@ If `state.json.checkpoint` is not null and has `next_action`, enter resume mode 
 - `[workspace]/contract/do-not-trigger-examples.jsonl` (>= 3 valid rows, required fields: `id`, `input`, `expected_behavior`)
 - `[workspace]/contract/inferred-contract.md` (must exist, must contain the 8 standard sections from `Inferred Contract Template`)
 
-Also validate `state.json.domain_eval_config_path` if set: `[workspace]/domain-eval/config.json` must exist and parse as valid JSON matching `Domain Eval Config Schema`. Golden-set file is NOT required here (it may be filled in later before Phase 7).
+Also validate `state.json.domain_eval_config_path` if set — FULL file integrity check, not just config existence:
+- `[workspace]/domain-eval/config.json` must exist, parse as valid JSON, and match the required fields in `Domain Eval Config Schema` (`domain_eval_version`, `metric_name`, `threshold_pass`, `threshold_concern`, `weight_multiplier`, `eval_script_path`, `author_confirmed = true`)
+- The file at `config.json.eval_script_path` must exist and be readable. Do not attempt to execute it; just verify readability.
+- The golden-set file at `config.json.golden_set_path` is OPTIONAL at checkpoint time (may be filled in before Phase 7). If present, verify it parses as valid JSONL and has >= 1 row with required fields (`id`, `input`, `expected_output`).
+
+On ANY validation failure, stop with a blocking error naming the specific missing/malformed file(s):
+- "Domain eval integrity check failed. `domain_eval_config_path` is set but the following are missing or malformed: [list]. Recovery options: (a) restore the files, (b) re-run Phase 0.5 Step 7 to reconfigure (set `domain_eval_config_path` to null in `state.json` and re-enter Phase 0.5 — the contract examples remain; only domain eval re-prompts), or (c) clear `domain_eval_config_path` to null in `state.json` to proceed without domain eval (Phase 5 and Phase 7 will skip domain-metric scoring — graceful degradation to LLM-judge-only)."
+
+Fail closed — do NOT silently clear `domain_eval_config_path` to null. The user must explicitly choose.
+
+Log `{"phase":"checkpoint","type":"domain_eval_integrity_check","status":"passed|failed","files_validated":2}` to session-log.json.
 
 On ANY validation failure, stop with a blocking error naming the specific missing/malformed file(s):
 - "Contract integrity check failed. `contract_status` is `"confirmed"` but the following files are missing or malformed: [list]. Recovery options: (a) restore the files from backup, (b) re-run Phase 0.5 contract wizard (set `contract_status` to `"not_started"` in `state.json` and re-enter), or (c) set `contract_status` to `"skipped"` in `state.json` to proceed without contract examples (downstream phases will use no-contract fallbacks)."

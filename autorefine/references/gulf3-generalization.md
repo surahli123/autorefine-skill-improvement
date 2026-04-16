@@ -331,6 +331,27 @@ Floor delta (Phase 1b → final):
 
 This answers: "Is the skill more effective now than when we started, measured against the author's own definition of effective?" — complementary to `combined_score`, which measures judge-perceived quality.
 
+### Write JSON alongside prose
+
+After generating the prose Contract Effectiveness Report in `session-close-report.md`, ALSO persist a machine-readable copy to `results.json.contract_effectiveness`. Format MUST match `references.md > Contract Effectiveness Result Schema` exactly.
+
+Fields:
+- `generated_at`: current ISO-8601 timestamp
+- `final_version_id`: `version_id` of the kept winning skill version
+- `exact_match.success_examples_pass/_total` — from step 4 exact-match row
+- `exact_match.failure_examples_caught/_total` — from step 4
+- `exact_match.trigger_correct_fires/_total_fires/_correct_declines/_total_declines` — split from the trigger line
+- `paraphrased.*` — same structure with /6 totals
+- `overfit_analysis.overfit_ratio` — computed in step 5
+- `overfit_analysis.status` — `"overfit_warning"` if ratio > 0.20, else `"overfit_none"`
+- `overfit_analysis.success_gap_pct / failure_gap_pct / trigger_gap_pct` — individual gaps in percentage points
+- `domain_metric`: null if not configured; else object `{name, continuous_score, threshold_pass, status}`
+- `efficiency_trend`: populate from step 8 data. Fields: `baseline_tokens`, `final_tokens`, `baseline_tool_calls`, `final_tool_calls`, `baseline_experiment_id`, `final_experiment_id`
+- `floor_delta`: null if no Phase 1b floor was computed; else array of `{dimension_id, before_status, after_status, changed: bool}` entries
+- `leakage_audit`: populate from the Leakage Audit section's output (match counts + status)
+
+Write the entire object to `results.json` under the `contract_effectiveness` top-level key. Use null (not omission) for fields that aren't applicable — the dashboard reads null safely but will crash on missing keys. After writing, log `{"phase":"session_close","type":"contract_effectiveness_written","overfit_status":"<status>","leakage_status":"<status>"}` to session-log.json.
+
 ### Leakage Audit (NEW — Meta-Harness pattern)
 
 After Session Close selects the winning version, run a leakage audit:

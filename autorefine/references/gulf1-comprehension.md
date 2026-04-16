@@ -122,7 +122,13 @@ Log each correction to session-log.json:
 
 ### Step 7: Domain Eval Setup (optional, 2 min)
 
-Determine whether Step 7 runs: read the Domain Metric section of `[workspace]/contract/inferred-contract.md`. If non-null and author has not already confirmed domain eval in a prior session (check `state.json.domain_eval_config_path` — if already set, skip Step 7 entirely), proceed with the prompt below.
+Determine whether Step 7 runs:
+1. Read the Domain Metric section of `[workspace]/contract/inferred-contract.md`. If null, Phase 1 pattern classification found no applicable domain metric — skip Step 7 entirely, proceed to Step 8.
+2. If non-null, check `state.json.domain_eval_config_path`:
+   - If null: proceed with the normal Step 7 options A/B/C/D flow below.
+   - If already set (resume case): run the Domain Eval Integrity Check from `SKILL.md` Step A before trusting it. If the check passes, skip Step 7 (domain eval already configured correctly). If the check fails (file missing, corrupted, or author_confirmed=false), clear `state.json.domain_eval_config_path` to null and re-enter Step 7 from the top.
+
+The integrity-first approach prevents a partial-state resume from treating a broken domain eval as valid.
 
 If Step 5's inferred contract has a non-null Domain Metric section (pattern classification suggested one):
 
@@ -356,12 +362,14 @@ Total: 3 success inputs × 3 phrasings = 9 should-fire inputs, plus the 3 do-not
 
 Rationale: a skill that fires on one exact phrasing but misses rephrased versions has fragile activation — the classic "trigger description says `track this flight` but user says `is my flight delayed?`" failure mode.
 
-Run the skill's activation check against all 12 inputs (route each input through a minimal skill-selection test: given the skill's `description` field and the input, would a routing LLM pick this skill?). Score using the schema's error-rate formula scaled to the 12-input count:
-- Pass: 0-1 errors (0-8.3% error rate — matches schema's "all correct")
-- Concern: 2-3 errors (17-25% error rate — matches schema's "1 misfire or miss" scaled)
-- Fail: 4+ errors (33%+ error rate — matches schema's "2+ errors" scaled)
+Run the skill's activation check against all 12 inputs (route each input through a minimal skill-selection test: given the skill's `description` field and the input, would a routing LLM pick this skill?). Score using a proportion-based scaling of the schema's 6-input error rule ("All correct / 1 misfire or 1 miss / 2+ errors"). For the default 6-input case (no paraphrase variation), use schema thresholds directly. For the 12-input case (paraphrase variation active), scale the error proportion:
 
-The schema thresholds are proportion-based: a "2+ errors in 6" rule becomes "4+ errors in 12" when input count doubles. If contract is skipped and you run the default 6-input test instead, use the schema thresholds directly (All / 1 / 2+).
+| Inputs | Pass (error rate) | Concern (error rate) | Fail (error rate) |
+|--------|-------------------|----------------------|-------------------|
+| 6 (schema default) | All correct (0 errors) | 1 error (16.7%) | 2+ errors (33%+) |
+| 12 (paraphrase variation) | 0-1 errors (0-8.3%) | 2-3 errors (17-25%) | 4+ errors (33%+) |
+
+Note: The 12-input "Pass 0-1" range is NOT equivalent to the schema's "all correct" (0 errors). It represents the proportion-scaled equivalent where 1 miss out of 12 corresponds to 0.5 misses out of 6 — below the schema's "1 error = concern" threshold when scaled. In practice: 12/12 correct is the strictest pass; 11/12 is still a pass by proportion, but a reviewer cross-referencing the schema should understand this is a scaling choice, not a looser bar. If you want schema-strict behavior, run the default 6-input test.
 
 Record in the floor result: `test_inputs_used` includes all 12 input IDs (e.g., `success-1`, `success-1-paraphrase-1`, `success-1-paraphrase-2`, ..., `dnt-3`).
 
