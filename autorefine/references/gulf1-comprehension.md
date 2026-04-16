@@ -16,7 +16,11 @@ Read when: starting a new campaign with no contract, or `state.json.contract_sta
 
 On entry, read `state.json.contract_status`:
 - `null` or `"not_started"` → proceed to Step 1 (Offer Contract)
-- `"collecting"` → skip to mid-wizard resume: inspect which JSONL files exist in `[workspace]/contract/` and count rows. Resume at the next incomplete step (success/failure/DNT collection).
+- `"collecting"` → mid-wizard resume, using row counts in `[workspace]/contract/*.jsonl` files to determine where to resume:
+  - `success-examples.jsonl` has < 3 rows → resume at Step 2, continuing from example N+1 where N = current row count
+  - `success-examples.jsonl` has 3 rows AND `failure-examples.jsonl` has < 3 rows → resume at Step 3, example N+1 where N = failure row count
+  - Both above complete AND `do-not-trigger-examples.jsonl` has < 3 rows → resume at Step 4, example N+1 where N = DNT row count
+  - All 3 JSONL files have 3 rows → advance `contract_status` to `"inferred"` (state was stale) and proceed to Step 5
 - `"inferred"` → skip to Step 6 (Author Correction Loop), reading the existing `[workspace]/contract/inferred-contract.md`.
 - `"confirmed"` or `"skipped"` → do not enter Phase 0.5, proceed to Phase 1 (routing handled by SKILL.md).
 
@@ -118,6 +122,8 @@ Log each correction to session-log.json:
 
 ### Step 7: Domain Eval Setup (optional, 2 min)
 
+Determine whether Step 7 runs: read the Domain Metric section of `[workspace]/contract/inferred-contract.md`. If non-null and author has not already confirmed domain eval in a prior session (check `state.json.domain_eval_config_path` — if already set, skip Step 7 entirely), proceed with the prompt below.
+
 If Step 5's inferred contract has a non-null Domain Metric section (pattern classification suggested one):
 
 Present to user:
@@ -137,7 +143,7 @@ D) Skip domain eval — use LLM judges only (current default)
 Handle each option:
 - **A**: generate `[workspace]/domain-eval/eval-metric.py` and `[workspace]/domain-eval/config.json` using `references.md > Domain Eval Config Schema`. Set `author_confirmed: true`. Tell user: "When you have labeled data, save it to `[workspace]/domain-eval/golden-set.jsonl` and domain eval will activate in Phase 7." Set `state.json.domain_eval_config_path = [workspace]/domain-eval/config.json`.
 - **B**: ask for metric name + threshold. Generate script + config.json with those values. Set `author_confirmed: true` and `suggested_by_autorefine: false`. Set `state.json.domain_eval_config_path`.
-- **C**: ask for paths to eval script + golden set. Validate the files exist. Generate config.json pointing at those paths with `suggested_by_autorefine: false` and `author_confirmed: true`. Set `state.json.domain_eval_config_path`.
+- **C**: ask for paths to eval script + golden set. Validate both files exist using `ls <path>`. If either file is missing, tell the user: `File not found at [path]. Please provide the correct path or type 'cancel' to return to the option menu.` Re-prompt up to 3 times. If the user types 'cancel', return to the A/B/C/D option menu. Do NOT generate config.json until both files are confirmed to exist. Once validated, generate config.json pointing at those paths with `suggested_by_autorefine: false` and `author_confirmed: true`. Set `state.json.domain_eval_config_path`.
 - **D**: leave `state.json.domain_eval_config_path = null`. Continue to Step 8.
 
 If Step 5 produced no Domain Metric (pattern classification found no applicable metric): skip Step 7 entirely, continue to Step 8.
@@ -148,8 +154,10 @@ Set `state.json.contract_status = "confirmed"`. Set `state.json.contract_path = 
 
 Log to session-log.json:
 ```json
-{"phase":"0.5","type":"contract_confirmed","success_count":3,"failure_count":3,"dnt_count":3,"domain_eval":"configured|skipped","corrections":N,"pattern_classification":"pattern_name"}
+{"phase":"0.5","type":"contract_confirmed","success_count":3,"failure_count":3,"dnt_count":3,"domain_eval":"<configured|skipped>","corrections":N,"pattern_classification":"<pattern_name>"}
 ```
+
+Substitute `<configured|skipped>` with `"configured"` if `state.json.domain_eval_config_path` was set in Step 7, otherwise `"skipped"`. Substitute `<pattern_name>` with the classification result from Phase 1, or `"unclassified"` if pattern classification wasn't run yet.
 
 Print:
 ```
