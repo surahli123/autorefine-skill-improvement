@@ -69,7 +69,7 @@ Preflight passed
 
 **Workspace path** was confirmed in Preflight Step 0. The workspace is at `[workspace]/` and the working copy of the skill is at `[workspace]/skill-under-test/`. (After Preflight, `[workspace]` = the path chosen in Step 0.3 and persisted in `state.json.workspace_path`.)
 
-If workspace `traces/`, `judges/`, `runs/`, and `skill-versions/` subdirectories don't exist: create them. Generate these files (see `references.md > Workspace Schemas` for exact formats):
+If workspace `traces/`, `judges/`, `runs/`, `skill-versions/`, `contract/`, and `domain-eval/` subdirectories don't exist: create them. Generate these files (see `references.md > Workspace Schemas` for exact formats):
 - `state.json` — pipeline state (schema_version:4 for new workspaces — see `references.md > Workspace Schemas`)
 - `results.json` — experiment results for dashboard
 - `results.tsv` — append-only experiment log
@@ -83,7 +83,30 @@ If workspace exists **with** `state.json`: read it, deserialize any persisted `p
 If workspace exists **with** `state.json`: read it, deserialize any persisted `phase1_context` (including `selected_skill_pattern` and `selected_eval_strategy_id`) plus any persisted `mutation_stage_split_access_policy` and `iteration_state` into the loaded run context, and print pipeline status.
 
 **Step A: Checkpoint recovery (runs FIRST on resume).**
-If `state.json.checkpoint` is not null and has `next_action`, enter resume mode — read all files in `checkpoint.files_to_read_on_resume` (skip any missing files and note which were missing), deserialize `state.json.phase1_context`, `state.json.mutation_stage_split_access_policy`, `state.json.iteration_state`, `state.json.mid_session_preference_signals`, and `state.json.mid_session_preference_signals_path` into the loaded run context before routing the resume path, then rebuild the normalized `style_preferences` payload from `references.md > Style Preferences Payload`, and print "Resuming from checkpoint: {next_action}". Restore `phase1_context.selected_skill_pattern` and `phase1_context.selected_eval_strategy_id` unchanged so later phases can read the chosen pattern + resolved downstream strategy from the loaded context rather than recomputing them. If the restored run-context pattern and `state.json.skill_pattern` mismatch, stop and rerun Phase 1 Step 0 instead of continuing. If the restored `selected_eval_strategy_id` is missing or no longer maps back to the restored pattern through `references.md > Skill Pattern Eval Strategy > Pattern-to-Evaluation-Strategy Selector`, stop and rerun strategy selection before continuing. If split-scoped Phase 7 work is active and the restored `mutation_stage_split_access_policy` is missing, read the same policy from `fixtures-manifest.md` or a stored Phase 4 `evaluation_metadata.config.mutation_stage_split_access_policy` snapshot, hydrate the loaded run context, and stop if the sources disagree. If `iteration_state` is present, treat it as the authoritative Phase 7 handoff record for whether the active `run_id` is in eval, mutate, test, or session_close; continue automatic progression from the persisted `next_action` until terminal success (`phase_status = "completed"`) or terminal failure (`phase_status = "blocked"`) without requiring manual phase handoff. Do not infer boundaries from directory scans while the persisted runner state is available. Then clear the checkpoint (set to null) while preserving every other serialized state field, including `phase1_context`, `mutation_stage_split_access_policy`, `iteration_state`, `mid_session_preference_signals`, and `mid_session_preference_signals_path`. See `references.md > Checkpoint Schema > Resume Detection`. Rotate `session-log.json` (rename to `session-log-<session_start, colons->dashes>.json`, create fresh). If `session-log.json` missing (pre-v2 workspace), create it. Legacy workspaces (schema_version 2 or 3) are read-compatible — checkpoint fields default to null. If checkpoint has `next_action` pointing to a Phase 7 experiment, **skip ambient learning entirely** (workspace copy must match the in-progress experiment state) and proceed from `next_action`.
+If `state.json.checkpoint` is not null and has `next_action`, enter resume mode — read all files in `checkpoint.files_to_read_on_resume` (skip any missing files and note which were missing), deserialize `state.json.phase1_context`, `state.json.mutation_stage_split_access_policy`, `state.json.iteration_state`, `state.json.mid_session_preference_signals`, and `state.json.mid_session_preference_signals_path` into the loaded run context before routing the resume path, then rebuild the normalized `style_preferences` payload from `references.md > Style Preferences Payload`, and print "Resuming from checkpoint: {next_action}". Also deserialize `state.json.contract_status`, `state.json.contract_path`, `state.json.effectiveness_floor`, and `state.json.domain_eval_config_path` into the loaded run context before routing. These fields control Phase 0.5 entry, contract consumption in Phase 4-5, and Session Close contract effectiveness reporting. If `contract_status = "confirmed"`, validate the full contract artifact set before trusting downstream state. Check all 4 required files exist and are non-empty:
+- `[workspace]/contract/success-examples.jsonl` (must exist, must have >= 3 valid JSONL rows each with required fields: `id`, `input`, `output_shape.description`, `actual_output`)
+- `[workspace]/contract/failure-examples.jsonl` (>= 3 valid rows, required fields: `id`, `input`, `output_shape.description`, `actual_output`, `failure_reason`)
+- `[workspace]/contract/do-not-trigger-examples.jsonl` (>= 3 valid rows, required fields: `id`, `input`, `expected_behavior`)
+- `[workspace]/contract/inferred-contract.md` (must exist, must contain the 8 standard sections from `Inferred Contract Template`)
+
+Also validate `state.json.domain_eval_config_path` if set — FULL file integrity check, not just config existence:
+- `[workspace]/domain-eval/config.json` must exist, parse as valid JSON, and match the required fields in `Domain Eval Config Schema` (`domain_eval_version`, `metric_name`, `threshold_pass`, `threshold_concern`, `weight_multiplier`, `eval_script_path`, `author_confirmed = true`)
+- The file at `config.json.eval_script_path` must exist and be readable. Do not attempt to execute it; just verify readability.
+- The golden-set file at `config.json.golden_set_path` is OPTIONAL at checkpoint time (may be filled in before Phase 7). If present, verify it parses as valid JSONL and has >= 1 row with required fields (`id`, `input`, `expected_output`).
+
+On ANY validation failure, stop with a blocking error naming the specific missing/malformed file(s):
+- "Domain eval integrity check failed. `domain_eval_config_path` is set but the following are missing or malformed: [list]. Recovery options: (a) restore the files, (b) re-run Phase 0.5 Step 7 to reconfigure (set `domain_eval_config_path` to null in `state.json` and re-enter Phase 0.5 — the contract examples remain; only domain eval re-prompts), or (c) clear `domain_eval_config_path` to null in `state.json` to proceed without domain eval (Phase 5 and Phase 7 will skip domain-metric scoring — graceful degradation to LLM-judge-only)."
+
+Fail closed — do NOT silently clear `domain_eval_config_path` to null. The user must explicitly choose.
+
+Log `{"phase":"checkpoint","type":"domain_eval_integrity_check","status":"passed|failed","files_validated":2}` to session-log.json.
+
+On ANY validation failure, stop with a blocking error naming the specific missing/malformed file(s):
+- "Contract integrity check failed. `contract_status` is `"confirmed"` but the following files are missing or malformed: [list]. Recovery options: (a) restore the files from backup, (b) re-run Phase 0.5 contract wizard (set `contract_status` to `"not_started"` in `state.json` and re-enter), or (c) set `contract_status` to `"skipped"` in `state.json` to proceed without contract examples (downstream phases will use no-contract fallbacks)."
+
+Fail closed — do NOT silently reset `contract_status` to `"skipped"` or continue with partial data. The user must explicitly choose a recovery path.
+
+If all validations pass, continue with normal downstream routing. Log `{"phase":"checkpoint","type":"contract_integrity_check","status":"passed","files_validated":4}` to session-log.json on success. Restore `phase1_context.selected_skill_pattern` and `phase1_context.selected_eval_strategy_id` unchanged so later phases can read the chosen pattern + resolved downstream strategy from the loaded context rather than recomputing them. If the restored run-context pattern and `state.json.skill_pattern` mismatch, stop and rerun Phase 1 Step 0 instead of continuing. If the restored `selected_eval_strategy_id` is missing or no longer maps back to the restored pattern through `references.md > Skill Pattern Eval Strategy > Pattern-to-Evaluation-Strategy Selector`, stop and rerun strategy selection before continuing. If split-scoped Phase 7 work is active and the restored `mutation_stage_split_access_policy` is missing, read the same policy from `fixtures-manifest.md` or a stored Phase 4 `evaluation_metadata.config.mutation_stage_split_access_policy` snapshot, hydrate the loaded run context, and stop if the sources disagree. If `iteration_state` is present, treat it as the authoritative Phase 7 handoff record for whether the active `run_id` is in eval, mutate, test, or session_close; continue automatic progression from the persisted `next_action` until terminal success (`phase_status = "completed"`) or terminal failure (`phase_status = "blocked"`) without requiring manual phase handoff. Do not infer boundaries from directory scans while the persisted runner state is available. Then clear the checkpoint (set to null) while preserving every other serialized state field, including `phase1_context`, `mutation_stage_split_access_policy`, `iteration_state`, `mid_session_preference_signals`, and `mid_session_preference_signals_path`. See `references.md > Checkpoint Schema > Resume Detection`. Rotate `session-log.json` (rename to `session-log-<session_start, colons->dashes>.json`, create fresh). If `session-log.json` missing (pre-v2 workspace), create it. Legacy workspaces (schema_version 2 or 3) are read-compatible — checkpoint fields default to null. If checkpoint has `next_action` pointing to a Phase 7 experiment, **skip ambient learning entirely** (workspace copy must match the in-progress experiment state) and proceed from `next_action`.
 Deserialize `state.json.phase1_context`, `state.json.mutation_stage_split_access_policy`, and `state.json.iteration_state` into the loaded run context before routing or resuming later phases.
 deserialize `state.json.phase1_context` and `state.json.mutation_stage_split_access_policy` into the loaded run context before routing the resume path.
 deserialize `state.json.phase1_context`, `state.json.mutation_stage_split_access_policy`, and `state.json.iteration_state` into the loaded run context.
@@ -125,6 +148,8 @@ Print at every session start:
 ```
 AutoRefine: <name>
 ================================================================
+Contract                           [STATUS]
+Effectiveness Floor                [STATUS]  [N pass / N concern / N fail]
 Quick Start                        [STATUS]
 Gulf 1: Comprehension
   Phase 1: Design Audit          [STATUS]
@@ -139,10 +164,11 @@ Gulf 2: Specification
 Gulf 3: Generalization
   Phase 7: AutoResearch Loop      [STATUS]  [best score]
 ================================================================
+> Contract examples anchor your evals. Skip it to use generic eval generation.
 > Gulf 1 builds the scorer. Gulf 3 uses the scorer.
 > Skip Gulf 1 and you optimize against a fantasy.
 ```
-STATUS values: `not started`, `in progress`, `complete`, `skipped`. Read from `state.json.phases`.
+STATUS values: `not started`, `in progress`, `complete`, `skipped`. Read from `state.json.phases`. Contract status read from `state.json.contract_status`; Effectiveness Floor status read from `state.json.effectiveness_floor.overall_status` (or `not started` if null).
 
 ---
 
@@ -152,11 +178,16 @@ After Initialize Workspace and Pipeline Status, stay in `SKILL.md` as the single
 
 | Current Phase | Read | Contains |
 |---------------|------|----------|
+| Phase 0.5 (Contract) | `references/gulf1-comprehension.md` | Phase 0.5 Contract Collection Wizard |
 | Quick Start, Phase 1-3 | `references/gulf1-comprehension.md` | Quick Start Path, Phase 1 (Design Audit + Pattern Classification), Phase 2 (Eval Audit), Phase 3 (Error Analysis), Gulf 1 Gate |
 | Phase 4-6 | `references/gulf2-specification.md` | Phase 4 (Expand Inputs), Phase 5 (Write Judges + Eval Category Tags), Phase 6 (Validate Judges), Gulf 2 Gate |
 | Phase 7, Session Close | `references/gulf3-generalization.md` | Phase 7 (AutoResearch Loop + Verdict Explanation Cards + Aggregation Explainer + Version Registry), Loop-Back Prompt, Session Close (+ Version Comparison) |
 
 **Routing rules:**
+- Starting fresh with no contract (state.json.contract_status is null or "not_started") → read `references/gulf1-comprehension.md` for Phase 0.5 first, then Phase 1
+- Contract already confirmed (state.json.contract_status = "confirmed") → skip Phase 0.5, read `references/gulf1-comprehension.md` for Phase 1
+- Contract skipped (state.json.contract_status = "skipped") → skip Phase 0.5, read `references/gulf1-comprehension.md` for Phase 1
+- Contract in-progress (state.json.contract_status is "collecting" or "inferred") → resume Phase 0.5 mid-wizard, read `references/gulf1-comprehension.md`
 - Starting fresh or resuming in Phases 1-3 → read `references/gulf1-comprehension.md`
 - Gulf 1 gate approved, entering Phases 4-6 → read `references/gulf2-specification.md`
 - Gulf 2 gate approved (or Quick Start returning) → read `references/gulf3-generalization.md`

@@ -12,7 +12,7 @@ Workspace directories for new runs are `traces/`, `judges/`, `runs/`, and `skill
 
 ### state.json
 ```json
-{"schema_version":4,"skill_name":"<name>","skill_path":"<path>","original_skill_path":"<path>","workspace_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null,"consecutive_discards":0,"circuit_breaker":null,"current_run_id":null,"current_run_path":null,"current_experiment":null,"iteration_state":null,"completion_cadence":null,"pending_user_override_scan":null,"mid_session_preference_signals":null,"mid_session_preference_signals_path":null,"skill_pattern":null,"phase1_context":null,"mutation_stage_split_access_policy":null,"meta_learnings_path":null,"research_intake":null,"research_intake_path":null,"final_only_evaluation":null,"quick_start":null}
+{"schema_version":4,"skill_name":"<name>","skill_path":"<path>","original_skill_path":"<path>","workspace_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null,"consecutive_discards":0,"circuit_breaker":null,"current_run_id":null,"current_run_path":null,"current_experiment":null,"iteration_state":null,"completion_cadence":null,"pending_user_override_scan":null,"mid_session_preference_signals":null,"mid_session_preference_signals_path":null,"skill_pattern":null,"phase1_context":null,"mutation_stage_split_access_policy":null,"meta_learnings_path":null,"research_intake":null,"research_intake_path":null,"final_only_evaluation":null,"quick_start":null,"contract_status":null,"contract_path":null,"effectiveness_floor":null,"domain_eval_config_path":null}
 ```
 - `schema_version`: 4 for v2.3 workspaces. Legacy: 2 = Standard/Deep (v2.1), 3 = Quick Start (v2.2). New fields default to null when reading v2/v3 workspaces.
 - `loop_iteration`: tracks Phase 7→5 loop-backs (0 = first run)
@@ -77,6 +77,10 @@ Workspace directories for new runs are `traces/`, `judges/`, `runs/`, and `skill
 - Gate all downstream Phase 1 processing on `phase1_context.selected_skill_pattern` and `phase1_context.selected_eval_strategy_id` being captured for the active run.
 - If `phase1_context.selected_skill_pattern` is null, missing, empty, or mismatched with `state.json.skill_pattern`, stop Phase 1 immediately and rerun Step 0 before scoring any dimension.
 - If `phase1_context.selected_eval_strategy_id` is null, missing, empty, or does not resolve back to the current `selected_skill_pattern` through `Skill Pattern Eval Strategy > Pattern-to-Evaluation-Strategy Selector`, stop Phase 1 immediately and rerun strategy selection before scoring any dimension.
+- `contract_status`: null, or `"not_started" | "collecting" | "inferred" | "confirmed" | "skipped"`. Tracks Phase 0.5 progress. Null and `"not_started"` both trigger Phase 0.5 entry; `"collecting"` means Phase 0.5 is mid-wizard gathering examples; `"inferred"` means examples collected but author correction not yet applied; `"confirmed"` means contract is ready for downstream consumption; `"skipped"` bypasses Phase 0.5 entirely. On resume, `"collecting"` and `"inferred"` states route back into Phase 0.5 to continue from where the wizard stopped.
+- `contract_path`: null, or `[workspace]/contract/`. Set when Phase 0.5 creates the contract directory. Contains `success-examples.jsonl`, `failure-examples.jsonl`, `do-not-trigger-examples.jsonl`, and `inferred-contract.md` per `Contract Example Schema` and `Inferred Contract Template`.
+- `effectiveness_floor`: null, or the floor result object from Phase 1b (see `Effectiveness Floor Schema > Floor Result`). Persisted for dashboard and Session Close delta reporting.
+- `domain_eval_config_path`: null, or `[workspace]/domain-eval/config.json`. Set when author provides domain eval assets in Phase 0.5 Step 7. See `Domain Eval Config Schema`.
 
 ### results.json
 ```json
@@ -2477,6 +2481,282 @@ Canonical headings are parsed at `##` level only. Skills with meaningful structu
 ### Multi-Section Mutations
 
 When a single experiment targets multiple sections (`changes[]` has 2+ entries with different `location` values), count the experiment toward ALL targeted sections. The `best_delta` for each section is the same (the experiment's overall delta), since per-section attribution is not possible with the current scoring model.
+
+---
+
+## Contract Example Schema
+
+Read when: Phase 0.5 (Contract Collection) or any phase consuming contract examples.
+
+Each contract example is a JSONL row. Three files in `[workspace]/contract/`:
+- `success-examples.jsonl` — 3 rows minimum
+- `failure-examples.jsonl` — 3 rows minimum
+- `do-not-trigger-examples.jsonl` — 3 rows minimum
+
+### Success Example Row
+```json
+{
+  "id": "success-1",
+  "input": "The prompt or context given to the skill",
+  "output_shape": {
+    "description": "Natural language description of correct output. Required. Used by Phase 5 judges for Pass/Fail criteria.",
+    "schema": null
+  },
+  "actual_output": "A concrete example output written by the author or captured from a real run. Required for success and failure examples."
+}
+```
+
+### Failure Example Row
+```json
+{
+  "id": "failure-1",
+  "input": "The prompt or context given to the skill",
+  "output_shape": {
+    "description": "What correct output would have looked like",
+    "schema": null
+  },
+  "actual_output": "What the skill actually produced (the bad output)",
+  "failure_reason": "What went wrong and why it is unacceptable. Required for failure examples."
+}
+```
+
+### Do-Not-Trigger Example Row
+```json
+{
+  "id": "dnt-1",
+  "input": "An input that looks similar to the skill's domain but should NOT activate it",
+  "expected_behavior": "decline | route_elsewhere | ignore"
+}
+```
+
+Field rules:
+- `id`: stable identifier. Format: `success-N`, `failure-N`, `dnt-N`. Used for traceability across phases.
+- `output_shape.description`: always required. Natural language. Consumed by Phase 5 agent-as-judge evals.
+- `output_shape.schema`: null or JSON Schema object. Auto-generated by Phase 0.5 from description + actual_output. Author confirms or sets null. Consumed by Phase 5 code-based validators.
+- `actual_output`: required for success and failure examples. Omitted for do-not-trigger examples.
+- `failure_reason`: required for failure examples only.
+- `expected_behavior`: required for do-not-trigger examples only.
+
+## Effectiveness Floor Schema
+
+Read when: Phase 1 effectiveness floor evaluation.
+
+### Floor Result
+```json
+{
+  "floor_version": "1.0",
+  "evaluated_at": "<ISO-timestamp>",
+  "skill_name": "<name>",
+  "contract_available": true,
+  "overall_status": "pass | concern | fail",
+  "dimensions": [
+    {
+      "id": "activation_quality",
+      "name": "Activation Quality",
+      "status": "pass | concern | fail",
+      "evidence": "One-sentence summary of test result",
+      "test_inputs_used": ["success-1", "success-2", "dnt-1", "dnt-2"],
+      "details": "Extended explanation if status is concern or fail"
+    }
+  ],
+  "dimension_count": {"pass": 0, "concern": 0, "fail": 0}
+}
+```
+
+### Dimension Definitions
+
+| ID | Name | Test Method | Pass | Concern | Fail |
+|----|------|-------------|------|---------|------|
+| `activation_quality` | Activation Quality | Run 3 success examples (should fire) + 3 do-not-trigger examples (should not fire). Score precision + recall on activation. | All correct | 1 misfire or 1 miss | 2+ errors |
+| `outcome_quality` | Outcome Quality | Run 3 success examples through skill. Judge output against `output_shape.description`. | All 3 produce acceptable output | 1 marginal output | 2+ failures |
+| `robustness` | Robustness | Take 3 success examples, perturb inputs (paraphrase, omit context, add noise). Run perturbed versions. | Output quality holds on 2+ | Quality holds on 1 | All degrade |
+| `recovery` | Recovery | Run 3 failure examples. Check if skill surfaces the problem instead of producing confident garbage. | Skill flags or recovers on 2+ | Flags or recovers on 1 | Blindly continues on all |
+| `efficiency` | Efficiency | Measure token count and tool-call count on success examples. Compare to the pre-mutation baseline captured in Phase 7 Experiment 0 (`baseline_trials[].trial_metadata` in `results.json`). If no Phase 7 baseline yet, use the raw counts with absolute threshold: 20K tokens / 10 tool calls per success example. | Within 2x of baseline or under 20K tokens/10 calls | 2-3x of baseline or 20-40K tokens | >3x of baseline or >40K tokens |
+| `boundary_discipline` | Boundary Discipline | Two-part check. Part A: Run 3 do-not-trigger examples — skill should decline/route/ignore. Part B: Run 3 success examples — skill should NOT produce out-of-scope side effects (e.g., modify files outside its stated scope, call unrelated tools). | Declines all DNT + no side effects | 1 partial activation or minor side effect | Activates on DNT or harmful side effects |
+
+When no contract exists: skip `activation_quality` and `boundary_discipline` (no do-not-trigger examples), run remaining 4 dimensions using Phase 3 traces as proxy inputs. Mark skipped dimensions as `"status": "skipped"`.
+
+### Floor Scoring Rules
+- `overall_status = "fail"` if ANY dimension is `fail`
+- `overall_status = "concern"` if ANY dimension is `concern` and none are `fail`
+- `overall_status = "pass"` if ALL dimensions are `pass`
+- Floor result is a **warning**, not a gate. Print result and continue to Phase 2 regardless.
+
+## Domain Eval Config Schema
+
+Read when: Phase 0.5 domain eval setup or Phase 5/7 domain metric scoring.
+
+### config.json
+```json
+{
+  "domain_eval_version": "1.0",
+  "metric_name": "ndcg_at_5",
+  "metric_display_name": "NDCG@5",
+  "threshold_pass": 0.65,
+  "threshold_concern": 0.50,
+  "weight_multiplier": 2.0,
+  "eval_script_path": "domain-eval/eval-metric.py",
+  "golden_set_path": "domain-eval/golden-set.jsonl",
+  "golden_set_count": 50,
+  "suggested_by_autorefine": true,
+  "author_confirmed": true,
+  "pattern_source": "retrieval_search"
+}
+```
+
+### golden-set.jsonl row
+```json
+{
+  "id": "golden-1",
+  "input": "The query or prompt",
+  "expected_output": "The ground-truth output or label",
+  "metadata": {}
+}
+```
+
+Field rules:
+- `weight_multiplier`: default 2.0. Applied as a multiplier on the eval's `weight` field in Phase 7 `decision_breakdown.components[]` before the `weighted_points = weight * pass_fail_score` computation. Default 2x chosen so domain ground-truth metrics outrank LLM judges in the weighted average — a domain metric scoring pass has twice the pull of a standard agent-as-judge passing. Authors can override (e.g., 3.0 to dominate, 1.0 to treat as equal-weight) in `config.json`.
+- `suggested_by_autorefine`: true if metric was suggested by pattern classification, false if author provided.
+- `author_confirmed`: must be true before domain eval runs. Phase 0.5 sets this after author confirmation.
+- `eval_script_path`: relative to `[workspace]/`. Script takes input + skill_output + expected_output, returns score 0-1.
+- When `golden_set_path` is null or empty: domain eval is disabled, falls back to LLM judges only.
+
+## Inferred Contract Template
+
+Read when: Phase 0.5 generates inferred-contract.md from author examples.
+
+### inferred-contract.md format
+```markdown
+# Inferred Effectiveness Contract
+
+Generated by AutoRefine from 9 author-provided examples. Author-corrected sections marked with [confirmed] or [corrected].
+
+## Intent
+[One-sentence skill purpose, inferred from success examples]
+
+## Success Criteria
+[Synthesized from success example output shapes — what "done right" looks like]
+
+## Non-Goals
+[Inferred from do-not-trigger examples — what the skill should NOT do]
+
+## Must-Catch Failure Modes
+[Extracted from failure examples — ranked by severity]
+
+## Trigger Conditions
+[Synthesized from success + do-not-trigger examples — when to fire vs stay quiet]
+
+## Domain Metric (if applicable)
+[Suggested metric, threshold, and reasoning. Null if not applicable.]
+
+## Evaluation Dimensions
+[Which Phase 5 evals map to which contract sections]
+
+## Correction Log
+[Author corrections to inferred content, with original vs corrected text]
+```
+
+Rules:
+- Every section must cite which example IDs informed it (e.g., "Inferred from success-1, success-3").
+- Author corrections are recorded in the Correction Log section with `ORIGINAL:` and `CORRECTED:` blocks.
+- After author correction, re-derive any dependent sections (e.g., if author corrects Intent, re-check Non-Goals alignment).
+
+## Contract Effectiveness Result Schema
+
+Read when: Session Close generates the Contract Effectiveness Report; dashboard reads `results.json.contract_effectiveness` to render the Contract Coverage card.
+
+Written by Session Close (see `references/gulf3-generalization.md > Contract Effectiveness Report`) at the end of each AutoRefine campaign. Persisted to `results.json.contract_effectiveness`. Consumed by `dashboard.html`.
+
+### results.json.contract_effectiveness
+
+```json
+{
+  "generated_at": "<ISO-timestamp>",
+  "final_version_id": "skill_version__<run_id>__exp_<NNN>",
+
+  "exact_match": {
+    "success_examples_pass": 0,
+    "success_examples_total": 3,
+    "failure_examples_caught": 0,
+    "failure_examples_total": 3,
+    "trigger_correct_fires": 0,
+    "trigger_total_fires": 3,
+    "trigger_correct_declines": 0,
+    "trigger_total_declines": 3
+  },
+
+  "paraphrased": {
+    "success_examples_pass": 0,
+    "success_examples_total": 6,
+    "failure_examples_caught": 0,
+    "failure_examples_total": 6,
+    "trigger_correct_fires": 0,
+    "trigger_total_fires": 6,
+    "trigger_correct_declines": 0,
+    "trigger_total_declines": 6
+  },
+
+  "overfit_analysis": {
+    "overfit_ratio": 0.0,
+    "overfit_threshold": 0.20,
+    "status": "overfit_none | overfit_warning",
+    "success_gap_pct": 0.0,
+    "failure_gap_pct": 0.0,
+    "trigger_gap_pct": 0.0
+  },
+
+  "domain_metric": null,
+
+  "efficiency_trend": {
+    "baseline_tokens": 0,
+    "final_tokens": 0,
+    "baseline_tool_calls": 0,
+    "final_tool_calls": 0,
+    "baseline_experiment_id": "exp_000",
+    "final_experiment_id": "exp_NNN"
+  },
+
+  "floor_delta": null,
+
+  "leakage_audit": {
+    "test_split_matches": 0,
+    "holdout_split_matches": 0,
+    "longest_match_chars": 0,
+    "status": "clean | warning | fail"
+  }
+}
+```
+
+### Field rules
+
+- `generated_at`: ISO-8601 timestamp when the report was written
+- `final_version_id`: the `version_id` of the kept winning skill version (from `skill-versions/`)
+- **`exact_match`**: results from re-running the final skill on the 9 original contract examples. High scores here combined with low `paraphrased` scores indicate memorization. Diagnostic only.
+- **`paraphrased`**: results from re-running on the 18 paraphrase variants (2 per original × 9). This is the honest effectiveness signal.
+- **`overfit_analysis`**:
+  - `overfit_ratio` = average of `(exact_match_rate - paraphrased_rate)` across success, failure, trigger categories. Range: -1.0 to 1.0. Positive values indicate exact-match outperforms paraphrased.
+  - `overfit_threshold`: fixed at 0.20 (20 percentage points). Configurable only for research runs.
+  - `status = "overfit_warning"` if `overfit_ratio > overfit_threshold`; else `"overfit_none"`.
+  - Individual gap fields (`success_gap_pct`, `failure_gap_pct`, `trigger_gap_pct`) expose per-category gaps for diagnostic display.
+- **`domain_metric`**: null when no domain eval configured. When configured, object: `{name: string, continuous_score: float, threshold_pass: float, status: "pass" | "concern" | "fail"}`.
+- **`efficiency_trend`**: token/tool-call delta from baseline experiment (`iteration_000`) to final kept experiment. Used for efficiency summary in report and dashboard.
+- **`floor_delta`**: null when no Phase 1b floor exists. When populated, array of `{dimension_id, before_status, after_status, changed: bool}` entries — one per dimension that existed at Phase 1b time.
+- **`leakage_audit`**: results from scanning the final `SKILL.md` for verbatim matches against test and adversarial_holdout fixture inputs.
+  - `test_split_matches`: count of test-fixture strings (>=20 contiguous chars) found in `SKILL.md`
+  - `holdout_split_matches`: count of holdout-fixture strings (>=20 contiguous chars) found in `SKILL.md`
+  - `longest_match_chars`: length of the longest verbatim match found (across both splits)
+  - `status`:
+    - `"clean"` if both match counts are 0
+    - `"warning"` if 1-2 total matches and `longest_match_chars < 50`
+    - `"fail"` if 3+ total matches OR `longest_match_chars >= 50`
+
+### Dashboard consumption
+
+`dashboard.html > renderContract` reads this object to populate the Contract Coverage card. Expected fields for the summary line: `exact_match.success_examples_pass`, `exact_match.failure_examples_caught`, `exact_match.trigger_correct_fires + trigger_correct_declines`, `paraphrased.success_examples_pass`, `overfit_analysis.status`, `domain_metric.name` (when non-null). The efficiency trend table reads `efficiency_trend.baseline_tokens → efficiency_trend.final_tokens` and the tool-call equivalents.
+
+### Missing field handling
+
+When Session Close writes the object but some fields aren't applicable (e.g., no domain eval, no Phase 1b floor), set the missing top-level field to `null` rather than omitting it. The dashboard is tolerant of `null` but not of missing keys — a missing key will cause the render path to crash.
 
 ---
 

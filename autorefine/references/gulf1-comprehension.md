@@ -6,6 +6,180 @@ Downstream phase-entry contract: on entry to Quick Start QS Step 2-4, Phase 2, o
 
 ---
 
+## Phase 0.5: Contract Collection
+
+Read when: starting a new campaign with no contract, or `state.json.contract_status` is null, `"not_started"`, `"collecting"`, or `"inferred"`.
+
+> **Optional but transformative.** 9 examples take ~15 min and anchor every downstream eval. Skip if you want generic eval generation (current behavior).
+
+### Resume Detection
+
+On entry, read `state.json.contract_status`:
+- `null` or `"not_started"` → proceed to Step 1 (Offer Contract)
+- `"collecting"` → mid-wizard resume, using row counts in `[workspace]/contract/*.jsonl` files to determine where to resume:
+  - `success-examples.jsonl` has < 3 rows → resume at Step 2, continuing from example N+1 where N = current row count
+  - `success-examples.jsonl` has 3 rows AND `failure-examples.jsonl` has < 3 rows → resume at Step 3, example N+1 where N = failure row count
+  - Both above complete AND `do-not-trigger-examples.jsonl` has < 3 rows → resume at Step 4, example N+1 where N = DNT row count
+  - All 3 JSONL files have 3 rows → advance `contract_status` to `"inferred"` (state was stale) and proceed to Step 5
+- `"inferred"` → skip to Step 6 (Author Correction Loop), reading the existing `[workspace]/contract/inferred-contract.md`.
+- `"confirmed"` or `"skipped"` → do not enter Phase 0.5, proceed to Phase 1 (routing handled by SKILL.md).
+
+### Step 1: Offer Contract (1 min)
+
+Present to user:
+```
+Your skill is loaded. Before building evals, I can collect 9 examples that define
+what "effective" means for THIS skill:
+  - 3 success examples (what done-right looks like)
+  - 3 failure examples (what must never happen)
+  - 3 do-not-trigger examples (when the skill should stay quiet)
+
+This takes ~15 min and makes every downstream eval more targeted.
+
+A) Collect examples (recommended — 15 min)
+B) Skip — use generic eval generation
+```
+
+If user chooses B: set `state.json.contract_status = "skipped"`, log `{"phase":"0.5","type":"contract_skipped"}` to session-log.json, and proceed to Phase 1.
+
+If user chooses A: set `state.json.contract_status = "collecting"`, ensure `[workspace]/contract/` exists (created by workspace init in SKILL.md), then proceed to Step 2.
+
+### Step 2: Collect Success Examples (5 min)
+
+Collect 3 success examples one at a time. For each:
+
+1. Ask: "Describe a scenario where your skill works correctly. What's the input?"
+2. After user provides input, ask: "What should the output look like? Describe the shape (not exact text)."
+3. Ask: "Can you paste or write a concrete example output?" (This becomes `actual_output`.)
+4. Auto-generate `output_shape.schema` from the description + actual_output:
+   - If output looks structured (JSON, lists, tables): generate a JSON Schema draft and show it with: "I generated a schema from your example. Keep it, edit it, or skip?"
+   - If output is prose/unstructured: set `schema: null`, say: "Output is unstructured — I'll use the description for judging."
+5. Write row to `[workspace]/contract/success-examples.jsonl` using `references.md > Contract Example Schema > Success Example Row`. Assign `id: "success-N"` where N increments from 1.
+
+After 3 success examples, print: "Got 3 success examples. Next: 3 failure examples."
+
+### Step 3: Collect Failure Examples (5 min)
+
+Collect 3 failure examples one at a time. For each:
+
+1. Ask: "Describe a scenario where your skill fails or produces unacceptable output. What's the input?"
+2. Ask: "What did the skill produce (or what would bad output look like)?"
+3. Ask: "Why is this unacceptable? (one sentence)"
+4. Write row to `[workspace]/contract/failure-examples.jsonl` using `references.md > Contract Example Schema > Failure Example Row`. Assign `id: "failure-N"` where N increments from 1.
+
+After 3 failure examples, print: "Got 3 failure examples. Next: 3 do-not-trigger examples."
+
+### Step 4: Collect Do-Not-Trigger Examples (3 min)
+
+Collect 3 do-not-trigger examples one at a time. For each:
+
+1. Ask: "Describe an input that LOOKS like it's for your skill but should NOT activate it. What's the input?"
+2. Ask: "What should happen? (one of: decline / route_elsewhere / ignore)"
+3. Write row to `[workspace]/contract/do-not-trigger-examples.jsonl` using `references.md > Contract Example Schema > Do-Not-Trigger Example Row`. Assign `id: "dnt-N"` where N increments from 1.
+
+After 3 do-not-trigger examples: set `state.json.contract_status = "inferred"` to mark collection complete, then print: "Got all 9 examples. Generating your effectiveness contract..."
+
+### Step 5: Generate Inferred Contract (2 min)
+
+Read all 9 examples from the 3 JSONL files in `[workspace]/contract/`. Generate `[workspace]/contract/inferred-contract.md` using `references.md > Inferred Contract Template`.
+
+For each section, cite which example IDs informed it. Apply these inference rules:
+- **Intent**: synthesize from success examples — what common job do they describe?
+- **Success Criteria**: merge `output_shape.description` fields from success examples
+- **Non-Goals**: derive from do-not-trigger examples — what adjacent tasks are out of scope?
+- **Must-Catch Failure Modes**: rank failure examples by severity (from `failure_reason`), extract the pattern
+- **Trigger Conditions**: success inputs = should-fire, do-not-trigger inputs = should-not-fire
+- **Domain Metric**: run Phase 1 pattern classification on the skill. If pattern suggests a domain metric (see `references.md > Skill Pattern Eval Strategy`), propose it with threshold and reasoning. Otherwise set "null — no domain metric applies".
+- **Evaluation Dimensions**: propose which Phase 5 eval categories map to which contract sections (e.g., Success Criteria → task-completion evals, Must-Catch Failure Modes → quality evals)
+
+Save the generated file. Do NOT advance state yet — wait for Step 6 corrections.
+
+### Step 6: Author Correction Loop (2 min)
+
+Present inferred-contract.md to the user section by section. For each section:
+
+```
+--- INTENT ---
+[inferred intent text]
+
+Based on: success-1, success-2, success-3
+
+Correct? (y to accept / paste corrected text)
+```
+
+For each correction:
+- Record in the Correction Log section with `ORIGINAL:` (exact prior text, max 3 lines) and `CORRECTED:` (new text) blocks.
+- Check if dependent sections need updating:
+  - Corrected Intent → re-check Non-Goals alignment
+  - Corrected Success Criteria → re-check Evaluation Dimensions mapping
+  - Corrected Non-Goals → re-check Trigger Conditions
+- If a dependency check flags a mismatch, surface it: "Your correction to Intent may affect Non-Goals. Want me to re-infer? (y/n)"
+
+Log each correction to session-log.json:
+```
+{"phase":"0.5","type":"contract_correction","section":"intent|success_criteria|...","section_index":N}
+```
+
+### Step 7: Domain Eval Setup (optional, 2 min)
+
+Determine whether Step 7 runs:
+1. Read the Domain Metric section of `[workspace]/contract/inferred-contract.md`. If null, Phase 1 pattern classification found no applicable domain metric — skip Step 7 entirely, proceed to Step 8.
+2. If non-null, check `state.json.domain_eval_config_path`:
+   - If null: proceed with the normal Step 7 options A/B/C/D flow below.
+   - If already set (resume case): run the Domain Eval Integrity Check from `SKILL.md` Step A before trusting it. If the check passes, skip Step 7 (domain eval already configured correctly). If the check fails (file missing, corrupted, or author_confirmed=false), clear `state.json.domain_eval_config_path` to null and re-enter Step 7 from the top.
+
+The integrity-first approach prevents a partial-state resume from treating a broken domain eval as valid.
+
+If Step 5's inferred contract has a non-null Domain Metric section (pattern classification suggested one):
+
+Present to user:
+```
+Based on your skill's pattern (PATTERN_NAME), I think the right effectiveness metric is:
+  Metric: [suggested metric, e.g., NDCG@5]
+  Reasoning: [why this metric fits your skill's domain]
+  Threshold: [suggested pass threshold]
+
+Options:
+A) Use this metric — I'll generate the eval script, you provide labeled data
+B) Use a different metric — you specify
+C) Bring your own eval script + golden set — provide paths
+D) Skip domain eval — use LLM judges only (current default)
+```
+
+Handle each option:
+- **A**: generate `[workspace]/domain-eval/eval-metric.py` and `[workspace]/domain-eval/config.json` using `references.md > Domain Eval Config Schema`. Set `author_confirmed: true`. Tell user: "When you have labeled data, save it to `[workspace]/domain-eval/golden-set.jsonl` and domain eval will activate in Phase 7." Set `state.json.domain_eval_config_path = [workspace]/domain-eval/config.json`.
+- **B**: ask for metric name + threshold. Generate script + config.json with those values. Set `author_confirmed: true` and `suggested_by_autorefine: false`. Set `state.json.domain_eval_config_path`.
+- **C**: ask for paths to eval script + golden set. Validate both files exist using `ls <path>`. If either file is missing, tell the user: `File not found at [path]. Please provide the correct path or type 'cancel' to return to the option menu.` Re-prompt up to 3 times. If the user types 'cancel', return to the A/B/C/D option menu. Do NOT generate config.json until both files are confirmed to exist. Once validated, generate config.json pointing at those paths with `suggested_by_autorefine: false` and `author_confirmed: true`. Set `state.json.domain_eval_config_path`.
+- **D**: leave `state.json.domain_eval_config_path = null`. Continue to Step 8.
+
+If Step 5 produced no Domain Metric (pattern classification found no applicable metric): skip Step 7 entirely, continue to Step 8.
+
+### Step 8: Finalize Contract
+
+Set `state.json.contract_status = "confirmed"`. Set `state.json.contract_path = "[workspace]/contract/"`.
+
+Log to session-log.json:
+```json
+{"phase":"0.5","type":"contract_confirmed","success_count":3,"failure_count":3,"dnt_count":3,"domain_eval":"<configured|skipped>","corrections":N,"pattern_classification":"<pattern_name>"}
+```
+
+Substitute `<configured|skipped>` with `"configured"` if `state.json.domain_eval_config_path` was set in Step 7, otherwise `"skipped"`. Substitute `<pattern_name>` with the classification result from Phase 1, or `"unclassified"` if pattern classification wasn't run yet.
+
+Print:
+```
+Contract confirmed.
+  9 examples saved to [workspace]/contract/
+  Inferred contract: [workspace]/contract/inferred-contract.md
+  Domain eval: [configured with METRIC | skipped]
+  Author corrections: N
+
+Moving to Phase 1 Design Audit + Effectiveness Floor...
+```
+
+Proceed to Phase 1.
+
+---
+
 ## Quick Start Path
 
 Read when: Quick Start path active (State 1 from Preflight routing).
@@ -126,6 +300,180 @@ The classification shapes downstream evaluation strategy. See `references.md > S
 Remaining dimensions: `references.md > V2.0 Design Audit Rubric`.
 
 **Output:** `design-audit.md` (includes pattern classification + Gotchas section with taxonomy, evidence, confidence levels, and probe results). When writing a structured audit payload, preserve the canonical dimension order and keys from `references.md > Phase 1 Design Audit Dimension Schema`. Emit the chosen primary pattern as the top-level `selected_skill_pattern` field in that payload. Emit the resolved downstream selector as the top-level `selected_eval_strategy_id` field in that payload. Source it from `state.json.phase1_context.selected_skill_pattern` for the active run rather than inferring it from prose or rereading state later. If routing fixtures were replayed, persist their comparable wrapper as top-level `phase1_routing_fixture_result_collection`. Source all three from the active run's canonical Phase 1 state/results rather than inferring them from prose or rereading raw manifests later. Append to session-log.json: `{"phase":"1","type":"design_audit","detail":"Pattern: [pattern]. Eval strategy: [strategy_id]. Scored 6 dims: Gotchas=X (N categories matched, M confirmed), Voice=X, Disclosure=X, Anti-Railroading=X, Description Quality=X, Scripts=X"}`. Phase 3 inherits `suspected` gotcha items as targeting input. **State:** advance to Phase 2.
+
+---
+
+## Phase 1b: Effectiveness Floor (5 min)
+
+Read when: Phase 1 Design Audit complete, before Phase 2. Produces `[workspace]/effectiveness-floor.md`.
+
+Evaluates 6 behavioral dimensions per `references.md > Effectiveness Floor Schema > Dimension Definitions`. Result is a **warning, not a gate** — print the result and continue to Phase 2 regardless of status.
+
+### Step 1: Input Selection
+
+Check `state.json.contract_status` and determine whether Phase 1b has enough data to run deterministically:
+
+**Case A — `contract_status = "confirmed"` (full data path, 6 dimensions):**
+Use contract examples as test inputs (3 success, 3 failure, 3 do-not-trigger from `[workspace]/contract/*.jsonl`). Run all 6 dimensions. Proceed to Step 2.
+
+**Case B — `contract_status = "skipped"` or null, AND `state.json.phases.error_analysis = "complete"` (Phase 3 done, 4 dimensions):**
+Phase 3 completed in a prior session or earlier in this pipeline run. Use Phase 3 traces as proxy inputs with this deterministic mapping:
+- Outcome quality: use the first 3 labeled-pass traces from `error-analysis-traces.md` as "expected success" inputs
+- Robustness: use Phase 3 traces with perturbation rules from Step 2c (applied by trace index: trace-1 → paraphrase, trace-2 → omit context, trace-3 → noise)
+- Recovery: use the first 3 labeled-fail traces from `error-analysis-traces.md` as "expected failure" inputs
+- Efficiency: run the 3 labeled-pass traces and measure per-input token/tool counts
+
+Skip `activation_quality` and `boundary_discipline` (require do-not-trigger examples that don't exist without a contract). Mark as `"status": "skipped"`. Run remaining 4 dimensions. Proceed to Step 2.
+
+**Case C — `contract_status = "skipped"` or null, AND Phase 3 not yet complete (DEFERRED):**
+Phase 1b cannot run deterministically on a fresh first-time run with no contract and no Phase 3 data. Any proxy inputs the agent invents would cause non-deterministic floor results across runs.
+
+Skip Phase 1b for now. Write a stub `[workspace]/effectiveness-floor.md`:
+
+```
+# Effectiveness Floor — DEFERRED
+
+No contract examples and no Phase 3 traces available yet. Phase 1b deferred until Phase 3 error analysis completes. Floor will auto-run after Phase 3 Gate 1 approval.
+
+Status: DEFERRED (ran 0 of 6 dimensions)
+```
+
+Set `state.json.effectiveness_floor = {"overall_status": "deferred", "deferred_reason": "no_contract_no_phase3_data", "evaluated_at": null, "dimensions": []}` so the dashboard displays "deferred" instead of empty.
+
+Log to session-log.json: `{"phase":"1b","type":"effectiveness_floor_deferred","reason":"no_contract_no_phase3_data"}`.
+
+Proceed to Phase 2. Phase 1b will re-run after Phase 3 completes, entering via Case B.
+
+**Auto-run trigger after Phase 3:** After Phase 3 Gate 1 is approved, if `state.json.effectiveness_floor.overall_status == "deferred"`, re-enter Phase 1b via Case B before starting Phase 4. This is a one-time re-entry (not a loop). The re-run uses the same Case B inputs and produces a normal floor result that replaces the deferred stub.
+
+### Step 2: Evaluate Each Dimension
+
+Evaluate each of the 6 dimensions per `references.md > Effectiveness Floor Schema > Dimension Definitions`. For each dimension, follow the test method in the schema and assign `pass`, `concern`, or `fail` per the threshold columns.
+
+#### 2a: Activation Quality
+
+**Input variation mandate (NEW — Resolver-inspired):** For each of the 3 success-example inputs, generate 2 phrasing variations using this fixed assignment to keep runs reproducible:
+- **Variation 1 — question/imperative flip:** if the original is imperative ('track this flight'), rephrase as a question ('is my flight on time?'). If the original is a question, rephrase as an imperative.
+- **Variation 2 — synonym substitution:** replace the primary action verb and one key noun with synonyms (e.g., 'track' → 'monitor', 'flight' → 'trip').
+
+Assign stable input IDs: `success-N-paraphrase-1` (question/imperative flip), `success-N-paraphrase-2` (synonym substitution).
+
+Total: 3 success inputs × 3 phrasings = 9 should-fire inputs, plus the 3 do-not-trigger inputs as-is = 12 inputs total for this dimension.
+
+Rationale: a skill that fires on one exact phrasing but misses rephrased versions has fragile activation — the classic "trigger description says `track this flight` but user says `is my flight delayed?`" failure mode.
+
+Run the skill's activation check against all 12 inputs (route each input through a minimal skill-selection test: given the skill's `description` field and the input, would a routing LLM pick this skill?). Score using a proportion-based scaling of the schema's 6-input error rule ("All correct / 1 misfire or 1 miss / 2+ errors"). For the default 6-input case (no paraphrase variation), use schema thresholds directly. For the 12-input case (paraphrase variation active), scale the error proportion:
+
+| Inputs | Pass (error rate) | Concern (error rate) | Fail (error rate) |
+|--------|-------------------|----------------------|-------------------|
+| 6 (schema default) | All correct (0 errors) | 1 error (16.7%) | 2+ errors (33%+) |
+| 12 (paraphrase variation) | 0-1 errors (0-8.3%) | 2-3 errors (17-25%) | 4+ errors (33%+) |
+
+Note: The 12-input "Pass 0-1" range is NOT equivalent to the schema's "all correct" (0 errors). It represents the proportion-scaled equivalent where 1 miss out of 12 corresponds to 0.5 misses out of 6 — below the schema's "1 error = concern" threshold when scaled. In practice: 12/12 correct is the strictest pass; 11/12 is still a pass by proportion, but a reviewer cross-referencing the schema should understand this is a scaling choice, not a looser bar. If you want schema-strict behavior, run the default 6-input test.
+
+Record in the floor result: `test_inputs_used` includes all 12 input IDs (e.g., `success-1`, `success-1-paraphrase-1`, `success-1-paraphrase-2`, ..., `dnt-3`).
+
+#### 2b: Outcome Quality
+
+Run the 3 success examples through the skill. For each, judge the output against `output_shape.description` (from the contract) or against Phase 3 expected-output traces if no contract. Score per the schema (3 pass → pass, 1 marginal → concern, 2+ fail → fail).
+
+#### 2c: Robustness
+
+Take 3 success examples. Apply perturbations in this fixed order to keep runs reproducible:
+- success-1 → paraphrase the primary request
+- success-2 → remove one piece of context the skill would normally rely on
+- success-3 → add 2-3 sentences of irrelevant noise before the actual request
+
+Assign stable input IDs: `success-N-robustness` for each perturbed input.
+
+Run perturbed inputs through the skill. Check if output quality holds (compared against the same `output_shape.description`). Score per the schema.
+
+#### 2d: Recovery
+
+Run the 3 failure examples (inputs designed to cause problems). For each, check if the skill:
+- Flags the problem explicitly (e.g., asks for clarification, surfaces missing info)
+- OR recovers (attempts a reasonable fallback with clear acknowledgment)
+- OR continues blindly (confident garbage)
+
+Score per the schema (flags-or-recovers on 2+ → pass, on 1 → concern, blindly-continues on all → fail).
+
+#### 2e: Efficiency
+
+Measure token count + tool-call count per success example execution. Compare to:
+- Phase 7 Experiment 0 `baseline_trials[].trial_metadata` in `results.json` if available
+- Otherwise, absolute threshold: 20K tokens / 10 tool calls per success example
+
+Score per the schema (within 2x baseline OR under 20K/10 → pass; 2-3x OR 20-40K → concern; >3x OR >40K → fail).
+
+#### 2f: Boundary Discipline
+
+**Part A:** Run 3 do-not-trigger examples. Skill should decline, route elsewhere, or ignore per each example's `expected_behavior` field.
+
+**Part B:** Run 3 success examples and check for out-of-scope side effects. Specifically: did the skill modify files outside its stated scope? Did it call tools unrelated to its purpose? Did it persist state beyond what its `description` implies?
+
+Score per the schema (all DNT declined + no side effects → pass; 1 partial activation or minor side effect → concern; activates on DNT or harmful side effects → fail).
+
+### Step 3: Compute Overall Status
+
+Per `references.md > Effectiveness Floor Schema > Floor Scoring Rules`:
+- `overall_status = "fail"` if ANY dimension is `fail`
+- `overall_status = "concern"` if ANY dimension is `concern` and none are `fail`
+- `overall_status = "pass"` if ALL non-skipped dimensions are `pass`. (This extends the schema's `Floor Scoring Rules` — the schema predates the `skipped` status introduced when contract is unavailable. Skipped dimensions are excluded from the pass check.)
+
+### Step 4: Write Floor Report
+
+Write `[workspace]/effectiveness-floor.md` with this human-readable format:
+
+```
+# Effectiveness Floor — [skill_name]
+
+Overall: [PASS / CONCERN / FAIL]     Date: [ISO date]     Contract: [available | skipped]
+
+| Dimension | Status | Evidence |
+|-----------|--------|----------|
+| Activation Quality | [pass/concern/fail/skipped] | [one-line summary — e.g., "11/12 correct fire, including 2/3 paraphrase variations on success-2"] |
+| Outcome Quality | ... | ... |
+| Robustness | ... | ... |
+| Recovery | ... | ... |
+| Efficiency | ... | ... |
+| Boundary Discipline | ... | ... |
+
+## Details
+
+[For each dimension with status = concern or fail, provide 2-3 sentences explaining:
+- Which specific test inputs failed
+- What the failure looked like
+- What the author might investigate]
+```
+
+### Step 5: Persist Floor Result
+
+Serialize the floor result object using `references.md > Effectiveness Floor Schema > Floor Result` (JSON shape). Store at `state.json.effectiveness_floor`. Include:
+- `floor_version: "1.0"`
+- `evaluated_at: <ISO timestamp>`
+- `skill_name` from state
+- `contract_available: true` if contract_status was "confirmed", else false
+- `overall_status` from Step 3
+- `dimensions[]` — one entry per dimension with id, name, status, evidence (one-line summary), test_inputs_used (input IDs), details (extended explanation if concern/fail)
+- `dimension_count: {pass: N, concern: N, fail: N}` (exclude skipped from counts)
+
+### Step 6: Present Result and Continue
+
+Print to user:
+```
+Effectiveness Floor: [PASS / CONCERN / FAIL]
+  [N pass, N concern, N fail, N skipped]
+  [One-line summary of any concern/fail dimensions, or "No issues found."]
+
+This is a warning, not a gate. Continuing to Phase 2...
+```
+
+Log to session-log.json:
+```json
+{"phase":"1b","type":"effectiveness_floor","overall":"<pass|concern|fail>","dimensions":{"activation_quality":"<status>","outcome_quality":"<status>","robustness":"<status>","recovery":"<status>","efficiency":"<status>","boundary_discipline":"<status>"}}
+```
+
+Proceed to Phase 2 regardless of result.
 
 ---
 
