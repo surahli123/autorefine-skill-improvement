@@ -315,14 +315,22 @@ Evaluate each of the 6 dimensions per `references.md > Effectiveness Floor Schem
 
 #### 2a: Activation Quality
 
-**Input variation mandate (NEW — Resolver-inspired):** For each of the 3 success-example inputs, generate 2 additional phrasing variations before running the skill. Cover formal/informal, verbose/terse, question vs. imperative, and synonym substitution. Total: 3 success inputs × 3 phrasings = 9 should-fire inputs, plus the 3 do-not-trigger inputs as-is = 12 inputs total for this dimension.
+**Input variation mandate (NEW — Resolver-inspired):** For each of the 3 success-example inputs, generate 2 phrasing variations using this fixed assignment to keep runs reproducible:
+- **Variation 1 — question/imperative flip:** if the original is imperative ('track this flight'), rephrase as a question ('is my flight on time?'). If the original is a question, rephrase as an imperative.
+- **Variation 2 — synonym substitution:** replace the primary action verb and one key noun with synonyms (e.g., 'track' → 'monitor', 'flight' → 'trip').
+
+Assign stable input IDs: `success-N-paraphrase-1` (question/imperative flip), `success-N-paraphrase-2` (synonym substitution).
+
+Total: 3 success inputs × 3 phrasings = 9 should-fire inputs, plus the 3 do-not-trigger inputs as-is = 12 inputs total for this dimension.
 
 Rationale: a skill that fires on one exact phrasing but misses rephrased versions has fragile activation — the classic "trigger description says `track this flight` but user says `is my flight delayed?`" failure mode.
 
-Run the skill's activation check against all 12 inputs (route each input through a minimal skill-selection test: given the skill's `description` field and the input, would a routing LLM pick this skill?). Score:
-- Pass: 11-12 correct (precision + recall on activation)
-- Concern: 9-10 correct
-- Fail: ≤8 correct
+Run the skill's activation check against all 12 inputs (route each input through a minimal skill-selection test: given the skill's `description` field and the input, would a routing LLM pick this skill?). Score using the schema's error-rate formula scaled to the 12-input count:
+- Pass: 0-1 errors (0-8.3% error rate — matches schema's "all correct")
+- Concern: 2-3 errors (17-25% error rate — matches schema's "1 misfire or miss" scaled)
+- Fail: 4+ errors (33%+ error rate — matches schema's "2+ errors" scaled)
+
+The schema thresholds are proportion-based: a "2+ errors in 6" rule becomes "4+ errors in 12" when input count doubles. If contract is skipped and you run the default 6-input test instead, use the schema thresholds directly (All / 1 / 2+).
 
 Record in the floor result: `test_inputs_used` includes all 12 input IDs (e.g., `success-1`, `success-1-paraphrase-1`, `success-1-paraphrase-2`, ..., `dnt-3`).
 
@@ -332,10 +340,12 @@ Run the 3 success examples through the skill. For each, judge the output against
 
 #### 2c: Robustness
 
-Take 3 success examples. For each, perturb the input in ONE of these ways (pick per example, don't apply all):
-- Paraphrase the primary request
-- Remove one piece of context the skill would normally rely on
-- Add irrelevant noise sentences before or after the actual request
+Take 3 success examples. Apply perturbations in this fixed order to keep runs reproducible:
+- success-1 → paraphrase the primary request
+- success-2 → remove one piece of context the skill would normally rely on
+- success-3 → add 2-3 sentences of irrelevant noise before the actual request
+
+Assign stable input IDs: `success-N-robustness` for each perturbed input.
 
 Run perturbed inputs through the skill. Check if output quality holds (compared against the same `output_shape.description`). Score per the schema.
 
@@ -369,7 +379,7 @@ Score per the schema (all DNT declined + no side effects → pass; 1 partial act
 Per `references.md > Effectiveness Floor Schema > Floor Scoring Rules`:
 - `overall_status = "fail"` if ANY dimension is `fail`
 - `overall_status = "concern"` if ANY dimension is `concern` and none are `fail`
-- `overall_status = "pass"` if ALL dimensions are `pass` or `skipped`
+- `overall_status = "pass"` if ALL non-skipped dimensions are `pass`. (This extends the schema's `Floor Scoring Rules` — the schema predates the `skipped` status introduced when contract is unavailable. Skipped dimensions are excluded from the pass check.)
 
 ### Step 4: Write Floor Report
 
