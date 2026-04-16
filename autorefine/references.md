@@ -2661,6 +2661,103 @@ Rules:
 - Author corrections are recorded in the Correction Log section with `ORIGINAL:` and `CORRECTED:` blocks.
 - After author correction, re-derive any dependent sections (e.g., if author corrects Intent, re-check Non-Goals alignment).
 
+## Contract Effectiveness Result Schema
+
+Read when: Session Close generates the Contract Effectiveness Report; dashboard reads `results.json.contract_effectiveness` to render the Contract Coverage card.
+
+Written by Session Close (see `references/gulf3-generalization.md > Contract Effectiveness Report`) at the end of each AutoRefine campaign. Persisted to `results.json.contract_effectiveness`. Consumed by `dashboard.html`.
+
+### results.json.contract_effectiveness
+
+```json
+{
+  "generated_at": "<ISO-timestamp>",
+  "final_version_id": "skill_version__<run_id>__exp_<NNN>",
+
+  "exact_match": {
+    "success_examples_pass": 0,
+    "success_examples_total": 3,
+    "failure_examples_caught": 0,
+    "failure_examples_total": 3,
+    "trigger_correct_fires": 0,
+    "trigger_total_fires": 3,
+    "trigger_correct_declines": 0,
+    "trigger_total_declines": 3
+  },
+
+  "paraphrased": {
+    "success_examples_pass": 0,
+    "success_examples_total": 6,
+    "failure_examples_caught": 0,
+    "failure_examples_total": 6,
+    "trigger_correct_fires": 0,
+    "trigger_total_fires": 6,
+    "trigger_correct_declines": 0,
+    "trigger_total_declines": 6
+  },
+
+  "overfit_analysis": {
+    "overfit_ratio": 0.0,
+    "overfit_threshold": 0.20,
+    "status": "overfit_none | overfit_warning",
+    "success_gap_pct": 0.0,
+    "failure_gap_pct": 0.0,
+    "trigger_gap_pct": 0.0
+  },
+
+  "domain_metric": null,
+
+  "efficiency_trend": {
+    "baseline_tokens": 0,
+    "final_tokens": 0,
+    "baseline_tool_calls": 0,
+    "final_tool_calls": 0,
+    "baseline_experiment_id": "exp_000",
+    "final_experiment_id": "exp_NNN"
+  },
+
+  "floor_delta": null,
+
+  "leakage_audit": {
+    "test_split_matches": 0,
+    "holdout_split_matches": 0,
+    "longest_match_chars": 0,
+    "status": "clean | warning | fail"
+  }
+}
+```
+
+### Field rules
+
+- `generated_at`: ISO-8601 timestamp when the report was written
+- `final_version_id`: the `version_id` of the kept winning skill version (from `skill-versions/`)
+- **`exact_match`**: results from re-running the final skill on the 9 original contract examples. High scores here combined with low `paraphrased` scores indicate memorization. Diagnostic only.
+- **`paraphrased`**: results from re-running on the 18 paraphrase variants (2 per original × 9). This is the honest effectiveness signal.
+- **`overfit_analysis`**:
+  - `overfit_ratio` = average of `(exact_match_rate - paraphrased_rate)` across success, failure, trigger categories. Range: -1.0 to 1.0. Positive values indicate exact-match outperforms paraphrased.
+  - `overfit_threshold`: fixed at 0.20 (20 percentage points). Configurable only for research runs.
+  - `status = "overfit_warning"` if `overfit_ratio > overfit_threshold`; else `"overfit_none"`.
+  - Individual gap fields (`success_gap_pct`, `failure_gap_pct`, `trigger_gap_pct`) expose per-category gaps for diagnostic display.
+- **`domain_metric`**: null when no domain eval configured. When configured, object: `{name: string, continuous_score: float, threshold_pass: float, status: "pass" | "concern" | "fail"}`.
+- **`efficiency_trend`**: token/tool-call delta from baseline experiment (`iteration_000`) to final kept experiment. Used for efficiency summary in report and dashboard.
+- **`floor_delta`**: null when no Phase 1b floor exists. When populated, array of `{dimension_id, before_status, after_status, changed: bool}` entries — one per dimension that existed at Phase 1b time.
+- **`leakage_audit`**: results from scanning the final `SKILL.md` for verbatim matches against test and adversarial_holdout fixture inputs.
+  - `test_split_matches`: count of test-fixture strings (>=20 contiguous chars) found in `SKILL.md`
+  - `holdout_split_matches`: count of holdout-fixture strings (>=20 contiguous chars) found in `SKILL.md`
+  - `longest_match_chars`: length of the longest verbatim match found (across both splits)
+  - `status`:
+    - `"clean"` if both match counts are 0
+    - `"warning"` if 1-2 total matches and `longest_match_chars < 50`
+    - `"fail"` if 3+ total matches OR `longest_match_chars >= 50`
+
+### Dashboard consumption
+
+`dashboard.html > renderContract` reads this object to populate the Contract Coverage card. Expected fields for the summary line: `exact_match.success_examples_pass`, `exact_match.failure_examples_caught`, `exact_match.trigger_correct_fires + trigger_correct_declines`, `paraphrased.success_examples_pass`, `overfit_analysis.status`, `domain_metric.name` (when non-null). The efficiency trend table reads `efficiency_trend.baseline_tokens → efficiency_trend.final_tokens` and the tool-call equivalents.
+
+### Missing field handling
+
+When Session Close writes the object but some fields aren't applicable (e.g., no domain eval, no Phase 1b floor), set the missing top-level field to `null` rather than omitting it. The dashboard is tolerant of `null` but not of missing keys — a missing key will cause the render path to crash.
+
 ---
 
 ## Gotchas
