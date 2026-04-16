@@ -305,9 +305,40 @@ Evaluates 6 behavioral dimensions per `references.md > Effectiveness Floor Schem
 
 ### Step 1: Input Selection
 
-Check `state.json.contract_status`:
-- If `"confirmed"`: use contract examples as test inputs (3 success, 3 failure, 3 do-not-trigger from `[workspace]/contract/*.jsonl`).
-- If `"skipped"` or null: skip dimensions that require do-not-trigger examples (`activation_quality` and `boundary_discipline` — mark as `"status": "skipped"`). Run remaining 4 dimensions using Phase 3 traces if available, or generate 3 proxy inputs from Phase 1 findings.
+Check `state.json.contract_status` and determine whether Phase 1b has enough data to run deterministically:
+
+**Case A — `contract_status = "confirmed"` (full data path, 6 dimensions):**
+Use contract examples as test inputs (3 success, 3 failure, 3 do-not-trigger from `[workspace]/contract/*.jsonl`). Run all 6 dimensions. Proceed to Step 2.
+
+**Case B — `contract_status = "skipped"` or null, AND `state.json.phases.error_analysis = "complete"` (Phase 3 done, 4 dimensions):**
+Phase 3 completed in a prior session or earlier in this pipeline run. Use Phase 3 traces as proxy inputs with this deterministic mapping:
+- Outcome quality: use the first 3 labeled-pass traces from `error-analysis-traces.md` as "expected success" inputs
+- Robustness: use Phase 3 traces with perturbation rules from Step 2c (applied by trace index: trace-1 → paraphrase, trace-2 → omit context, trace-3 → noise)
+- Recovery: use the first 3 labeled-fail traces from `error-analysis-traces.md` as "expected failure" inputs
+- Efficiency: run the 3 labeled-pass traces and measure per-input token/tool counts
+
+Skip `activation_quality` and `boundary_discipline` (require do-not-trigger examples that don't exist without a contract). Mark as `"status": "skipped"`. Run remaining 4 dimensions. Proceed to Step 2.
+
+**Case C — `contract_status = "skipped"` or null, AND Phase 3 not yet complete (DEFERRED):**
+Phase 1b cannot run deterministically on a fresh first-time run with no contract and no Phase 3 data. Any proxy inputs the agent invents would cause non-deterministic floor results across runs.
+
+Skip Phase 1b for now. Write a stub `[workspace]/effectiveness-floor.md`:
+
+```
+# Effectiveness Floor — DEFERRED
+
+No contract examples and no Phase 3 traces available yet. Phase 1b deferred until Phase 3 error analysis completes. Floor will auto-run after Phase 3 Gate 1 approval.
+
+Status: DEFERRED (ran 0 of 6 dimensions)
+```
+
+Set `state.json.effectiveness_floor = {"overall_status": "deferred", "deferred_reason": "no_contract_no_phase3_data", "evaluated_at": null, "dimensions": []}` so the dashboard displays "deferred" instead of empty.
+
+Log to session-log.json: `{"phase":"1b","type":"effectiveness_floor_deferred","reason":"no_contract_no_phase3_data"}`.
+
+Proceed to Phase 2. Phase 1b will re-run after Phase 3 completes, entering via Case B.
+
+**Auto-run trigger after Phase 3:** After Phase 3 Gate 1 is approved, if `state.json.effectiveness_floor.overall_status == "deferred"`, re-enter Phase 1b via Case B before starting Phase 4. This is a one-time re-entry (not a loop). The re-run uses the same Case B inputs and produces a normal floor result that replaces the deferred stub.
 
 ### Step 2: Evaluate Each Dimension
 
