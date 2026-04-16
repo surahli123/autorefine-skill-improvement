@@ -12,7 +12,7 @@ Workspace directories for new runs are `traces/`, `judges/`, `runs/`, and `skill
 
 ### state.json
 ```json
-{"schema_version":4,"skill_name":"<name>","skill_path":"<path>","original_skill_path":"<path>","workspace_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null,"consecutive_discards":0,"circuit_breaker":null,"current_run_id":null,"current_run_path":null,"current_experiment":null,"iteration_state":null,"completion_cadence":null,"pending_user_override_scan":null,"mid_session_preference_signals":null,"mid_session_preference_signals_path":null,"skill_pattern":null,"phase1_context":null,"mutation_stage_split_access_policy":null,"meta_learnings_path":null,"research_intake":null,"research_intake_path":null,"final_only_evaluation":null,"quick_start":null}
+{"schema_version":4,"skill_name":"<name>","skill_path":"<path>","original_skill_path":"<path>","workspace_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null,"consecutive_discards":0,"circuit_breaker":null,"current_run_id":null,"current_run_path":null,"current_experiment":null,"iteration_state":null,"completion_cadence":null,"pending_user_override_scan":null,"mid_session_preference_signals":null,"mid_session_preference_signals_path":null,"skill_pattern":null,"phase1_context":null,"mutation_stage_split_access_policy":null,"meta_learnings_path":null,"research_intake":null,"research_intake_path":null,"final_only_evaluation":null,"quick_start":null,"contract_status":null,"contract_path":null,"effectiveness_floor":null,"domain_eval_config_path":null}
 ```
 - `schema_version`: 4 for v2.3 workspaces. Legacy: 2 = Standard/Deep (v2.1), 3 = Quick Start (v2.2). New fields default to null when reading v2/v3 workspaces.
 - `loop_iteration`: tracks Phase 7→5 loop-backs (0 = first run)
@@ -77,6 +77,10 @@ Workspace directories for new runs are `traces/`, `judges/`, `runs/`, and `skill
 - Gate all downstream Phase 1 processing on `phase1_context.selected_skill_pattern` and `phase1_context.selected_eval_strategy_id` being captured for the active run.
 - If `phase1_context.selected_skill_pattern` is null, missing, empty, or mismatched with `state.json.skill_pattern`, stop Phase 1 immediately and rerun Step 0 before scoring any dimension.
 - If `phase1_context.selected_eval_strategy_id` is null, missing, empty, or does not resolve back to the current `selected_skill_pattern` through `Skill Pattern Eval Strategy > Pattern-to-Evaluation-Strategy Selector`, stop Phase 1 immediately and rerun strategy selection before scoring any dimension.
+- `contract_status`: null, or `"not_started" | "collecting" | "inferred" | "confirmed" | "skipped"`. Tracks Phase 0.5 progress. Null and `"not_started"` both trigger Phase 0.5 entry; `"skipped"` bypasses Phase 0.5; `"confirmed"` means contract is ready for downstream consumption.
+- `contract_path`: null, or `[workspace]/contract/`. Set when Phase 0.5 creates the contract directory. Contains `success-examples.jsonl`, `failure-examples.jsonl`, `do-not-trigger-examples.jsonl`, and `inferred-contract.md` per `Contract Example Schema` and `Inferred Contract Template`.
+- `effectiveness_floor`: null, or the floor result object from Phase 1b (see `Effectiveness Floor Schema > Floor Result`). Persisted for dashboard and Session Close delta reporting.
+- `domain_eval_config_path`: null, or `[workspace]/domain-eval/config.json`. Set when author provides domain eval assets in Phase 0.5 Step 7. See `Domain Eval Config Schema`.
 
 ### results.json
 ```json
