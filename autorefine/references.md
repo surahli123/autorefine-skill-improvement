@@ -2566,9 +2566,9 @@ Read when: Phase 1 effectiveness floor evaluation.
 | `activation_quality` | Activation Quality | Run 3 success examples (should fire) + 3 do-not-trigger examples (should not fire). Score precision + recall on activation. | All correct | 1 misfire or 1 miss | 2+ errors |
 | `outcome_quality` | Outcome Quality | Run 3 success examples through skill. Judge output against `output_shape.description`. | All 3 produce acceptable output | 1 marginal output | 2+ failures |
 | `robustness` | Robustness | Take 3 success examples, perturb inputs (paraphrase, omit context, add noise). Run perturbed versions. | Output quality holds on 2+ | Quality holds on 1 | All degrade |
-| `recovery` | Recovery | Run 3 failure examples. Check if skill surfaces the problem instead of producing confident garbage. | Skill flags or recovers on 2+ | Flags on 1 | Blindly continues on all |
-| `efficiency` | Efficiency | Measure token count and tool-call count on success examples. Compare to baseline. | Within 2x of expected for pattern | 2-3x of expected | >3x of expected |
-| `boundary_discipline` | Boundary Discipline | Run 3 do-not-trigger examples. Check for out-of-scope actions on success examples. | Declines all DNT + no side effects | 1 partial activation or minor side effect | Activates on DNT or harmful side effects |
+| `recovery` | Recovery | Run 3 failure examples. Check if skill surfaces the problem instead of producing confident garbage. | Skill flags or recovers on 2+ | Flags or recovers on 1 | Blindly continues on all |
+| `efficiency` | Efficiency | Measure token count and tool-call count on success examples. Compare to the pre-mutation baseline captured in Phase 7 Experiment 0 (`baseline_trials[].trial_metadata` in `results.json`). If no Phase 7 baseline yet, use the raw counts with absolute threshold: 20K tokens / 10 tool calls per success example. | Within 2x of baseline or under 20K tokens/10 calls | 2-3x of baseline or 20-40K tokens | >3x of baseline or >40K tokens |
+| `boundary_discipline` | Boundary Discipline | Two-part check. Part A: Run 3 do-not-trigger examples — skill should decline/route/ignore. Part B: Run 3 success examples — skill should NOT produce out-of-scope side effects (e.g., modify files outside its stated scope, call unrelated tools). | Declines all DNT + no side effects | 1 partial activation or minor side effect | Activates on DNT or harmful side effects |
 
 When no contract exists: skip `activation_quality` and `boundary_discipline` (no do-not-trigger examples), run remaining 4 dimensions using Phase 3 traces as proxy inputs. Mark skipped dimensions as `"status": "skipped"`.
 
@@ -2611,7 +2611,7 @@ Read when: Phase 0.5 domain eval setup or Phase 5/7 domain metric scoring.
 ```
 
 Field rules:
-- `weight_multiplier`: default 2.0. Domain metric scores count 2x in Phase 7 `combined_score`.
+- `weight_multiplier`: default 2.0. Applied as a multiplier on the eval's `weight` field in Phase 7 `decision_breakdown.components[]` before the `weighted_points = weight * pass_fail_score` computation. Default 2x chosen so domain ground-truth metrics outrank LLM judges in the weighted average — a domain metric scoring pass has twice the pull of a standard agent-as-judge passing. Authors can override (e.g., 3.0 to dominate, 1.0 to treat as equal-weight) in `config.json`.
 - `suggested_by_autorefine`: true if metric was suggested by pattern classification, false if author provided.
 - `author_confirmed`: must be true before domain eval runs. Phase 0.5 sets this after author confirmation.
 - `eval_script_path`: relative to `[workspace]/`. Script takes input + skill_output + expected_output, returns score 0-1.
@@ -2656,6 +2656,8 @@ Rules:
 - Every section must cite which example IDs informed it (e.g., "Inferred from success-1, success-3").
 - Author corrections are recorded in the Correction Log section with `ORIGINAL:` and `CORRECTED:` blocks.
 - After author correction, re-derive any dependent sections (e.g., if author corrects Intent, re-check Non-Goals alignment).
+
+---
 
 ## Gotchas
 
