@@ -117,11 +117,12 @@ Populate from `[workspace]/runs/run_*/iteration_*/mutation.md` (for prior edits)
   - `category: "domain-metric"`
   - `weight: <base_weight> * <weight_multiplier>` — the effective weight is already multiplied per `references.md > Domain Eval Config Schema`. Example: base 1.0 × multiplier 2.0 → `weight: 2.0`. This keeps the canonical `weighted_points = weight * pass_fail_score` formula consistent with every other component.
   - `weight_multiplier: <from config.json>` — kept as a provenance-only field (default 2.0), documenting how the effective `weight` was derived. Downstream math uses `weight` directly; do NOT re-multiply.
-  - `weighted_points: weight * pass_fail_score` — canonical formula, matches all other components. For a domain-metric eval with `weight=2.0` and `pass_fail_score=score` (0-1 continuous), `weighted_points` = `2.0 * score`.
+  - `pass_fail`: binary, derived from thresholds. `pass_fail = 1` if aggregated domain score >= `threshold_pass`, else `pass_fail = 0`. (Concern-range scores — below threshold_pass but above threshold_concern — count as `pass_fail = 0` in the scoring math but surface as "concern" in the reasoning_trace and evidence block for transparency.)
+  - `pass_fail_score: <pass_fail>` — the binary value used in weighted_points math. Matches the binary semantics of every other component.
+  - `weighted_points: weight * pass_fail_score` — canonical formula, matches all other components. For a failed domain metric (score below threshold_pass), `weighted_points = 0` even though the continuous score may be positive. This prevents a failed-but-high-score domain metric from inflating combined_score while reporting pass_fail=fail.
   - `weight_source: "domain_eval_config"`
-  - `pass_fail`: derived from `threshold_pass` and `threshold_concern` (see Phase 5 Step 1 domain-metric threshold rules)
-  - `reasoning_trace`: 1) the computed score, 2) the threshold comparison, 3) the Pass/Fail derivation
-  - `evidence[]`: each golden-set input that contributed to the score, with `kind: "metric"`, `source: "domain_eval"`, `locator: <input_id>`, `metric: <per-input score>`
+  - `reasoning_trace`: 1) the computed continuous domain score (e.g., 0.49), 2) the threshold comparison (e.g., `0.49 < threshold_pass=0.65 → fail; 0.49 < threshold_concern=0.50 → would be concern if in range`), 3) the binary pass_fail derivation (0), 4) explicit note that the continuous score is preserved in `evidence[]` for Session Close reporting but does NOT enter weighted_points math
+  - `evidence[]`: each golden-set input that contributed to the score, with `kind: "metric"`, `source: "domain_eval"`, `locator: <input_id>`, `metric: <per-input score>`. Also add ONE aggregate evidence row with `kind: "metric"`, `source: "domain_eval_aggregate"`, `locator: "aggregate"`, `metric: <continuous_aggregate_score>` — so Session Close and downstream reporting can read the continuous score for display even though weighted_points uses the binary.
 
 If `domain_eval_config_path` is null OR golden-set.jsonl is missing/empty: skip this block entirely (no domain-metric component in combined_score — current v4.0 behavior).
 
@@ -272,10 +273,22 @@ If `state.json.contract_status = "confirmed"`, generate a contract-based effecti
 ```
 ## Contract Effectiveness
 
-Success examples:    [N/3 pass]  [list which passed/failed — e.g., "success-1 pass, success-2 pass, success-3 concern (output missing key section)"]
-Failure mode catch:  [N/3 caught] [list which caught/missed — e.g., "failure-1 caught, failure-2 caught, failure-3 missed (skill didn't flag the ambiguity)"]
-Trigger precision:   [N/3 correct fires, N/3 correct declines, N/X phrasing variations correct] 
-Domain metric:       [metric_name: score / threshold — e.g., "NDCG@5: 0.72 (threshold 0.65) — pass"] or "not configured"
+Exact-match (diagnostic — high score may indicate memorization):
+  Success:           [N/3 pass]
+  Failure catch:     [N/3 caught]
+  Trigger precision: [N/3 correct fires, N/3 correct declines]
+
+Paraphrased (honest effectiveness signal):
+  Success:           [N/6 pass]
+  Failure catch:     [N/6 caught]
+  Trigger precision: [N/6 correct fires, N/6 correct declines]
+
+Overfit analysis:    [OVERFIT_WARNING (>20pp gap) | OVERFIT_NONE]
+  Success gap:       [exact-match% - paraphrase%]
+  Failure gap:       [exact-match% - paraphrase%]
+  Trigger gap:       [exact-match% - paraphrase%]
+
+Domain metric:       [metric_name: continuous score / threshold — e.g., "NDCG@5: 0.72 (threshold 0.65) — pass"] or "not configured"
 Efficiency trend:    [baseline_token_count] → [final_token_count] tokens, [baseline_tool_calls] → [final_tool_calls] tool calls
 
 Floor delta (Phase 1b → final):
@@ -285,14 +298,36 @@ Floor delta (Phase 1b → final):
 ```
 
 **How to generate:**
-1. Re-run the final kept skill version on all 9 contract examples (3 success, 3 failure, 3 DNT).
-2. Score each example against its contract criterion:
+1. **Generate 2 paraphrase variants for each of the 9 contract examples** using the deterministic assignment already defined in Phase 1b Step 2a:
+   - For each success example: Variation 1 = question/imperative flip, Variation 2 = synonym substitution of primary verb + key noun
+   - For each failure example: same 2 variants of the input (keep the `failure_reason` semantics stable)
+   - For each do-not-trigger example: same 2 variants
+   - Assign stable IDs: `<original-id>-paraphrase-1`, `<original-id>-paraphrase-2`. Total: 9 originals + 18 paraphrases = 27 verification inputs.
+
+2. **Run the final kept skill version on all 27 inputs:**
+   - 9 originals (exact match to contract examples — diagnostic for memorization)
+   - 18 paraphrases (author-blind effectiveness measure — the honest signal)
+
+3. **Score each example against its contract criterion:**
    - Success examples: judge output against `output_shape.description` using a fresh agent-as-judge call
    - Failure examples: check if the skill caught the failure mode (flagged, declined, or recovered)
    - Do-not-trigger examples: check if the skill correctly declined/routed/ignored
-3. If `domain_eval_config_path` is set: re-run domain metric on the golden set with the final version.
-4. If `state.json.effectiveness_floor` is populated: re-run Phase 1b dimensions and compute delta.
-5. Report efficiency: compare baseline experiment (iteration_000) token/tool counts to final kept experiment's counts.
+
+4. **Report both exact-match AND paraphrase scores:**
+   - Exact-match success: N/3 (diagnostic only)
+   - Paraphrased success: N/6 (effectiveness signal — 3 examples × 2 variants)
+   - Exact-match failure catch: N/3 (diagnostic only)
+   - Paraphrased failure catch: N/6 (effectiveness signal)
+   - Exact-match trigger precision: N/3 should-fire, N/3 should-not-fire
+   - Paraphrased trigger precision: N/6 should-fire, N/6 should-not-fire (effectiveness signal)
+
+5. **Overfit flag:** Compute `overfit_ratio = exact_match_rate - paraphrase_rate`, where each rate is the fraction of correct outcomes in its set. If `overfit_ratio > 0.20` (exact match outperforms paraphrase by more than 20 percentage points), flag: `OVERFIT_WARNING: skill may have memorized contract examples. Paraphrase performance is the honest effectiveness measure.` Otherwise: `OVERFIT_NONE: paraphrase performance matches exact match within 20pp — skill generalizes beyond the contract examples.`
+
+6. If `domain_eval_config_path` is set: re-run domain metric on the golden set with the final version (golden set is held-out from Phase 4 seeding by design — not subject to the same gaming concern as contract examples).
+
+7. If `state.json.effectiveness_floor` is populated: re-run Phase 1b dimensions and compute delta.
+
+8. Report efficiency: compare baseline experiment (iteration_000) token/tool counts to final kept experiment's counts.
 
 This answers: "Is the skill more effective now than when we started, measured against the author's own definition of effective?" — complementary to `combined_score`, which measures judge-perceived quality.
 
