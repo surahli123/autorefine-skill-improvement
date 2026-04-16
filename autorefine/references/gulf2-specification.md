@@ -17,6 +17,8 @@ Downstream phase-entry contract: on entry to Phases 4-6, initialize pattern-awar
 - Tag imported fixtures with `source: contract` in `fixtures-manifest.md` so Phase 5 judges can distinguish contract-seeded fixtures from Phase 3-derived fixtures.
 - Assign stable `input_id`s using the contract example IDs (prefix with `contract-` to avoid collision with Phase 3-derived IDs).
 
+Register all contract-seeded inputs in `[workspace]/input-sets.json` under a new set with `kind: "contract_fixtures"` (see `references.md > Input Set Identity Schema`) so downstream version comparison and holdout-overlap validation can locate them through the same ID resolution path as Phase 3-derived fixtures.
+
 These seeded fixtures count toward the 30-40 total target. Step 2 continues with dimension generation for the remaining ~21-31 fixtures. If `state.json.contract_status` is null or `"skipped"`: skip this step entirely (current v4.0 behavior).
 
 **Step 2:** Define 3 failure-prone dimensions from the taxonomy. Read the current run's `selected_eval_strategy_id` failure focus from `references.md > Skill Pattern Eval Strategy > Strategy Definitions` and use that strategy route as the canonical source for choosing the dimensions. Do not build a generic dimension mix once the strategy is resolved. Format: `references.md > Dimension Template`.
@@ -35,7 +37,7 @@ These seeded fixtures count toward the 30-40 total target. Step 2 continues with
 - Reads `[workspace]/domain-eval/config.json` for metric name, threshold, eval script path, and weight multiplier (see `references.md > Domain Eval Config Schema`).
 - Reads `[workspace]/domain-eval/golden-set.jsonl` for labeled inputs (when the file exists — if missing or empty, skip this eval with a log warning, do NOT error).
 - Runs the configured `eval_script_path` on each golden-set input with the skill's output as the prediction. The script returns a score 0-1 per input.
-- Aggregates scores using the configured metric (e.g., mean for NDCG@5, sum for precision@k). Threshold for Pass: score >= `threshold_pass`. Concern: between `threshold_concern` and `threshold_pass`. Fail: below `threshold_concern`.
+- Aggregates scores using the configured metric (e.g., mean for NDCG@5, sum for precision@k). Threshold for Pass: `score >= threshold_pass`. Concern: `threshold_concern <= score < threshold_pass`. Fail: `score < threshold_concern`. (Boundaries: score exactly at `threshold_pass` counts as Pass; score exactly at `threshold_concern` counts as Concern.)
 - **Category tag:** `domain-metric` (new value alongside `structural`, `task-completion`, `quality`).
 - **Weight in Phase 7 `combined_score`:** uses `config.json.weight_multiplier` (default 2.0) — see `Domain Eval Config Schema` field rules for integration details.
 
@@ -72,7 +74,7 @@ These tags enable per-category score reporting at Session Close (see `references
 **Contract-aware judge writing (NEW — v4 effectiveness criteria):** If `[workspace]/contract/inferred-contract.md` exists (set by Phase 0.5), read it before writing judges. Use the contract's:
 - **Success Criteria** section → define Pass conditions for task-completion judges (what does "done right" look like?)
 - **Must-Catch Failure Modes** section → define Fail conditions for quality judges (what unacceptable outputs must be caught?)
-- **Non-Goals** section → exclude out-of-scope criteria from judges (don't penalize a skill for NOT doing things it's explicitly not designed to do)
+- **Non-Goals** section → narrow specific Pass/Fail conditions within individual judges. A Non-Goals exclusion applies to a CONDITION inside a judge, not to the judge itself. Do NOT use Non-Goals to disable entire evals, remove eval category assignments from Step 1b, or skip quality/task-completion coverage wholesale. If a Non-Goals entry would require skipping an entire eval, surface that to the author as a contract-design question before writing judges.
 - **Evaluation Dimensions** section → map each contract dimension to a specific eval (honor the contract's intended coverage)
 
 Anchoring judges to the contract tests whether the skill achieves the author's stated intent, not whether it follows its own instructions perfectly. A skill can follow its own instructions and still fail the contract — contract-aware judges catch this gap.
