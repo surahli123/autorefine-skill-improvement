@@ -9,3 +9,4 @@
 - move repo-maintenance shell tests out of the shipped bundle into `dev/tests/`
 - add `.claude-plugin/` and `.codex-plugin/` manifests plus a plugin-facing README
 - normalize internal note and archive naming in `dev/` and add an internal consolidation sanity check
+- fix the shipped bundle README so standalone installs point at live GitHub docs instead of missing repo-relative paths, then re-verify the merged `main` bundle from a fresh scratch `~/.claude/skills/autorefine` install
