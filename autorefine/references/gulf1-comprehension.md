@@ -124,9 +124,11 @@ Log each correction to session-log.json:
 
 Determine whether Step 7 runs:
 1. Read the Domain Metric section of `[workspace]/contract/inferred-contract.md`. If null, Phase 1 pattern classification found no applicable domain metric — skip Step 7 entirely, proceed to Step 8.
-2. If non-null, check `state.json.domain_eval_config_path`:
-   - If null: proceed with the normal Step 7 options A/B/C/D flow below.
-   - If already set (resume case): run the Domain Eval Integrity Check from `SKILL.md` Step A before trusting it. If the check passes, skip Step 7 (domain eval already configured correctly). If the check fails (file missing, corrupted, or author_confirmed=false), clear `state.json.domain_eval_config_path` to null and re-enter Step 7 from the top.
+2. If non-null, check the canonical adapter config pointer first:
+   - If `state.json.adapter_config_path` is set, use it.
+   - Else if the legacy alias `state.json.domain_eval_config_path` is set, hydrate `state.json.adapter_config_path` from that alias and continue.
+   - If both are null: proceed with the normal Step 7 options A/B/C/D flow below.
+   - If either is already set (resume case): run the Domain Eval Integrity Check from `SKILL.md` Step A before trusting it. If the check passes, keep both fields aligned and skip Step 7 (domain eval already configured correctly). If the check fails (file missing, corrupted, or author_confirmed=false), clear BOTH `state.json.adapter_config_path` and `state.json.domain_eval_config_path` to null and re-enter Step 7 from the top.
 
 The integrity-first approach prevents a partial-state resume from treating a broken domain eval as valid.
 
@@ -147,10 +149,10 @@ D) Skip domain eval — use LLM judges only (current default)
 ```
 
 Handle each option:
-- **A**: generate `[workspace]/domain-eval/eval-metric.py` and `[workspace]/domain-eval/config.json` using `references.md > Domain Eval Config Schema`. Set `author_confirmed: true`. Tell user: "When you have labeled data, save it to `[workspace]/domain-eval/golden-set.jsonl` and domain eval will activate in Phase 7." Set `state.json.domain_eval_config_path = [workspace]/domain-eval/config.json`.
-- **B**: ask for metric name + threshold. Generate script + config.json with those values. Set `author_confirmed: true` and `suggested_by_autorefine: false`. Set `state.json.domain_eval_config_path`.
-- **C**: ask for paths to eval script + golden set. Validate both files exist using `ls <path>`. If either file is missing, tell the user: `File not found at [path]. Please provide the correct path or type 'cancel' to return to the option menu.` Re-prompt up to 3 times. If the user types 'cancel', return to the A/B/C/D option menu. Do NOT generate config.json until both files are confirmed to exist. Once validated, generate config.json pointing at those paths with `suggested_by_autorefine: false` and `author_confirmed: true`. Set `state.json.domain_eval_config_path`.
-- **D**: leave `state.json.domain_eval_config_path = null`. Continue to Step 8.
+- **A**: generate `[workspace]/domain-eval/eval-metric.py` and `[workspace]/domain-eval/config.json` using `references.md > Domain Eval Config Schema`. Set `author_confirmed: true`. Tell user: "When you have labeled data, save it to `[workspace]/domain-eval/golden-set.jsonl` and domain eval will activate in Phase 7." Set BOTH `state.json.adapter_config_path` and `state.json.domain_eval_config_path` to `[workspace]/domain-eval/config.json`.
+- **B**: ask for metric name + threshold. Generate script + config.json with those values. Set `author_confirmed: true` and `suggested_by_autorefine: false`. Set BOTH `state.json.adapter_config_path` and `state.json.domain_eval_config_path`.
+- **C**: ask for paths to eval script + golden set. Validate both files exist using `ls <path>`. If either file is missing, tell the user: `File not found at [path]. Please provide the correct path or type 'cancel' to return to the option menu.` Re-prompt up to 3 times. If the user types 'cancel', return to the A/B/C/D option menu. Do NOT generate config.json until both files are confirmed to exist. Once validated, generate config.json pointing at those paths with `suggested_by_autorefine: false` and `author_confirmed: true`. Set BOTH `state.json.adapter_config_path` and `state.json.domain_eval_config_path`.
+- **D**: leave BOTH `state.json.adapter_config_path` and `state.json.domain_eval_config_path` as null. Continue to Step 8.
 
 If Step 5 produced no Domain Metric (pattern classification found no applicable metric): skip Step 7 entirely, continue to Step 8.
 
@@ -163,7 +165,7 @@ Log to session-log.json:
 {"phase":"0.5","type":"contract_confirmed","success_count":3,"failure_count":3,"dnt_count":3,"domain_eval":"<configured|skipped>","corrections":N,"pattern_classification":"<pattern_name>"}
 ```
 
-Substitute `<configured|skipped>` with `"configured"` if `state.json.domain_eval_config_path` was set in Step 7, otherwise `"skipped"`. Substitute `<pattern_name>` with the classification result from Phase 1, or `"unclassified"` if pattern classification wasn't run yet.
+Substitute `<configured|skipped>` with `"configured"` if `state.json.adapter_config_path` was set in Step 7 (or restored from the legacy alias and kept aligned), otherwise `"skipped"`. Substitute `<pattern_name>` with the classification result from Phase 1, or `"unclassified"` if pattern classification wasn't run yet.
 
 Print:
 ```
@@ -269,6 +271,22 @@ Follow the fixed-order procedure in `references.md > Pattern Classification Proc
 If the classifier-orchestration boundary rejects the result, stop before downstream routing and surface the structured error payload in the run output/log.
 
 The classification shapes downstream evaluation strategy. See `references.md > Skill Pattern Eval Strategy > Strategy Definitions` for the full pattern-to-eval mapping bundle after the selector resolves the active strategy.
+
+**Adapter suggestion pass (generic, optional):** After persisting the pattern and downstream evaluation strategy, check whether the current skill and available evidence suggest a domain adapter per `references.md > Adapter Resolution Rules`. A suggestion is allowed only when the domain signal is concrete enough to name a plausible primary oracle or gold source. Examples: a retrieval/search skill with labeled ranking data available, or a code-verification skill with executable tests/static checks. If an adapter is plausible:
+- present it as a suggestion, not an activation
+- explain the likely primary oracle in one sentence
+- ask the author whether to activate it now
+
+If the author confirms:
+- write `state.json.selected_adapter_id`
+- write `state.json.adapter_config_path` when the config already exists
+- mirror the same path into `state.json.domain_eval_config_path` when the config lives at `[workspace]/domain-eval/config.json`
+
+If the author declines or required assets do not yet exist:
+- leave `selected_adapter_id = null`
+- continue on the LLM-judge-only path
+
+Do not auto-activate an adapter from classification alone.
 
 **Step 1-6: Score dimensions.** Score 6 dimensions in this canonical order: **Gotchas** (`gotchas`), **Voice** (`voice`), **Progressive Disclosure** (`progressive_disclosure`), **Anti-Railroading** (`anti_railroading`), **Description Quality** (`description_quality`), **Scripts** (`scripts`, if any). Use the score types and allowed values from `references.md > Phase 1 Design Audit Dimension Schema`. For each Partial/Missing: quote the problem, recommend a fix, assign priority. For Anti-Railroading findings, also name the exact overspecific instruction and the likely edge case it mishandles.
 
