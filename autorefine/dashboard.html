@@ -372,6 +372,16 @@
   </table>
 </div>
 
+<!-- Adapter Evaluation Surface — hidden until adapter-aware state or results exist -->
+<div class="chart-container full" id="adapter-card" style="display:none; margin-bottom: 24px;">
+  <h2>Adapter Evaluation Surface</h2>
+  <div id="adapter-summary"></div>
+  <table class="contract-table" id="adapter-table" style="display:none">
+    <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+    <tbody id="adapter-details"></tbody>
+  </table>
+</div>
+
 <div class="refresh-note">Auto-refreshes every 10 seconds &middot; Serve with: python3 -m http.server 8080</div>
 
 <script>
@@ -2152,6 +2162,12 @@ function resolveSessionCloseHoldoutArtifact(options = {}) {
           ])
         )
       : null,
+    trust_gate:
+      normalizedArtifact.trust_gate &&
+      typeof normalizedArtifact.trust_gate === 'object' &&
+      !Array.isArray(normalizedArtifact.trust_gate)
+        ? cloneStructuredValue(normalizedArtifact.trust_gate)
+        : null,
     selected_variant_version: selectedVariantVersion,
     selected_experiment_id: selectedExperimentId,
     selected_candidate_summary: selectedCandidateSummary
@@ -2807,6 +2823,10 @@ function isMutationTimeVersionComparison(versionComparison, experiments) {
 }
 
 function getStoredEvaluationResult(experiment) {
+  if (!experiment || typeof experiment !== 'object' || Array.isArray(experiment)) {
+    return null;
+  }
+
   if (experiment.stored_evaluation_result && typeof experiment.stored_evaluation_result === 'object') {
     return experiment.stored_evaluation_result;
   }
@@ -13849,40 +13869,207 @@ function renderContract(state, results) {
 
   if (!contractResult) {
     summary.textContent = 'Contract confirmed — waiting for Session Close report.';
+    const table = document.getElementById('contract-table');
+    if (table) table.style.display = 'none';
+    const tbody = document.getElementById('contract-details');
+    if (tbody) tbody.innerHTML = '';
     return;
   }
 
-  const successPass    = contractResult.success_examples_pass  || 0;
-  const failureCaught  = contractResult.failure_examples_caught || 0;
-  const triggerCorrect = contractResult.trigger_correct         || 0;
-  const triggerTotal   = contractResult.trigger_total           || 0;
-  const domainMetric   = contractResult.domain_metric           || null;
+  const exactMatch = contractResult.exact_match && typeof contractResult.exact_match === 'object'
+    ? contractResult.exact_match
+    : {};
+  const paraphrased = contractResult.paraphrased && typeof contractResult.paraphrased === 'object'
+    ? contractResult.paraphrased
+    : {};
+  const domainMetric = contractResult.domain_metric && typeof contractResult.domain_metric === 'object'
+    ? contractResult.domain_metric
+    : null;
+  const overfitAnalysis = contractResult.overfit_analysis && typeof contractResult.overfit_analysis === 'object'
+    ? contractResult.overfit_analysis
+    : null;
+  const leakageAudit = contractResult.leakage_audit && typeof contractResult.leakage_audit === 'object'
+    ? contractResult.leakage_audit
+    : null;
 
   summary.innerHTML =
-    'Success: <strong>' + escapeHtml(successPass) + '/3</strong> &middot; ' +
-    'Failures caught: <strong>' + escapeHtml(failureCaught) + '/3</strong> &middot; ' +
-    'Trigger precision: <strong>' + escapeHtml(triggerCorrect) + '/' + escapeHtml(triggerTotal) + '</strong>' +
+    'Exact match success: <strong>' + escapeHtml(String(exactMatch.success_examples_pass ?? 0)) + '/' + escapeHtml(String(exactMatch.success_examples_total ?? 3)) + '</strong> &middot; ' +
+    'Paraphrased success: <strong>' + escapeHtml(String(paraphrased.success_examples_pass ?? 0)) + '/' + escapeHtml(String(paraphrased.success_examples_total ?? 6)) + '</strong> &middot; ' +
+    'Overfit: <strong>' + escapeHtml(formatDisplayToken(overfitAnalysis && overfitAnalysis.status, 'n/a')) + '</strong>' +
     (domainMetric
-      ? ' &middot; Domain metric: <strong>' + escapeHtml(domainMetric.name) + ' = ' + escapeHtml(domainMetric.score) + '</strong>'
+      ? ' &middot; Domain metric: <strong>' + escapeHtml(domainMetric.name || domainMetric.metric_name || 'metric') + ' = ' + escapeHtml(String(
+        domainMetric.continuous_score ?? domainMetric.score ?? 'n/a'
+      )) + '</strong>'
       : '');
 
-  // Optional efficiency trend detail table
   const table = document.getElementById('contract-table');
   const tbody = document.getElementById('contract-details');
-  if (contractResult.efficiency_trend) {
-    table.style.display = 'table';
-    tbody.innerHTML = '';  // clear stale rows so 10s refresh doesn't double up
-    const e = contractResult.efficiency_trend;
-    const addRow = function(label, value) {
-      const row = document.createElement('tr');
-      row.innerHTML = '<td>' + escapeHtml(label) + '</td><td>' + escapeHtml(value) + '</td>';
-      tbody.appendChild(row);
-    };
-    addRow('Tokens (baseline → final)',
-           (e.baseline_tokens || '?') + ' → ' + (e.final_tokens || '?'));
-    addRow('Tool calls (baseline → final)',
-           (e.baseline_tool_calls || '?') + ' → ' + (e.final_tool_calls || '?'));
+  tbody.innerHTML = '';
+  const addRow = function(label, value) {
+    const row = document.createElement('tr');
+    row.innerHTML = '<td>' + escapeHtml(label) + '</td><td>' + escapeHtml(value) + '</td>';
+    tbody.appendChild(row);
+  };
+
+  addRow(
+    'Exact-match trigger precision',
+    String(exactMatch.trigger_correct_fires ?? 0) + '/' + String(exactMatch.trigger_total_fires ?? 3) +
+      ' fires, ' + String(exactMatch.trigger_correct_declines ?? 0) + '/' + String(exactMatch.trigger_total_declines ?? 3) + ' declines'
+  );
+  addRow(
+    'Paraphrased trigger precision',
+    String(paraphrased.trigger_correct_fires ?? 0) + '/' + String(paraphrased.trigger_total_fires ?? 6) +
+      ' fires, ' + String(paraphrased.trigger_correct_declines ?? 0) + '/' + String(paraphrased.trigger_total_declines ?? 6) + ' declines'
+  );
+
+  if (overfitAnalysis) {
+    addRow('Overfit ratio', String(overfitAnalysis.overfit_ratio ?? 'n/a'));
+    addRow('Overfit threshold', String(overfitAnalysis.overfit_threshold ?? 'n/a'));
   }
+
+  if (leakageAudit) {
+    addRow('Leakage audit', formatDisplayToken(leakageAudit.status, 'n/a'));
+    addRow('Test / holdout matches', String(leakageAudit.test_split_matches ?? 0) + ' / ' + String(leakageAudit.holdout_split_matches ?? 0));
+  }
+
+  if (contractResult.efficiency_trend && typeof contractResult.efficiency_trend === 'object') {
+    const e = contractResult.efficiency_trend;
+    addRow('Tokens (baseline → final)', String(e.baseline_tokens ?? '?') + ' → ' + String(e.final_tokens ?? '?'));
+    addRow('Tool calls (baseline → final)', String(e.baseline_tool_calls ?? '?') + ' → ' + String(e.final_tool_calls ?? '?'));
+  }
+
+  table.style.display = tbody.children.length > 0 ? 'table' : 'none';
+}
+
+function getSelectedSessionCloseHoldoutVariantResult(sessionCloseHoldout) {
+  if (!sessionCloseHoldout || !Array.isArray(sessionCloseHoldout.variant_results)) {
+    return null;
+  }
+  return sessionCloseHoldout.variant_results.find(variantResult =>
+    isSelectedSessionCloseHoldoutVariant(sessionCloseHoldout, variantResult)
+  ) || null;
+}
+
+function getLatestExperimentWithDecisionBreakdown(results) {
+  const experiments = results && Array.isArray(results.experiments) ? results.experiments : [];
+  for (let index = experiments.length - 1; index >= 0; index -= 1) {
+    const experiment = experiments[index];
+    if (experiment && experiment.decision_breakdown && typeof experiment.decision_breakdown === 'object') {
+      return experiment;
+    }
+  }
+  return null;
+}
+
+function getAdapterDisplayName(adapterId) {
+  if (adapterId === 'search_retrieval_v1') return 'Search Retrieval v1';
+  if (adapterId === 'code_verification_v1') return 'Code Verification v1';
+  return hasNonEmptyString(adapterId) ? adapterId : 'LLM-judge-only';
+}
+
+function getAdapterPrimaryOracleLabel(adapterId) {
+  if (adapterId === 'search_retrieval_v1') return 'Ranking metrics on stable doc_id order';
+  if (adapterId === 'code_verification_v1') return 'Executable verification (tests/static checks)';
+  return 'No adapter primary oracle configured';
+}
+
+function getPrimaryMetricComponent(decisionBreakdown) {
+  const components = Array.isArray(decisionBreakdown && decisionBreakdown.components)
+    ? decisionBreakdown.components
+    : [];
+  return components.find(component =>
+    component &&
+    (component.category === 'domain-metric' ||
+      component.eval_id === 'domain-metric' ||
+      component.metric_role === 'primary_oracle')
+  ) || null;
+}
+
+function countSecondaryDiagnosticComponents(decisionBreakdown, primaryComponent) {
+  const components = Array.isArray(decisionBreakdown && decisionBreakdown.components)
+    ? decisionBreakdown.components
+    : [];
+  return components.filter(component => component && component !== primaryComponent).length;
+}
+
+function extractAggregateMetricEvidence(component) {
+  const evidence = Array.isArray(component && component.evidence) ? component.evidence : [];
+  return evidence.find(item =>
+    item &&
+    item.source === 'domain_eval_aggregate' &&
+    typeof item.metric === 'number'
+  ) || null;
+}
+
+function renderAdapterEvaluation(state, results) {
+  const card = document.getElementById('adapter-card');
+  if (!card) return;
+
+  const adapterId = state && hasNonEmptyString(state.selected_adapter_id)
+    ? state.selected_adapter_id
+    : null;
+  const sessionCloseHoldout = results && results.session_close_holdout && typeof results.session_close_holdout === 'object'
+    ? results.session_close_holdout
+    : null;
+  const finalVariant = getSelectedSessionCloseHoldoutVariantResult(sessionCloseHoldout);
+  const latestExperiment = getLatestExperimentWithDecisionBreakdown(results);
+  const sourceExperiment = finalVariant || latestExperiment;
+  const decisionBreakdown = sourceExperiment && sourceExperiment.decision_breakdown && typeof sourceExperiment.decision_breakdown === 'object'
+    ? sourceExperiment.decision_breakdown
+    : null;
+
+  if (!adapterId && !decisionBreakdown) {
+    card.style.display = 'none';
+    const summary = document.getElementById('adapter-summary');
+    if (summary) summary.innerHTML = '';
+    const table = document.getElementById('adapter-table');
+    if (table) table.style.display = 'none';
+    const tbody = document.getElementById('adapter-details');
+    if (tbody) tbody.innerHTML = '';
+    return;
+  }
+
+  card.style.display = 'block';
+  const summary = document.getElementById('adapter-summary');
+  const table = document.getElementById('adapter-table');
+  const tbody = document.getElementById('adapter-details');
+  const primaryComponent = getPrimaryMetricComponent(decisionBreakdown);
+  const aggregateMetricEvidence = extractAggregateMetricEvidence(primaryComponent);
+  const secondaryCount = countSecondaryDiagnosticComponents(decisionBreakdown, primaryComponent);
+  const trustGate = sessionCloseHoldout && sessionCloseHoldout.trust_gate && typeof sessionCloseHoldout.trust_gate === 'object'
+    ? sessionCloseHoldout.trust_gate
+    : null;
+
+  summary.innerHTML =
+    'Adapter: <strong>' + escapeHtml(getAdapterDisplayName(adapterId)) + '</strong> &middot; ' +
+    'Primary oracle: <strong>' + escapeHtml(getAdapterPrimaryOracleLabel(adapterId)) + '</strong> &middot; ' +
+    'Trust gate: <strong>' + escapeHtml(formatDisplayToken(trustGate && trustGate.outcome, 'directional_only')) + '</strong>';
+
+  tbody.innerHTML = '';
+  const addRow = function(label, value) {
+    const row = document.createElement('tr');
+    row.innerHTML = '<td>' + escapeHtml(label) + '</td><td>' + escapeHtml(value) + '</td>';
+    tbody.appendChild(row);
+  };
+
+  addRow('Adapter ID', getAdapterDisplayName(adapterId));
+  addRow('Primary oracle', getAdapterPrimaryOracleLabel(adapterId));
+
+  if (primaryComponent) {
+    addRow('Primary component', formatDisplayToken(primaryComponent.eval_id || primaryComponent.category, 'n/a'));
+    addRow('Primary verdict', formatDisplayToken(primaryComponent.pass_fail, 'n/a'));
+    addRow('Primary weight', String(primaryComponent.weight ?? 'n/a'));
+    if (aggregateMetricEvidence) {
+      addRow('Primary continuous score', String(aggregateMetricEvidence.metric));
+    }
+  } else {
+    addRow('Primary component', 'No adapter-specific primary component recorded yet');
+  }
+
+  addRow('Secondary diagnostics', String(secondaryCount));
+  addRow('Trust gate outcome', formatDisplayToken(trustGate && trustGate.outcome, 'n/a'));
+
+  table.style.display = tbody.children.length > 0 ? 'table' : 'none';
 }
 
 async function refresh() {
@@ -13899,6 +14086,7 @@ async function refresh() {
   // New quality-signal cards (hidden gracefully when data absent)
   renderFloor(state);
   renderContract(state, data);
+  renderAdapterEvaluation(state, data);
 }
 
 refresh();

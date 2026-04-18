@@ -2790,6 +2790,44 @@ Rules:
 - `ndcg_at_5` is the default display metric. `recall_at_5` is the minimum companion diagnostic.
 - Explanation/rationale quality stays secondary; it must not override a failing retrieval metric.
 
+### Code adapter reference
+
+Use this as the second concrete adapter implementation.
+
+```json
+{
+  "adapter_id": "code_verification_v1",
+  "skill_family": "code_verification",
+  "primary_metric_defaults": [
+    "tests_pass",
+    "static_checks_pass"
+  ],
+  "secondary_metric_defaults": [
+    "explanation_quality",
+    "boundary_discipline"
+  ],
+  "normalized_output_shape": {
+    "verification": {
+      "tests_pass": true,
+      "static_checks_pass": true,
+      "runtime_contract_checks_pass": null
+    }
+  },
+  "failure_taxonomy": [
+    "test_failure",
+    "static_check_failure",
+    "runtime_contract_failure",
+    "scope_overreach"
+  ]
+}
+```
+
+Rules:
+- `code_verification_v1` is the stable code adapter ID.
+- The primary oracle is executable verification: tests and static checks first, optional runtime contract checks second.
+- If the target skill cannot surface executable verification inputs, stop and require explicit downgrade instead of pretending the code adapter is active.
+- Explanation quality remains secondary; it must not override a failing executable verification result.
+
 ### Minimum viable search gold-set row
 ```json
 {

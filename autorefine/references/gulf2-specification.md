@@ -52,6 +52,10 @@ For `search_retrieval_v1`:
 - primary oracle = retrieval metrics on ranked `doc_id` output (`ndcg_at_5` by default, `recall_at_5` companion)
 - secondary judges = explanation quality, clarifying-question quality, and boundary discipline
 
+For `code_verification_v1`:
+- primary oracle = executable verification (`tests_pass`, `static_checks_pass`, optional runtime contract checks)
+- secondary judges = explanation quality and boundary discipline
+
 **Domain-metric evals (NEW — v4 effectiveness criteria):** If the canonical adapter config pointer is set (`state.json.adapter_config_path`, or the legacy alias `state.json.domain_eval_config_path` when `adapter_config_path` is null), add one eval of type `domain-metric` using the configured metric. This eval:
 
 **Pre-use integrity check:** Before writing the domain-metric eval to `eval-suite.md`, re-run the Domain Eval Integrity Check (defined in `SKILL.md` Step A): verify `config.json` exists and parses, `eval_script_path` exists and is readable. If the check fails at Phase 5 time (file was deleted between Phase 0.5 and Phase 5), stop with the same 3-option blocking error from Step A. Do NOT silently fall back to LLM-judge-only. Golden-set at Phase 5 is still optional; absence is surfaced via the `inactive_pending_golden_set: true` flag, not via skipping.
@@ -105,6 +109,8 @@ One-liner or short script per eval. Test on 3 dev fixtures.
 **Adapter-aware handoff artifact:** If `state.json.selected_adapter_id` is present, every adapter-aware eval written in Phase 5 must specify the normalized artifact boundary it expects to read at Phase 7. The generator side may produce raw skill output in any convenient internal form, but the evaluator must score only the adapter-normalized output shape plus the adapter's gold source. This is the generator/evaluator handoff boundary. Do not let the evaluator infer task success directly from raw mutation reasoning.
 
 For `search_retrieval_v1`, the normalized artifact must expose ordered ranked results with stable `doc_id`s. Score the ordered result list directly. Do not let explanation prose, result summaries, or formatting quality substitute for ranking identity when the primary oracle runs.
+
+For `code_verification_v1`, the normalized artifact must expose executable verification results directly. Score tests/static checks first. Do not let prose explanation or self-reported confidence substitute for actual verification outcomes when the primary oracle runs.
 
 **Step 3: Build agent-as-judge prompts.** Each judge has 4 components: task+criterion, Pass/Fail definitions, 3 few-shot examples (TRAIN split only — never dev/test), critique-before-verdict output format. The coding agent itself IS the judge — no external API needed. **Anti-rigidity rule:** Score on outcome achievement, not path matching. A judge that fails outputs for using different structure or wording than the reference is penalizing creativity, not catching errors. Multi-judge activation is `category + instability`, not category alone. `structural` evals remain single-judge. `task-completion` stays single-judge by default and escalates to panel mode only when `phase6_dev_fold_metrics` or human calibration shows instability. `quality` evals are eligible for panel review, but activate panel mode only when `phase6_dev_fold_metrics` or human calibration shows instability, or when the user explicitly forces it. When panel mode is used, write 2+ independent prompts with different framing and record `agreement_rule: unanimous` in the eval metadata so a single judge cannot decide the verdict alone. Keep the panel contract consistent with `references.md > Multi-Judge Verdict Schema`. Full template: `references.md > Judge Prompt Template`.
 
