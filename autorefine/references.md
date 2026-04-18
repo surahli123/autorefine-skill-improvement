@@ -8,11 +8,11 @@ Templates, schemas, methodology rationale, and detailed rubrics. SKILL.md refere
 
 Read when: Initialize Workspace or resuming a session.
 
-Workspace directories for new runs are `traces/`, `judges/`, `runs/`, and `skill-versions/`. `skill-versions/` stores immutable per-version `SKILL.md` snapshots for rollback, comparison, and external replay.
+Workspace directories for new runs are `traces/`, `judges/`, `runs/`, `skill-versions/`, `contract/`, and `domain-eval/`. `skill-versions/` stores immutable per-version `SKILL.md` snapshots for rollback, comparison, and external replay. `domain-eval/` is the shared on-disk surface for adapter-aware evaluation assets and remains the canonical location even when runtime state uses generic adapter field names.
 
 ### state.json
 ```json
-{"schema_version":4,"skill_name":"<name>","skill_path":"<path>","original_skill_path":"<path>","workspace_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null,"consecutive_discards":0,"circuit_breaker":null,"current_run_id":null,"current_run_path":null,"current_experiment":null,"iteration_state":null,"completion_cadence":null,"pending_user_override_scan":null,"mid_session_preference_signals":null,"mid_session_preference_signals_path":null,"skill_pattern":null,"phase1_context":null,"mutation_stage_split_access_policy":null,"meta_learnings_path":null,"research_intake":null,"research_intake_path":null,"final_only_evaluation":null,"quick_start":null,"contract_status":null,"contract_path":null,"effectiveness_floor":null,"domain_eval_config_path":null}
+{"schema_version":4,"skill_name":"<name>","skill_path":"<path>","original_skill_path":"<path>","workspace_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null,"consecutive_discards":0,"circuit_breaker":null,"current_run_id":null,"current_run_path":null,"current_experiment":null,"iteration_state":null,"completion_cadence":null,"pending_user_override_scan":null,"mid_session_preference_signals":null,"mid_session_preference_signals_path":null,"skill_pattern":null,"phase1_context":null,"mutation_stage_split_access_policy":null,"meta_learnings_path":null,"research_intake":null,"research_intake_path":null,"final_only_evaluation":null,"quick_start":null,"contract_status":null,"contract_path":null,"effectiveness_floor":null,"adapter_config_path":null,"selected_adapter_id":null,"active_experiment_contract_path":null,"domain_eval_config_path":null}
 ```
 - `schema_version`: 4 for v2.3 workspaces. Legacy: 2 = Standard/Deep (v2.1), 3 = Quick Start (v2.2). New fields default to null when reading v2/v3 workspaces.
 - `loop_iteration`: tracks Phase 7→5 loop-backs (0 = first run)
@@ -80,7 +80,11 @@ Workspace directories for new runs are `traces/`, `judges/`, `runs/`, and `skill
 - `contract_status`: null, or `"not_started" | "collecting" | "inferred" | "confirmed" | "skipped"`. Tracks Phase 0.5 progress. Null and `"not_started"` both trigger Phase 0.5 entry; `"collecting"` means Phase 0.5 is mid-wizard gathering examples; `"inferred"` means examples collected but author correction not yet applied; `"confirmed"` means contract is ready for downstream consumption; `"skipped"` bypasses Phase 0.5 entirely. On resume, `"collecting"` and `"inferred"` states route back into Phase 0.5 to continue from where the wizard stopped.
 - `contract_path`: null, or `[workspace]/contract/`. Set when Phase 0.5 creates the contract directory. Contains `success-examples.jsonl`, `failure-examples.jsonl`, `do-not-trigger-examples.jsonl`, and `inferred-contract.md` per `Contract Example Schema` and `Inferred Contract Template`.
 - `effectiveness_floor`: null, or the floor result object from Phase 1b (see `Effectiveness Floor Schema > Floor Result`). Persisted for dashboard and Session Close delta reporting.
+- `adapter_config_path`: null, or `[workspace]/domain-eval/config.json`. Canonical runtime pointer for adapter-aware evaluation config. This is the generic state field later phases should prefer.
+- `selected_adapter_id`: null, or the confirmed adapter identifier for the active workspace copy (for example `search_retrieval_v1` or `code_verification_v1`). Suggestions from pattern classification do not populate this field until the author confirms activation.
+- `active_experiment_contract_path`: null, or `[workspace]/runs/<run-id>/experiment-contract.json`. Canonical run-scoped contract artifact for adapter-aware mutation/evaluation loops. This file is written before a bounded run, then read by both the mutation actor and the evaluator.
 - `domain_eval_config_path`: null, or `[workspace]/domain-eval/config.json`. Set when author provides domain eval assets in Phase 0.5 Step 7. See `Domain Eval Config Schema`.
+- `domain_eval_config_path` is a legacy alias for `adapter_config_path`. New writes should keep both fields aligned when the config lives at `[workspace]/domain-eval/config.json`, but downstream logic should prefer `adapter_config_path` when both are present.
 
 ### results.json
 ```json
@@ -2620,6 +2624,189 @@ Field rules:
 - `author_confirmed`: must be true before domain eval runs. Phase 0.5 sets this after author confirmation.
 - `eval_script_path`: relative to `[workspace]/`. Script takes input + skill_output + expected_output, returns score 0-1.
 - When `golden_set_path` is null or empty: domain eval is disabled, falls back to LLM judges only.
+
+## Domain Adapter Contract Schema
+
+Read when: any phase needs a generic adapter-aware evaluation interface instead of a domain-specific special case.
+
+Each adapter definition must provide one shared contract shape, even when the primary oracle differs by domain.
+
+### adapter contract
+```json
+{
+  "adapter_id": "search_retrieval_v1",
+  "skill_family": "search_retrieval",
+  "input_schema": {
+    "description": "Canonical evaluation input shape for this adapter."
+  },
+  "output_schema": {
+    "description": "Canonical normalized output shape consumed by the primary metric."
+  },
+  "runner": {
+    "description": "How the skill is executed for adapter-aware evaluation."
+  },
+  "normalizer": {
+    "description": "How raw skill output becomes metric-ready normalized output."
+  },
+  "primary_metric": {
+    "metric_name": "ndcg_at_5",
+    "description": "The task-truth metric that decides quality for this adapter."
+  },
+  "secondary_metrics": [
+    {
+      "metric_name": "explanation_quality",
+      "description": "Behavioral or presentation checks that diagnose quality but do not replace the primary oracle."
+    }
+  ],
+  "failure_taxonomy": {
+    "description": "Adapter-specific failure buckets used for diagnostics and reporting."
+  },
+  "gold_source": {
+    "type": "labeled_set | executable_checks | reference_outputs | human_review",
+    "description": "The evidence source required by the primary oracle."
+  },
+  "trust_rule": {
+    "description": "How dev, holdout, hard-fail conditions, and human review combine for this adapter."
+  }
+}
+```
+
+Field rules:
+- `adapter_id`: stable versioned identifier. Use this as the runtime adapter handle.
+- `skill_family`: broad adapter family label such as `search_retrieval`, `code_verification`, `structured_extraction`, or `prose_review`.
+- `input_schema` and `output_schema`: canonicalize what the evaluator reads and scores. These are adapter contracts, not user-facing output templates.
+- `runner`: defines how the skill is invoked for evaluation.
+- `normalizer`: defines how raw output is transformed into the `output_schema`.
+- `primary_metric`: the primary oracle. This decides task quality for the adapter.
+- `secondary_metrics`: diagnostic checks such as explanation quality, formatting, or boundary discipline. These support diagnosis and regression detection but do not replace the primary oracle.
+- `gold_source`: the evidence substrate the primary oracle depends on.
+- `trust_rule`: the adapter-specific trust policy layered on top of AutoRefine's shared holdout and human-review model.
+
+## Experiment Contract Schema
+
+Read when: starting a bounded mutation/evaluation run or resuming one.
+
+The experiment contract is the shared success definition for one run. The mutation actor and evaluator must both read the same artifact instead of improvising targets from chat history.
+
+### experiment-contract.json
+```json
+{
+  "run_id": "run_2026-04-17T14-30-00",
+  "adapter_id": "search_retrieval_v1",
+  "objective": "Improve NDCG@5 without regressing boundary or clarity checks.",
+  "fixture_refs": ["fixtures-manifest.md#search-fixtures"],
+  "primary_metric": {
+    "metric_name": "ndcg_at_5",
+    "threshold_pass": 0.65
+  },
+  "secondary_metrics": [
+    {
+      "metric_name": "explanation_quality",
+      "threshold_pass": 0.8
+    }
+  ],
+  "thresholds": {
+    "combined_score": 0.8
+  },
+  "hard_fail_dimensions": [
+    "primary_metric_below_threshold",
+    "invalid_normalized_output",
+    "holdout_leakage"
+  ],
+  "holdout_policy": {
+    "split_id": "adversarial_holdout",
+    "mode": "evaluation_only"
+  },
+  "mutation_scope": {
+    "allowed_targets": ["skill-under-test/SKILL.md"]
+  },
+  "evaluator_inputs": {
+    "normalized_output_ref": "runs/run_2026-04-17T14-30-00/iteration_001/eval_results.json"
+  }
+}
+```
+
+Field rules:
+- `run_id`: must match `state.json.current_run_id`.
+- `adapter_id`: the confirmed adapter for the run. Null means no adapter-aware contract should be written.
+- `objective`: concise statement of what quality change the run is trying to achieve.
+- `fixture_refs`: the exact fixture/artifact sources this run scores against.
+- `primary_metric`: the task-truth metric and its pass threshold.
+- `secondary_metrics`: evaluator-side diagnostics that may contribute to score or hard-fail logic.
+- `thresholds`: aggregate thresholds used by Phase 7 scoring.
+- `hard_fail_dimensions`: any listed failure condition can fail the candidate even when aggregate scores look acceptable.
+- `holdout_policy`: run-scoped expression of the shared holdout rule. Mutation-stage callers must never target the holdout directly.
+- `mutation_scope`: what the mutation actor may change.
+- `evaluator_inputs`: artifact refs the evaluator needs to score the current run consistently.
+
+## Adapter Resolution Rules
+
+Read when: pattern classification suggests an adapter or resume logic restores one from state.
+
+- Pattern classification may suggest an adapter, but suggestion alone is not activation.
+- `selected_adapter_id` is null until the author explicitly confirms activation.
+- When an adapter is confirmed, runtime state should write `selected_adapter_id` and `adapter_config_path`.
+- If required adapter assets are missing, stop and ask the user to either provide the missing assets or explicitly downgrade to the LLM-judge-only path.
+- Do not silently downgrade from an active adapter-aware path.
+
+### Search adapter reference
+
+Use this as the first concrete adapter implementation.
+
+```json
+{
+  "adapter_id": "search_retrieval_v1",
+  "skill_family": "search_retrieval",
+  "primary_metric_defaults": ["ndcg_at_5", "recall_at_5"],
+  "secondary_metric_defaults": [
+    "explanation_quality",
+    "clarifying_question_quality",
+    "boundary_discipline"
+  ],
+  "normalized_output_shape": {
+    "results": [
+      {
+        "doc_id": "doc_123",
+        "rank": 1,
+        "title": "Optional title",
+        "url": "Optional URL",
+        "rationale": "Optional explanation"
+      }
+    ]
+  },
+  "failure_taxonomy": [
+    "missed_relevant_results",
+    "poor_ranking",
+    "irrelevant_top_results",
+    "over_filtering",
+    "explanation_mismatch"
+  ]
+}
+```
+
+Rules:
+- `search_retrieval_v1` is the stable search adapter ID.
+- The primary oracle scores the ordered `doc_id` sequence, not the prose explanation.
+- `ndcg_at_5` is the default display metric. `recall_at_5` is the minimum companion diagnostic.
+- Explanation/rationale quality stays secondary; it must not override a failing retrieval metric.
+
+### Minimum viable search gold-set row
+```json
+{
+  "query": "python web framework",
+  "doc_id": "doc_123",
+  "grade": 2,
+  "metadata": {}
+}
+```
+
+Required fields:
+- `query`: the retrieval query being evaluated
+- `doc_id`: stable identifier used for ranking metrics
+- `grade`: relevance grade consumed by ranking metrics such as `NDCG@k`
+
+Optional fields:
+- `metadata`: any extra adapter-specific information needed for replay or diagnostics
 
 ## Inferred Contract Template
 
