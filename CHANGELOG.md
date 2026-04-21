@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- add `autorefine/scripts/record.py` — local proxy recorder that captures Claude Code sessions to JSONL so Phase 0.5 comprehension can ingest real traces
+- add `autorefine/scripts/records-to-gulf1.py` — JSONL-to-Gulf1 converter with heuristic classification (success/failure/do-not-trigger) preserving `source_trace` cross-reference
+- document the canonical Gulf 1 Trace Record Schema under `autorefine/references.md` with `records/<skill_slug>/<session_id>.jsonl` layout
+- wire Option D (record live sessions) into the Phase 0.5 contract wizard in `autorefine/references/gulf1-comprehension.md`
+- add `description_quality.not_for_clause_hint` informational sub-signal — silent when do-not-trigger examples exist, suggests adding a "NOT for:" clause when both are absent
+- document SkillClaw SKILL.md superset compatibility — Claude Code silently ingests `metadata.skillclaw.*` and related superset frontmatter
 - restructure the public repo so `autorefine/` is the clear shipped bundle
 - rewrite the public `README.md` and `autorefine/README.md` around product-vs-bundle roles
 - add curated public user docs under `docs/`
