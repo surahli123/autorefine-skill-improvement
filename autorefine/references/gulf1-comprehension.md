@@ -79,6 +79,28 @@ Collect 3 do-not-trigger examples one at a time. For each:
 
 After 3 do-not-trigger examples: set `state.json.contract_status = "inferred"` to mark collection complete, then print: "Got all 9 examples. Generating your effectiveness contract..."
 
+### Option D: Record live sessions (trace recorder input)
+
+When the user has already recorded real agent traces for the skill-under-test via `autorefine/scripts/record.py`, the wizard can import those traces as Phase 0.5 inputs instead of collecting 9 interactive examples.
+
+**Step D.1: Convert recorded traces.** Ask the user for the records directory or file path. Run:
+```
+python3 autorefine/scripts/records-to-gulf1.py --input <path> --output [workspace]/contract/recorded-traces.jsonl --classify auto
+```
+
+This converts the JSONL session records to Gulf 1 Phase 0.5 input shape with heuristic classification.
+
+**Step D.2: Classify and append to buckets.** Read the converted file. For each record, check the author's existing example counts. Surface low- and medium-confidence items to the author for quick confirmation before committing them to the bucket files. high-confidence items (explicit error -> failure classification) may auto-commit without prompting. Append records to the appropriate example JSONL files with stable IDs:
+- Success classifications → append to `[workspace]/contract/success-examples.jsonl` with `id: "success-N"` (do not exceed 3 unless author requests richer contract)
+- Failure classifications → append to `[workspace]/contract/failure-examples.jsonl` with `id: "failure-N"` (max 3)
+- Do-not-trigger classifications → append to `[workspace]/contract/do-not-trigger-examples.jsonl` with `id: "dnt-N"` (max 3)
+
+**Verification.** After import:
+- Each converted record preserves `source_trace: {session_id, turn}` so Gulf 1 can cross-reference failing turns back to the original raw trace during debugging.
+- Heuristic classifications include `classification_confidence` — surface low- and medium-confidence items to the author for quick confirmation before committing them to the bucket files. high-confidence items (explicit error -> failure classification) may auto-commit without prompting.
+
+**See also:** `references.md > Gulf 1 Trace Record Schema` for canonical JSONL shape and `records-to-gulf1.py` consumer contract.
+
 ### Step 5: Generate Inferred Contract (2 min)
 
 Read all 9 examples from the 3 JSONL files in `[workspace]/contract/`. Generate `[workspace]/contract/inferred-contract.md` using `references.md > Inferred Contract Template`.
@@ -313,6 +335,7 @@ Do not auto-activate an adapter from classification alone.
 2. **Trigger check:** Ask whether it names specific user intents, conditions, or environment cues that would cause an agent to invoke this skill.
 3. **Summary-vs-trigger check:** Mark Partial when the text mostly summarizes the skill rather than saying when to use it.
 4. **Missing rule:** Mark Missing when the field is absent, tautological, or generic enough that invocation timing is still unclear. Never score `n/a` for `description_quality`.
+4a. **`not_for_clause_hint` sub-signal:** After assigning the Present/Partial/Missing anchor, compute `description_quality.not_for_clause_hint`. This is informational only — it does NOT affect the anchor score and is silent when `[workspace]/contract/do-not-trigger-examples.jsonl` has ≥1 row. See `references.md > Dimension 5: Description Quality / Trigger Precision > not_for_clause_hint` for the full diagnostic sub-signal rules, trigger conditions, silencing rule, and output payload shape.
 5. **Canonical routing-fixture pipeline:** If you replay the production routing fixtures while auditing this dimension, normalize them into `expected_routing_fixtures[]` first, then build one Phase 1 routing evaluation input per canonical `prompt_cases[]` entry. Downstream evaluation must read the canonical fields (`description_quality.score`, `routing_rationale`, `source.*`, and `prompt_case.expected_routing_outcome`) rather than manifest-era keys. If you persist per-case routing evaluation results, emit one canonical result per `input_id` with `fixture_identity`, `evaluator_outcome`, and `routing_decision`. Preserve `fixture_identity.fixture_skill` + `fixture_identity.trigger_metadata` so the expected fixture route stays inspectable, and derive `evaluator_outcome.fixture_route_match_status` from the normalized comparison. When writing the structured Phase 1 payload, aggregate the full ordered batch under top-level `phase1_routing_fixture_result_collection` with `fixture_set_id`, `comparison_key`, `total_results`, `aggregate_trigger_precision`, `per_skill_trigger_precision`, and `phase1_routing_fixture_results`. `aggregate_trigger_precision` must summarize the full replay with `total_matches`, `total_evaluated_routes`, and `overall_precision`. `per_skill_trigger_precision` must group the same comparison results by `fixture_identity.fixture_skill`, recompute precision inside each skill bucket, and include `mismatch_details` for every incorrect route decision in that bucket. Also surface the replayed trigger-precision evidence under top-level `description_quality`, with one report per evaluated skill containing `score`, `evidence`, and `mismatches`.
 
 Remaining dimensions: `references.md > V2.0 Design Audit Rubric`.

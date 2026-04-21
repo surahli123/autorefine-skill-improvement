@@ -190,6 +190,7 @@ After Initialize Workspace and Pipeline Status, stay in `SKILL.md` as the single
 - Contract already confirmed (state.json.contract_status = "confirmed") → skip Phase 0.5, read `references/gulf1-comprehension.md` for Phase 1
 - Contract skipped (state.json.contract_status = "skipped") → skip Phase 0.5, read `references/gulf1-comprehension.md` for Phase 1
 - Contract in-progress (state.json.contract_status is "collecting" or "inferred") → resume Phase 0.5 mid-wizard, read `references/gulf1-comprehension.md`
+- **Phase 0.5 trace recorder input:** `autorefine/scripts/record.py` + `autorefine/scripts/records-to-gulf1.py` provide an alternative Phase 0.5 ingestion path. Use when you have recorded real agent traces (Option D in Phase 0.5).
 - Starting fresh or resuming in Phases 1-3 → read `references/gulf1-comprehension.md`
 - Gulf 1 gate approved, entering Phases 4-6 → read `references/gulf2-specification.md`
 - Gulf 2 gate approved (or Quick Start returning) → read `references/gulf3-generalization.md`
