@@ -2807,6 +2807,10 @@ function isMutationTimeVersionComparison(versionComparison, experiments) {
 }
 
 function getStoredEvaluationResult(experiment) {
+  if (!experiment || typeof experiment !== 'object') {
+    return null;
+  }
+
   if (experiment.stored_evaluation_result && typeof experiment.stored_evaluation_result === 'object') {
     return experiment.stored_evaluation_result;
   }
