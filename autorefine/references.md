@@ -25,11 +25,12 @@ Workspace directories for new runs are `traces/`, `judges/`, `runs/`, `skill-ver
 - `current_run_id`: null, or the unique iteration-run identifier for the active Phase 7 execution (for example `run_2026-04-03T14-30-00`). Set exactly once by the single iteration-start trigger at Phase 7 start. Resume/load should use this ID to reopen the matching run record in `results.json.iteration_runs[]` before reading iteration artifacts.
 - `current_run_path`: null, or relative path to the current Phase 7 run directory (e.g., `runs/run_2026-04-03T14-30-00/`). Set at Phase 7 start, updated on loop-back. Used by resume to identify which run directory to read `decision.md` files from.
 - `current_experiment`: null, or the active Phase 7 experiment slot. Set `current_experiment = 0` for the baseline-in-progress slot when a new iteration run starts, before any `iteration_000/` artifacts exist. Resume/checkpoint flows should use this field together with `current_run_path` to reopen the active baseline or mutation slot instead of guessing from directory scans.
-- `iteration_state`: null, or `{"run_id":"run_...","run_path":"runs/run_.../","experiment_id":0,"active_phase":"eval|mutate|test|session_close","phase_status":"running|ready|completed|blocked","last_eval_status":"completed|invalid|blocked|null","last_eval_results_ref":"runs/.../iteration_000/eval_results.json|null","last_mutation_status":"completed|invalid|blocked|null","last_mutation_results_ref":"runs/.../iteration_001/mutation.md|null","next_action":"phase7_baseline_eval|phase7_mutation_analysis|phase7_test_phase|phase7_session_close|null"}`. This is the canonical runner handoff record for the active Phase 7 run.
+- `iteration_state`: null, or `{"run_id":"run_...","run_path":"runs/run_.../","experiment_id":0,"active_phase":"eval|mutate|test|session_close","phase_status":"running|ready|completed|blocked","last_eval_status":"completed|invalid|blocked|null","last_eval_results_ref":"runs/.../iteration_000/eval_results.json|null","last_mutation_status":"completed|skipped|invalid|blocked|null","last_mutation_results_ref":"runs/.../iteration_001/mutation.md|null","next_action":"phase7_baseline_eval|phase7_mutation_analysis|phase7_test_phase|phase7_session_close|null"}`. This is the canonical runner handoff record for the active Phase 7 run.
 - On the iteration-start write, initialize `iteration_state` with the new `run_id`, `run_path`, `experiment_id = 0`, `active_phase = "eval"`, `phase_status = "running"`, `last_eval_status = null`, `last_eval_results_ref = null`, and `next_action = "phase7_baseline_eval"`.
 - When the baseline eval finishes and `iteration_000/eval_results.json` exists, update the same `iteration_state` object to `active_phase = "mutate"`, `phase_status = "ready"`, `last_eval_status = "completed"`, `last_eval_results_ref = "runs/.../iteration_000/eval_results.json"`, and `next_action = "phase7_mutation_analysis"`. This is the explicit eval-to-mutate handoff for the same run; do not create a new `run_id`, `run_path`, or run record.
 - When later mutation evals finish, overwrite `iteration_state.experiment_id`, `last_eval_status`, and `last_eval_results_ref` for the current `iteration_<NNN>/eval_results.json` while keeping the same run identifiers. Resume/load should reopen the latest eval artifact from this object instead of rescanning directories.
-- When the mutate phase finishes for an experiment, record the mutation output/status on the same `iteration_state` object (`last_mutation_status = "completed"`, `last_mutation_results_ref = "runs/.../iteration_<NNN>/mutation.md"`), then automatically advance the same run into test by setting `active_phase = "test"`, `phase_status = "ready"`, and `next_action = "phase7_test_phase"`. Do not open a second run.
+- When the mutate phase finishes for an experiment with a real candidate, record the mutation output/status on the same `iteration_state` object (`last_mutation_status = "completed"`, `last_mutation_results_ref = "runs/.../iteration_<NNN>/mutation.md"`), then automatically advance the same run into test by setting `active_phase = "test"`, `phase_status = "ready"`, and `next_action = "phase7_test_phase"`. Do not open a second run.
+- When the mutate phase resolves to a no-op / skip result, record `last_mutation_status = "skipped"` and `last_mutation_results_ref = "runs/.../iteration_<NNN>/mutation.md"` on the same `iteration_state` object, keep `active_phase = "mutate"`, keep the current baseline active, and keep `next_action = "phase7_mutation_analysis"` so the run can re-target, continue, or stop without fabricating a scored candidate.
 - When the test phase finishes for an experiment, automatically advance the same run into Session Close by setting `active_phase = "session_close"`, `phase_status = "ready"`, and `next_action = "phase7_session_close"` on the same `iteration_state` object.
 - Session Close resolves the run to a terminal state on that same object: success writes `active_phase = "session_close"`, `phase_status = "completed"`, `next_action = null`; unrecoverable failure writes `active_phase = "session_close"`, `phase_status = "blocked"`, `next_action = null`.
 - When serializing `state.json` for checkpoint writes, phase boundaries, or any other persistence path, preserve `iteration_state` unchanged so the active eval->mutate->test->session_close handoff survives resume.
@@ -1895,7 +1896,15 @@ The scoring pass also emits `mutation_handoff` for baseline and every mutation. 
         ],
         "strategy_alignment": "pipeline_eval_strategy",
         "rationale": "Restore explicit stage-local disclosure guidance for pipeline readers.",
-        "expected_effect": "Recover the missed disclosure requirement without destabilizing passing gotcha behavior."
+        "expected_effect": "Recover the missed disclosure requirement without destabilizing passing gotcha behavior.",
+        "evidence_admission": {
+          "status": "admitted",
+          "reason_code": "skill_deficiency",
+          "evidence_refs": [
+            "eval_results[E2].evidence[0]"
+          ],
+          "summary": "The failure was caused by missing disclosure guidance in the skill itself."
+        }
       }
     ]
   }
@@ -1921,6 +1930,10 @@ The scoring pass also emits `mutation_handoff` for baseline and every mutation. 
 - `mutation_targets[].strategy_alignment`: the active `selected_eval_strategy_id` or compatible strategy tag that justified choosing this target. Mutate should treat this as the canonical pattern-aware route instead of falling back to a generic edit path.
 - `mutation_targets[].rationale`: concise target-local explanation for why this target is the next mutation candidate. This is the machine-readable summary mutate can display or copy into the hypothesis scaffold without mining free-form critique prose.
 - `mutation_targets[].expected_effect`: concise statement of the intended improvement if this target is mutated successfully. Mutate should propagate this unchanged into the candidate hypothesis and later compare the observed outcome against it.
+- `mutation_targets[].evidence_admission`: mutation-stage evidence-admission decision for this target. Required fields are `status` (`admitted|rejected`), `reason_code`, `evidence_refs[]`, and `summary`.
+- Only `mutation_targets[]` rows with `evidence_admission.status = admitted` may feed step 2a candidate generation.
+- Use `reason_code = skill_deficiency` when the evidence shows the skill content is actually wrong, missing, or misleading.
+- Use `reason_code = agent_misuse_not_skill_deficiency` when the skill already contained correct guidance and the failure came from agent misuse, runtime behavior, or missed tool use. Rejected rows remain audit-visible but may not be promoted into candidate revisions.
 - Populate `mutation_handoff` immediately after `decision_explanation` is finalized so scoring, explanation, and mutation-target extraction all describe the same evaluation event.
 - Return the stored `mutation_handoff` field unchanged anywhere experiment payloads are serialized, fetched, or shown. Never recompute `mutation_handoff` on the retrieval path.
 
@@ -2160,10 +2173,24 @@ Once mutate selects the highest-priority target row, convert that structured eva
     "rationale": "Restore explicit read-when guidance before later expansion.",
     "expected_effect": "Recover the missed disclosure requirement without disturbing stage order."
   },
+  "mutation_outcome": {
+    "status": "candidate_generated",
+    "skip_reason_code": null,
+    "skip_summary": null,
+    "next_recommended_action": "phase7_test_phase"
+  },
   "candidate_skill_revision": {
     "format": "SKILL.md",
     "content_type": "text/markdown",
     "content": "# AutoRefine\n\nRead when: before expanding the answer, inspect the linked reference section.\n\n## Progressive Disclosure\n- Load references.md before writing the final response."
+  },
+  "reviewer_confirmation_gate": {
+    "required": false,
+    "trigger_kinds": [],
+    "status": "not_required",
+    "reviewer_id": null,
+    "confirmed_at": null,
+    "notes": null
   },
   "version_artifact": {
     "schema_version": 1,
@@ -2192,13 +2219,24 @@ Once mutate selects the highest-priority target row, convert that structured eva
 - `source_artifact_schema_version`: copy the `mutation_handoff.schema_version` that powered this candidate revision.
 - `lineage_metadata`: copy the same experiment/input-set/strategy lineage used to build the direct mutate input so downstream consumers can trace which scoring corpus and pattern-aware route produced the candidate.
 - `selected_mutation_target`: copy the selected `mutation_targets[]` row unchanged from `mutation_handoff`. Do not paraphrase or rebuild the target from prose.
+- `mutation_outcome`: canonical mutate-phase result for this attempt. Use `status = candidate_generated` when mutate produced a real candidate revision. Use `status = skipped` when mutate intentionally makes no change and persists only the skip result.
+- `mutation_outcome.skip_reason_code`: null for `candidate_generated`; required for `skipped`.
+- `mutation_outcome.skip_summary`: concise explanation of why no candidate was generated.
+- `mutation_outcome.next_recommended_action`: canonical next step after this mutate attempt. Use `phase7_test_phase` only when a real candidate exists. Skip outcomes should point back to mutate / retarget / stop handling instead of test.
 - `candidate_skill_revision`: the full candidate revision produced for this experiment.
 - `candidate_skill_revision.format`: always `SKILL.md`.
 - `candidate_skill_revision.content_type`: always `text/markdown`.
 - `candidate_skill_revision.content`: the full revised `SKILL.md` body. This field is required so the mutation artifact carries the candidate revision directly instead of forcing downstream readers to reopen sibling files.
+- `reviewer_confirmation_gate`: machine-readable confirmation gate for env-fact mutations such as API endpoints, schemas, and filenames.
+- `reviewer_confirmation_gate.required`: true when the candidate edits an externally constrained environment fact; otherwise false.
+- `reviewer_confirmation_gate.trigger_kinds[]`: ordered trigger categories such as `api_endpoint`, `schema`, or `filename`.
+- `reviewer_confirmation_gate.status`: one of `not_required`, `pending`, `confirmed`, or `rejected`.
+- A candidate may not be kept while `reviewer_confirmation_gate.status` is `pending` or `rejected`.
 - `version_artifact`: immutable persisted version snapshot for this candidate revision. Use `Skill Version Artifact Schema`.
 - `skill_after.md` must exactly mirror `candidate_skill_revision.content` for the same experiment.
 - Persist this artifact in the `mutation.md` iteration artifact under `## Mutation Artifact` before scoring or user presentation.
+- When `mutation_outcome.status = skipped`, do not write `candidate_skill_revision`, do not write `version_artifact`, do not advance into test, and do not finalize a new experiment record.
+- A skip result is still persisted in `mutation.md` as the canonical mutate-phase outcome for that attempt so resume/reporting can distinguish `skipped` from `missing` or `failed`.
 
 ### Mutation Test Launch Payload
 
@@ -2271,6 +2309,7 @@ Persist the payload in `mutation.md` under `## Test Launch Payload`. Resume-time
 - `eval_artifact_refs`: stable references back to the eval-phase artifact that selected the target and froze the replay corpus. Preserve `eval_results_ref`, `mutation_handoff_ref`, `decision_breakdown_ref`, `input_set_id`, `input_set_ref`, and the ordered `input_ids[]`.
 - `test_bootstrap_metadata`: explicit bootstrap state for the next phase. Preserve `run_id`, `run_path`, `experiment_id`, `dataset_split_id`, `selected_eval_strategy_id`, `active_phase = test`, `phase_status = ready`, `next_action = phase7_test_phase`, and `bootstrap_generated_at`.
 - Do not rebuild `input_ids[]`, `input_set_ref`, or the candidate snapshot path from split manifests, filesystem scans, or free-form mutation notes once this payload has been written.
+- Do not emit `## Test Launch Payload` when `mutation_outcome.status = skipped`; skip/no-op outcomes stay in the mutate lane and do not bootstrap test.
 
 ---
 
@@ -4245,6 +4284,8 @@ On user-initiated pause, also offer: "Want to save key learnings to memory befor
 
 Read when: Phase 7 active (after scoring, before presenting to user).
 
+This is AutoRefine's explicit "preserves existing value" surface. Regression check is the contract that proves a candidate did not break previously established wins while chasing a new improvement.
+
 ### When to Run
 
 After scoring a mutation against the eval suite, BEFORE presenting results to the user. This ensures the user sees score + regression status together in one decision point.
@@ -4303,7 +4344,8 @@ Treat the same run-start write as the full baseline-in-progress recovery state f
 - Persist the active baseline slot with `state.json.current_experiment = 0` before any `iteration_000/` artifacts exist.
 - Persist the eval-running runner handoff in `state.json.iteration_state` and `results.json.iteration_state` before baseline scoring starts.
 - When `iteration_000/eval_results.json` is written, update the same `iteration_state` object to the mutate-ready handoff for the same `run_id` / `run_path` instead of opening a second run.
-- When `iteration_<NNN>/mutation.md` is written for a completed mutate phase, update the same `iteration_state` object with `last_mutation_status`, `last_mutation_results_ref`, and a test-ready handoff (`active_phase = "test"`, `phase_status = "ready"`, `next_action = "phase7_test_phase"`) for the same `run_id` / `run_path`.
+- When `iteration_<NNN>/mutation.md` is written for a completed mutate phase that generated a candidate, update the same `iteration_state` object with `last_mutation_status`, `last_mutation_results_ref`, and a test-ready handoff (`active_phase = "test"`, `phase_status = "ready"`, `next_action = "phase7_test_phase"`) for the same `run_id` / `run_path`.
+- When `iteration_<NNN>/mutation.md` is written for a skip/no-op mutate phase, update the same `iteration_state` object with `last_mutation_status = "skipped"` and `last_mutation_results_ref`, but do not advance into test, do not finalize the experiment, and do not alter `completion_cadence`.
 - When test-phase validation completes for that experiment, update the same `iteration_state` object to a Session Close-ready handoff (`active_phase = "session_close"`, `phase_status = "ready"`, `next_action = "phase7_session_close"`) for the same `run_id` / `run_path`.
 - Session Close completion must set terminal `iteration_state` on the same run: success writes `phase_status = "completed"` with `next_action = null`; unrecoverable closeout failure writes `phase_status = "blocked"` with `next_action = null`.
 - Append the full run record to `results.json.iteration_runs[]`.
@@ -4373,7 +4415,8 @@ Read when: Phase 7 start, baseline finalization, later mutation/test transitions
 - When the baseline eval finishes and `iteration_000/eval_results.json` exists, update the same object to `active_phase = "mutate"`, `phase_status = "ready"`, `last_eval_status = "completed"`, `last_eval_results_ref = "runs/.../iteration_000/eval_results.json"`, and `next_action = "phase7_mutation_analysis"`.
 - This is the explicit eval-to-mutate handoff for the same run. Do not allocate a new `run_id`, create a second `run_path`, or append another run record just because the phase advanced.
 - When later mutation evals finish, overwrite `experiment_id`, `last_eval_status`, and `last_eval_results_ref` for the current `iteration_<NNN>/eval_results.json` while keeping the same run identifiers. Use this record to reopen the newest eval output on resume instead of scanning the filesystem.
-- When the mutate phase finishes for the same experiment, record `last_mutation_status = "completed"` and `last_mutation_results_ref = "runs/.../iteration_<NNN>/mutation.md"`, then advance the same run into a test-ready handoff with `active_phase = "test"`, `phase_status = "ready"`, and `next_action = "phase7_test_phase"`.
+- When the mutate phase finishes for the same experiment and produces a candidate, record `last_mutation_status = "completed"` and `last_mutation_results_ref = "runs/.../iteration_<NNN>/mutation.md"`, then advance the same run into a test-ready handoff with `active_phase = "test"`, `phase_status = "ready"`, and `next_action = "phase7_test_phase"`.
+- When the mutate phase finishes for the same experiment with `mutation_outcome.status = "skipped"`, record `last_mutation_status = "skipped"` and `last_mutation_results_ref = "runs/.../iteration_<NNN>/mutation.md"`, keep the run in `active_phase = "mutate"`, and continue from `next_action = "phase7_mutation_analysis"` until a real candidate is produced or the loop ends.
 - When test-phase validation completes for that experiment, keep the same run identifiers and advance the same object into a Session Close-ready handoff with `active_phase = "session_close"`, `phase_status = "ready"`, and `next_action = "phase7_session_close"`.
 - At Session Close completion, write a terminal state on the same object: success sets `active_phase = "session_close"`, `phase_status = "completed"`, `next_action = null`; unrecoverable failure sets `active_phase = "session_close"`, `phase_status = "blocked"`, `next_action = null`.
 - Resume/load must continue from the persisted `next_action` while `phase_status` is `running|ready`, and stop handoff progression only when `phase_status` is terminal (`completed|blocked`).
@@ -4428,10 +4471,24 @@ A new `run_*` directory is created each time Phase 7 starts (including after loo
     "target_location": "Progressive Disclosure",
     "recommended_mutation_type": "modify"
   },
+  "mutation_outcome": {
+    "status": "candidate_generated",
+    "skip_reason_code": null,
+    "skip_summary": null,
+    "next_recommended_action": "phase7_test_phase"
+  },
   "candidate_skill_revision": {
     "format": "SKILL.md",
     "content_type": "text/markdown",
     "content": "# AutoRefine\n\nRead when: before expanding the answer, inspect the linked reference section."
+  },
+  "reviewer_confirmation_gate": {
+    "required": false,
+    "trigger_kinds": [],
+    "status": "not_required",
+    "reviewer_id": null,
+    "confirmed_at": null,
+    "notes": null
   },
   "version_artifact": {
     "version_id": "skill_version__run_2026-04-11T09-00-00__exp_003",
