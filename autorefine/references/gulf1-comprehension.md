@@ -87,6 +87,7 @@ When the user has already recorded real agent traces for the skill-under-test vi
 ```
 python3 autorefine/scripts/records-to-gulf1.py --input <path> --output [workspace]/contract/recorded-traces.jsonl --classify auto
 ```
+If `[workspace]/contract/recorded-traces.jsonl` already exists and the author is intentionally regenerating it, pass `--force`; otherwise the converter fails closed to avoid clobbering an existing trace artifact.
 
 This converts the JSONL session records to Gulf 1 Phase 0.5 input shape with heuristic classification.
 

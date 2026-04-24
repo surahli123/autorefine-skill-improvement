@@ -210,6 +210,40 @@ class TestValidation:
             validate_record(bad, "x.jsonl", 3)
         assert "tool_calls" in str(exc_info.value)
 
+    def test_malformed_response_text_not_string_raises(self):
+        bad = {
+            "session_id": "s1",
+            "turn": 1,
+            "timestamp": "2026-04-21T00:00:00Z",
+            "messages": [],
+            "response_text": {"text": "nested"},
+            "tool_calls": [],
+        }
+        with pytest.raises(ValueError) as exc_info:
+            validate_record(bad, "x.jsonl", 4)
+        msg = str(exc_info.value)
+        assert "response_text" in msg
+        assert "string" in msg
+
+    def test_malformed_session_id_not_string_raises(self):
+        bad = make_turn()
+        bad["session_id"] = 123
+        with pytest.raises(ValueError, match="session_id.*string"):
+            validate_record(bad, "x.jsonl", 5)
+
+    @pytest.mark.parametrize("bad_turn", [0, -1, "1", 1.2])
+    def test_malformed_turn_not_positive_integer_raises(self, bad_turn):
+        bad = make_turn()
+        bad["turn"] = bad_turn
+        with pytest.raises(ValueError, match="turn.*positive integer"):
+            validate_record(bad, "x.jsonl", 6)
+
+    def test_malformed_timestamp_not_string_raises(self):
+        bad = make_turn()
+        bad["timestamp"] = None
+        with pytest.raises(ValueError, match="timestamp.*string"):
+            validate_record(bad, "x.jsonl", 7)
+
     def test_valid_record_does_not_raise(self):
         good = make_turn()
         # Should not raise.
@@ -504,3 +538,96 @@ def test_mixed_layout_discovers_both_flat_and_nested(tmp_path):
 
     found_session_ids = {row["source_trace"]["session_id"] for row in rows}
     assert found_session_ids == {"session-flat", "session-nested"}
+
+
+def test_converter_refuses_to_overwrite_input_file(tmp_path, capsys):
+    input_file = tmp_path / "session.jsonl"
+    original = json.dumps(make_turn()) + "\n"
+    input_file.write_text(original, encoding="utf-8")
+
+    old_argv = sys.argv[:]
+    sys.argv = [
+        "records-to-gulf1.py",
+        "--input", str(input_file),
+        "--output", str(input_file),
+    ]
+    try:
+        with pytest.raises(SystemExit) as exc:
+            _mod.main()
+    finally:
+        sys.argv = old_argv
+
+    assert exc.value.code == 1
+    assert "must not match an input file" in capsys.readouterr().err
+    assert input_file.read_text(encoding="utf-8") == original
+
+
+def test_converter_refuses_to_overwrite_existing_output_without_force(tmp_path, capsys):
+    input_file = tmp_path / "session.jsonl"
+    output_file = tmp_path / "existing.jsonl"
+    input_file.write_text(json.dumps(make_turn()) + "\n", encoding="utf-8")
+    output_file.write_text("keep me\n", encoding="utf-8")
+
+    old_argv = sys.argv[:]
+    sys.argv = [
+        "records-to-gulf1.py",
+        "--input", str(input_file),
+        "--output", str(output_file),
+    ]
+    try:
+        with pytest.raises(SystemExit) as exc:
+            _mod.main()
+    finally:
+        sys.argv = old_argv
+
+    assert exc.value.code == 1
+    assert "refusing to overwrite existing output file" in capsys.readouterr().err
+    assert output_file.read_text(encoding="utf-8") == "keep me\n"
+
+
+def test_converter_refuses_to_write_through_symlink(tmp_path, capsys):
+    input_file = tmp_path / "session.jsonl"
+    target_file = tmp_path / "target.jsonl"
+    output_link = tmp_path / "linked-output.jsonl"
+    input_file.write_text(json.dumps(make_turn()) + "\n", encoding="utf-8")
+    target_file.write_text("keep target\n", encoding="utf-8")
+    output_link.symlink_to(target_file)
+
+    old_argv = sys.argv[:]
+    sys.argv = [
+        "records-to-gulf1.py",
+        "--input", str(input_file),
+        "--output", str(output_link),
+    ]
+    try:
+        with pytest.raises(SystemExit) as exc:
+            _mod.main()
+    finally:
+        sys.argv = old_argv
+
+    assert exc.value.code == 1
+    assert "refusing to write through symlink" in capsys.readouterr().err
+    assert target_file.read_text(encoding="utf-8") == "keep target\n"
+
+
+def test_converter_force_overwrites_existing_output(tmp_path):
+    input_file = tmp_path / "session.jsonl"
+    output_file = tmp_path / "existing.jsonl"
+    input_file.write_text(json.dumps(make_turn()) + "\n", encoding="utf-8")
+    output_file.write_text("replace me\n", encoding="utf-8")
+
+    old_argv = sys.argv[:]
+    sys.argv = [
+        "records-to-gulf1.py",
+        "--input", str(input_file),
+        "--output", str(output_file),
+        "--force",
+    ]
+    try:
+        _mod.main()
+    finally:
+        sys.argv = old_argv
+
+    rows = [json.loads(line) for line in output_file.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["source_trace"]["session_id"] == "sess-abc123"

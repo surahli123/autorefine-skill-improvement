@@ -41,6 +41,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -56,10 +57,15 @@ _turn_lock = threading.Lock()
 _turn_counter: int = 0                        # incremented per captured turn
 _records_file: Any = None                     # open file handle, set at startup
 _records_path: Path | None = None            # for the shutdown banner
-_skill_hint: str | None = None               # absolute path from --skill flag
+_skill_hint: str | None = None               # path from --skill flag, sanitized by default
+_raw_records: bool = False                   # opt-in: preserve raw payloads and absolute paths
 _server_port: int = 8765                     # resolved from --port
 MAX_CARRY_BYTES: int = 1 * 1024 * 1024
 PASSTHROUGH_ALLOWED_PREFIXES: tuple[str, ...] = ("/v1/",)
+ALLOWED_UPSTREAM_HOSTS: dict[str, set[str]] = {
+    "anthropic": {"api.anthropic.com"},
+    "openai": {"api.openai.com"},
+}
 _CREDENTIAL_PATTERN = re.compile(
     r"(sk-[A-Za-z0-9\-_]{10,}|sk-ant-[A-Za-z0-9\-_]{10,}|Bearer\s+\S+)",
     re.IGNORECASE,
@@ -103,6 +109,52 @@ def _derive_skill_slug(skill_arg: str | None) -> str:
     return slug
 
 
+def _is_loopback_base_url(value: str) -> bool:
+    """Return True when an upstream base URL would point back at this local proxy."""
+    host = (urlparse(value).hostname or "").lower()
+    return host == "localhost" or host == "::1" or host.startswith("127.")
+
+
+def _validate_upstream_base_url(
+    value: str,
+    provider: str,
+    allow_custom: bool,
+) -> str:
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").lower()
+    if _is_loopback_base_url(value):
+        raise ValueError(f"{provider} upstream points to a local address and would create a forwarding loop")
+    if parsed.scheme != "https":
+        raise ValueError(f"{provider} upstream must use https: {value}")
+    if not allow_custom and host not in ALLOWED_UPSTREAM_HOSTS[provider]:
+        raise ValueError(
+            f"unsafe upstream host for {provider}: {host}. "
+            "Pass --allow-custom-upstream to use a trusted custom HTTPS endpoint."
+        )
+    return value.rstrip("/")
+
+
+def _join_upstream_url(base: str, path: str) -> str:
+    base = base.rstrip("/")
+    if base.endswith("/v1") and path.startswith("/v1/"):
+        return base + path[len("/v1"):]
+    return base + path
+
+
+def _scrub_json(value: Any) -> Any:
+    if isinstance(value, str):
+        return _scrub(value)
+    if isinstance(value, list):
+        return [_scrub_json(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _scrub_json(item) for key, item in value.items()}
+    return value
+
+
+def _record_skill_hint(value: str) -> str:
+    return value if _raw_records else Path(value).name
+
+
 # ---------------------------------------------------------------------------
 # Record writer
 # ---------------------------------------------------------------------------
@@ -128,9 +180,9 @@ def write_record(
         "session_id": SESSION_ID,
         "turn": turn,
         "timestamp": _now_iso(),
-        "messages": messages,
-        "response_text": response_text,
-        "tool_calls": tool_calls,
+        "messages": messages if _raw_records else _scrub_json(messages),
+        "response_text": response_text if _raw_records else _scrub(response_text),
+        "tool_calls": tool_calls if _raw_records else _scrub_json(tool_calls),
     }
 
     # Optional fields: only add the key when the value is meaningful.
@@ -138,7 +190,7 @@ def write_record(
     # missing optional fields — so emitting null would be technically valid
     # but misleading. Omitting is cleaner and matches the schema docs.
     if _skill_hint is not None:
-        record["skill_hint"] = _skill_hint
+        record["skill_hint"] = _record_skill_hint(_skill_hint)
     if upstream_model is not None:
         record["upstream_model"] = upstream_model
     if error is not None:
@@ -409,6 +461,7 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
     ANALOGY: logging middleware in Express.js — sits between client and server,
     captures the request/response pair, then passes it through unmodified.
     """
+    protocol_version = "HTTP/1.1"
 
     # Silence the default per-request log lines (we print our own summaries)
     def log_message(self, fmt: str, *args: Any) -> None:  # noqa: N802
@@ -447,11 +500,10 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         """
         if path == "/v1/messages":
             base = os.environ.get("ANTHROPIC_BASE_URL_REAL", "https://api.anthropic.com")
-            # Remove trailing slash to avoid double-slash
-            return base.rstrip("/") + path
+            return _join_upstream_url(base, path)
         else:
             base = os.environ.get("OPENAI_BASE_URL_REAL", "https://api.openai.com")
-            return base.rstrip("/") + path
+            return _join_upstream_url(base, path)
 
     def _forward_headers(self) -> dict[str, str]:
         """Build headers to forward upstream, excluding Host (which httpx sets).
@@ -476,15 +528,24 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(status)
         for k, v in headers.items():
             # Don't forward hop-by-hop headers
-            if k.lower() not in {"transfer-encoding", "connection", "keep-alive"}:
+            if k.lower() not in {
+                "transfer-encoding",
+                "connection",
+                "keep-alive",
+                "content-length",
+                "content-encoding",
+            }:
                 self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
     def _send_error_response(self, description: str) -> None:
         """Send a synthetic 500 JSON error to the client."""
-        body = json.dumps({"error": f"upstream failure: {description}"}).encode()
-        self.send_response(500)
+        self._send_json_error(500, f"upstream failure: {description}")
+
+    def _send_json_error(self, status: int, description: str) -> None:
+        body = json.dumps({"error": description}).encode()
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -724,15 +785,22 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
-        # For passthrough, we need to decide which upstream to use.
-        # Simple heuristic: if path starts with /v1 and we have ANTHROPIC_BASE_URL_REAL,
-        # use Anthropic; else OpenAI. Most passthrough calls are model-listing.
-        if "/messages" in path or "/anthropic" in path.lower():
+        lower_headers = {k.lower(): v for k, v in self.headers.items()}
+        has_anthropic_auth = (
+            "x-api-key" in lower_headers
+            or "anthropic-version" in lower_headers
+        )
+        has_openai_auth = "authorization" in lower_headers
+        if has_anthropic_auth == has_openai_auth:
+            self._send_json_error(400, "ambiguous passthrough target")
+            return
+
+        if has_anthropic_auth:
             base = os.environ.get("ANTHROPIC_BASE_URL_REAL", "https://api.anthropic.com")
         else:
             base = os.environ.get("OPENAI_BASE_URL_REAL", "https://api.openai.com")
 
-        upstream_url = base.rstrip("/") + path
+        upstream_url = _join_upstream_url(base, path)
         forward_headers = self._forward_headers()
 
         try:
@@ -770,7 +838,7 @@ def _print_banner(port: int, records_path: Path, skill_hint: str | None) -> None
     The most important thing to communicate:
     1. What to export (the key action the user must take)
     2. Where records go (so they can find them)
-    3. Privacy warning (records are unredacted)
+    3. Privacy warning (records may still include sensitive content)
     """
     print()
     print("=" * 60)
@@ -791,7 +859,8 @@ def _print_banner(port: int, records_path: Path, skill_hint: str | None) -> None
     print("  Every turn will be captured to the records file above.")
     print()
     print("  *** PII WARNING ***")
-    print("  RECORDS ARE LOCAL AND UNREDACTED.")
+    print("  Records are local. Credential-like tokens are scrubbed by default,")
+    print("  but prompts and responses may still contain sensitive content.")
     print("  Do not share the .jsonl file without reviewing for sensitive content.")
     print()
     print("  Ctrl-C to stop.")
@@ -845,7 +914,7 @@ def _handle_sigint(signum: int, frame: Any) -> None:
 
 def main() -> None:
     """Parse args, open records file, start server, block until Ctrl-C."""
-    global _records_file, _records_path, _skill_hint, _server_port, _server_ref
+    global _records_file, _records_path, _skill_hint, _raw_records, _server_port, _server_ref
 
     parser = argparse.ArgumentParser(
         description=(
@@ -868,7 +937,7 @@ def main() -> None:
     parser.add_argument(
         "--skill",
         metavar="PATH",
-        help="Absolute path to the SKILL.md file under test. Stored as skill_hint in records.",
+        help="Path to the SKILL.md file under test. Basename is stored as skill_hint unless --raw-records is used.",
     )
     parser.add_argument(
         "--port",
@@ -883,9 +952,20 @@ def main() -> None:
         metavar="DIR",
         help="Directory to write JSONL session files (default: records).",
     )
+    parser.add_argument(
+        "--allow-custom-upstream",
+        action="store_true",
+        help="Allow trusted custom HTTPS upstream base URLs instead of only official API hosts.",
+    )
+    parser.add_argument(
+        "--raw-records",
+        action="store_true",
+        help="Preserve raw messages, responses, tool calls, and absolute skill paths in records.",
+    )
     args = parser.parse_args()
 
     _server_port = args.port
+    _raw_records = args.raw_records
 
     # Resolve --skill to an absolute path, if provided
     if args.skill:
@@ -911,22 +991,26 @@ def main() -> None:
     real_anthropic = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
     real_openai = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com")
 
-    # Detect if the user already has these pointing at localhost — probably
-    # means they're re-running without resetting. Warn but don't fail.
-    if "localhost" in real_anthropic or "127.0.0.1" in real_anthropic:
+    try:
+        real_anthropic = _validate_upstream_base_url(
+            real_anthropic,
+            "anthropic",
+            args.allow_custom_upstream,
+        )
+        real_openai = _validate_upstream_base_url(
+            real_openai,
+            "openai",
+            args.allow_custom_upstream,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        if "forwarding loop" not in detail:
+            detail = f"unsafe upstream: {detail}"
         print(
-            f"Warning: ANTHROPIC_BASE_URL already points to a local address "
-            f"({real_anthropic}). This may cause a forwarding loop. "
-            f"Unset it before running this script.",
+            "Refusing to start: " + detail,
             file=sys.stderr,
         )
-    if "localhost" in real_openai or "127.0.0.1" in real_openai:
-        print(
-            f"Warning: OPENAI_BASE_URL already points to a local address "
-            f"({real_openai}). This may cause a forwarding loop. "
-            f"Unset it before running this script.",
-            file=sys.stderr,
-        )
+        sys.exit(1)
 
     os.environ["ANTHROPIC_BASE_URL_REAL"] = real_anthropic
     os.environ["OPENAI_BASE_URL_REAL"] = real_openai

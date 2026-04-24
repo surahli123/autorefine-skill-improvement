@@ -60,6 +60,7 @@ def _reset_globals(skill_hint: str | None = None) -> None:
     """
     rec._turn_counter = 0
     rec._skill_hint = skill_hint
+    rec._raw_records = False
     # We'll inject a StringIO as the records file so we can inspect output
     # without touching the filesystem.
 
@@ -157,7 +158,7 @@ class TestSchemaEmission:
         assert isinstance(r["upstream_model"], str)
 
     def test_messages_preserved_verbatim(self) -> None:
-        """messages array must be preserved exactly as passed in."""
+        """messages array without secrets must be preserved exactly as passed in."""
         msgs = [
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": "What is 2+2?"},
@@ -171,6 +172,27 @@ class TestSchemaEmission:
         )
         records = _read_records(self.buf)
         assert records[0]["messages"] == msgs
+
+    def test_default_record_payload_scrubs_credentials(self) -> None:
+        rec.write_record(
+            turn=1,
+            messages=[{"role": "user", "content": "Bearer tok-xyz ?api_key=abc"}],
+            response_text="done with sk-abc123def456789",
+            tool_calls=[
+                {
+                    "id": "tc1",
+                    "name": "bash",
+                    "arguments": {"cmd": "curl https://x.test?token=secret"},
+                }
+            ],
+        )
+
+        record = _read_records(self.buf)[0]
+        serialized = json.dumps(record)
+        assert "Bearer tok-xyz" not in serialized
+        assert "sk-abc123def456789" not in serialized
+        assert "token=secret" not in serialized
+        assert serialized.count("[REDACTED]") >= 3
 
     def test_tool_calls_structure(self) -> None:
         """tool_calls must be a list; empty list when no tools used."""
@@ -357,7 +379,7 @@ class TestOptionalFields:
         assert "skill_hint" not in parsed
 
     def test_skill_hint_present_when_set(self) -> None:
-        """When skill_hint IS set, it must appear in the record."""
+        """When skill_hint IS set, the default record stores only a basename."""
         rec._skill_hint = "/Users/alice/.claude/skills/react-debug/SKILL.md"
         rec.write_record(
             turn=1,
@@ -368,7 +390,19 @@ class TestOptionalFields:
         records = _read_records(self.buf)
         r = records[0]
         assert "skill_hint" in r
-        assert r["skill_hint"] == "/Users/alice/.claude/skills/react-debug/SKILL.md"
+        assert r["skill_hint"] == "SKILL.md"
+
+    def test_raw_records_preserve_absolute_skill_hint(self) -> None:
+        rec._raw_records = True
+        rec._skill_hint = "/Users/alice/.claude/skills/react-debug/SKILL.md"
+        rec.write_record(
+            turn=1,
+            messages=[],
+            response_text="hi",
+            tool_calls=[],
+        )
+        records = _read_records(self.buf)
+        assert records[0]["skill_hint"] == "/Users/alice/.claude/skills/react-debug/SKILL.md"
 
     def test_upstream_model_absent_when_none(self) -> None:
         """upstream_model must not appear when not provided."""
@@ -851,6 +885,85 @@ class TestMainStartup:
 
 
 class TestProxySecurity:
+    def test_proxy_uses_http_1_1_for_chunked_streaming(self) -> None:
+        assert rec.ProxyHandler.protocol_version == "HTTP/1.1"
+
+    def test_build_upstream_url_does_not_duplicate_terminal_v1(self, monkeypatch) -> None:
+        handler = rec.ProxyHandler.__new__(rec.ProxyHandler)
+        monkeypatch.setenv("OPENAI_BASE_URL_REAL", "https://gateway.example.com/openai/v1")
+        monkeypatch.setenv("ANTHROPIC_BASE_URL_REAL", "https://gateway.example.com/anthropic/v1")
+
+        assert (
+            handler._build_upstream_url("/v1/chat/completions")
+            == "https://gateway.example.com/openai/v1/chat/completions"
+        )
+        assert (
+            handler._build_upstream_url("/v1/messages")
+            == "https://gateway.example.com/anthropic/v1/messages"
+        )
+
+    def test_passthrough_routes_anthropic_auth_to_anthropic_upstream(self, monkeypatch) -> None:
+        handler = rec.ProxyHandler.__new__(rec.ProxyHandler)
+        handler.path = "/v1/models"
+        handler.command = "GET"
+        handler.headers = {"x-api-key": "sk-ant-test", "anthropic-version": "2023-06-01"}
+        handler.wfile = io.BytesIO()
+        handler.rfile = io.BytesIO()
+        handler.send_response = lambda code: None
+        handler.send_header = lambda name, value: None
+        handler.end_headers = lambda: None
+        monkeypatch.setenv("ANTHROPIC_BASE_URL_REAL", "https://api.anthropic.com")
+        monkeypatch.setenv("OPENAI_BASE_URL_REAL", "https://api.openai.com")
+        captured: dict[str, object] = {}
+
+        class FakeResponse:
+            status_code = 200
+            headers = {"Content-Type": "application/json"}
+            content = b'{"data":[]}'
+
+        class FakeClient:
+            def __init__(self, timeout: float) -> None:
+                self.timeout = timeout
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def request(self, method: str, url: str, headers=None, content=None):
+                captured["url"] = url
+                captured["headers"] = headers
+                return FakeResponse()
+
+        with patch.object(rec.httpx, "Client", FakeClient):
+            handler._handle_passthrough()
+
+        assert captured["url"] == "https://api.anthropic.com/v1/models"
+        assert "x-api-key" in captured["headers"]
+
+    def test_passthrough_rejects_ambiguous_auth_headers(self, monkeypatch) -> None:
+        handler = rec.ProxyHandler.__new__(rec.ProxyHandler)
+        handler.path = "/v1/models"
+        handler.command = "GET"
+        handler.headers = {"x-api-key": "sk-ant-test", "Authorization": "Bearer sk-test"}
+        handler.wfile = io.BytesIO()
+        handler.rfile = io.BytesIO()
+        status_codes: list[int] = []
+        handler.send_response = lambda code: status_codes.append(code)
+        handler.send_header = lambda name, value: None
+        handler.end_headers = lambda: None
+
+        class FailClient:
+            def __init__(self, timeout: float) -> None:
+                raise AssertionError("ambiguous passthrough must not reach httpx")
+
+        with patch.object(rec.httpx, "Client", FailClient):
+            handler._handle_passthrough()
+
+        assert status_codes == [400]
+        assert "ambiguous passthrough target" in handler.wfile.getvalue().decode()
+
     def test_passthrough_rejects_disallowed_path(self) -> None:
         handler = rec.ProxyHandler.__new__(rec.ProxyHandler)
         handler.path = "/internal/secrets"
@@ -998,6 +1111,29 @@ class TestProxySecurity:
         assert "sk-abc123def456789" not in error_field
         assert "sk-abc123def456789" not in response_body
 
+    def test_send_response_drops_stale_body_metadata_headers(self) -> None:
+        handler = rec.ProxyHandler.__new__(rec.ProxyHandler)
+        sent_headers: dict[str, str] = {}
+        handler.send_response = lambda code: None
+        handler.send_header = lambda name, value: sent_headers.setdefault(name, value)
+        handler.end_headers = lambda: None
+        handler.wfile = io.BytesIO()
+
+        handler._send_response_to_client(
+            200,
+            {
+                "Content-Type": "application/json",
+                "Content-Length": "999",
+                "Content-Encoding": "gzip",
+                "Transfer-Encoding": "chunked",
+                "Connection": "keep-alive",
+            },
+            b'{"ok":true}',
+        )
+
+        assert sent_headers == {"Content-Type": "application/json"}
+        assert handler.wfile.getvalue() == b'{"ok":true}'
+
     def test_recorded_post_exception_scrubs_bearer_in_record_and_response(self) -> None:
         _reset_globals()
         buf = _make_string_records_file()
@@ -1037,7 +1173,7 @@ class TestProxySecurity:
         handler = rec.ProxyHandler.__new__(rec.ProxyHandler)
         handler.path = "/v1/models"
         handler.command = "GET"
-        handler.headers = {}
+        handler.headers = {"Authorization": "Bearer sk-test"}
         handler.wfile = io.BytesIO()
         handler.send_response = lambda code: None
         handler.send_header = lambda name, value: None
@@ -1068,6 +1204,113 @@ class TestProxySecurity:
 
 
 class TestStartup:
+    def test_loopback_base_url_detection(self) -> None:
+        assert rec._is_loopback_base_url("http://localhost:8765")
+        assert rec._is_loopback_base_url("http://127.0.0.1:8765")
+        assert rec._is_loopback_base_url("http://[::1]:8765")
+        assert not rec._is_loopback_base_url("https://api.openai.com")
+
+    def test_main_exits_when_upstream_base_url_already_points_to_local_proxy(
+        self, tmp_path, monkeypatch, capsys
+    ) -> None:
+        records_dir = tmp_path / "records"
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://localhost:8765")
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com")
+
+        old_argv = sys.argv[:]
+        sys.argv = [
+            "record.py",
+            "--port",
+            "8877",
+            "--records-dir",
+            str(records_dir),
+        ]
+        try:
+            with pytest.raises(SystemExit) as exc_info:
+                rec.main()
+        finally:
+            sys.argv = old_argv
+
+        assert exc_info.value.code == 1
+        assert "forwarding loop" in capsys.readouterr().err
+        assert not records_dir.exists()
+
+    def test_main_exits_when_custom_upstream_is_not_explicitly_allowed(
+        self, tmp_path, monkeypatch, capsys
+    ) -> None:
+        records_dir = tmp_path / "records"
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://gateway.example.com/openai/v1")
+
+        class FakeServer:
+            def __init__(self, *args, **kwargs) -> None:
+                raise AssertionError("unsafe upstream should fail before server setup")
+
+        monkeypatch.setattr(rec, "ThreadedHTTPServer", FakeServer)
+
+        old_argv = sys.argv[:]
+        sys.argv = [
+            "record.py",
+            "--port",
+            "8877",
+            "--records-dir",
+            str(records_dir),
+        ]
+        try:
+            with pytest.raises(SystemExit) as exc_info:
+                rec.main()
+        finally:
+            sys.argv = old_argv
+
+        assert exc_info.value.code == 1
+        assert "unsafe upstream" in capsys.readouterr().err
+        assert not records_dir.exists()
+
+    def test_main_allows_explicit_custom_https_upstream(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        records_dir = tmp_path / "records"
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://gateway.example.com/openai/v1")
+
+        class FakeServer:
+            def __init__(self, addr, handler, bind_and_activate=False) -> None:
+                self.addr = addr
+                self.handler = handler
+
+            def server_bind(self) -> None:
+                return None
+
+            def server_activate(self) -> None:
+                return None
+
+            def serve_forever(self) -> None:
+                return None
+
+        monkeypatch.setattr(rec, "ThreadedHTTPServer", FakeServer)
+        monkeypatch.setattr(rec.signal, "signal", lambda *args, **kwargs: None)
+        monkeypatch.setattr(rec, "_print_banner", lambda *args, **kwargs: None)
+        monkeypatch.setattr(rec, "SESSION_ID", "session-test-custom")
+
+        old_argv = sys.argv[:]
+        sys.argv = [
+            "record.py",
+            "--allow-custom-upstream",
+            "--port",
+            "8877",
+            "--records-dir",
+            str(records_dir),
+        ]
+        try:
+            rec.main()
+        finally:
+            sys.argv = old_argv
+            if rec._records_file is not None:
+                rec._records_file.close()
+                rec._records_file = None
+
+        assert rec._records_path == records_dir / "unclassified" / "session-test-custom.jsonl"
+
     def test_main_uses_skill_slug_subdir_and_private_file_mode(self, tmp_path, monkeypatch) -> None:
         skill_path = tmp_path / "Gulf 1.Trace Recorder.md"
         skill_path.write_text("# skill", encoding="utf-8")

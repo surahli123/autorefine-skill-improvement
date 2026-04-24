@@ -50,6 +50,25 @@ def validate_record(record: dict, filepath: str, lineno: int) -> None:
                 f"Every record must have: {', '.join(REQUIRED_FIELDS)}"
             )
 
+    if not isinstance(record["session_id"], str) or not record["session_id"].strip():
+        raise ValueError(
+            f"[{filepath}:{lineno}] Field 'session_id' must be a non-empty string."
+        )
+
+    if (
+        not isinstance(record["turn"], int)
+        or isinstance(record["turn"], bool)
+        or record["turn"] < 1
+    ):
+        raise ValueError(
+            f"[{filepath}:{lineno}] Field 'turn' must be a positive integer."
+        )
+
+    if not isinstance(record["timestamp"], str) or not record["timestamp"].strip():
+        raise ValueError(
+            f"[{filepath}:{lineno}] Field 'timestamp' must be a non-empty string."
+        )
+
     # tool_calls and messages must be lists (not strings, not null).
     for list_field in ("messages", "tool_calls"):
         if not isinstance(record[list_field], list):
@@ -57,6 +76,12 @@ def validate_record(record: dict, filepath: str, lineno: int) -> None:
                 f"[{filepath}:{lineno}] Field '{list_field}' must be a JSON array, "
                 f"got {type(record[list_field]).__name__!r}."
             )
+
+    if not isinstance(record["response_text"], str):
+        raise ValueError(
+            f"[{filepath}:{lineno}] Field 'response_text' must be a string, "
+            f"got {type(record['response_text']).__name__!r}."
+        )
 
 
 # ─── Auto-classification heuristics ─────────────────────────────────────────
@@ -322,9 +347,22 @@ def main():
             "'none' (emit unclassified rows)."
         ),
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite an existing non-symlink output file.",
+    )
     args = parser.parse_args()
 
     input_files = collect_input_files(args.input)
+    out_path = Path(args.output)
+    out_resolved = out_path.resolve()
+    if any(input_file.resolve() == out_resolved for input_file in input_files):
+        print(
+            f"ERROR: --output must not match an input file: {out_path}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # Counters for the final summary line.
     total_turns = 0
@@ -335,11 +373,21 @@ def main():
     # Per-bucket index for id generation (success-1, failure-2, etc.)
     idx = {"success": 0, "failure": 0, "do-not-trigger": 0, "unclassified": 0}
 
-    # Open the output file for writing (overwrite if exists — intentional).
-    out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    if out_path.is_symlink():
+        print(f"ERROR: refusing to write through symlink: {out_path}", file=sys.stderr)
+        sys.exit(1)
+    if out_path.exists() and not args.force:
+        print(
+            f"ERROR: refusing to overwrite existing output file without --force: {out_path}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
-    with out_path.open("w", encoding="utf-8") as out_fh:
+    open_flags = os.O_WRONLY | os.O_CREAT
+    open_flags |= os.O_TRUNC if args.force else os.O_EXCL
+    fd = os.open(str(out_path), open_flags, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as out_fh:
 
         for filepath in input_files:
             with filepath.open("r", encoding="utf-8") as in_fh:
