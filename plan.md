@@ -188,6 +188,15 @@ Adapter contract + workspace schema
 
 ## Task List
 
+### Session Close: PR #37 Live Trace Capture
+
+- [x] Review and merge useful parts from `/Users/surahli/.codex/worktrees/skill-improvement-v4-1-trust-alignment`
+- [x] Run code review, TDD test review, security review, and architecture review using the requested skill workflow
+- [x] Fix confirmed review findings in the Gulf 1 recorder/converter path
+- [x] Open PR #37, mark it ready for review, resolve `main` merge conflicts, and verify GitHub reports `mergeStateStatus: CLEAN`
+- [ ] After PR #37 merges, run one live recorder smoke test against a non-production local mock or explicitly approved API session before relying on real captured traces
+- [ ] Decide whether the generated search-adapter helper files should be promoted into PR scope or kept for a separate dogfood branch
+
 ### Phase 1: Platform Contract
 
 - [x] Task 1: Define the adapter specification in `references.md`

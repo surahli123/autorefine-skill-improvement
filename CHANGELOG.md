@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- harden the Gulf 1 trace recorder and converter after code-review, TDD, security, and architecture review: HTTP/1.1 streaming, `/v1`-safe upstream joins, auth-header passthrough routing, official HTTPS upstream allowlist, default credential-like scrubbing, basename skill hints, stricter converter validation, and fail-closed output writes with explicit `--force`
+- open PR #37 (`fix/autorefine-broken-tests`) for the live-trace capture path, mark it ready for review, resolve the `main` merge conflict, and confirm GitHub reports the PR as mergeable and clean with CI passing
 - add `autorefine/scripts/record.py` — local proxy recorder that captures Claude Code sessions to JSONL so Phase 0.5 comprehension can ingest real traces
 - add `autorefine/scripts/records-to-gulf1.py` — JSONL-to-Gulf1 converter with heuristic classification (success/failure/do-not-trigger) preserving `source_trace` cross-reference
 - document the canonical Gulf 1 Trace Record Schema under `autorefine/references.md` with `records/<skill_slug>/<session_id>.jsonl` layout
