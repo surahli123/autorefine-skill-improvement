@@ -2,7 +2,11 @@
 
 ## Status
 
-Proposed.
+Active follow-up plan.
+
+The platform contract portions are already present in the current AutoRefine
+runtime docs and tests. Treat this file as the remaining execution roadmap, not
+as a proposal to invent the adapter model from scratch.
 
 Derived from:
 - [docs/brainstorm-skill-effectiveness-criteria.md](/Users/surahli/Documents/projects/skill-improvement/docs/brainstorm-skill-effectiveness-criteria.md)
@@ -19,6 +23,22 @@ The core product shape is:
 `universal floor + domain adapter + common trust loop`
 
 This means AutoRefine keeps one shared pipeline for workspaces, contracts, holdouts, mutation, and trust, while each domain adapter defines the primary oracle that actually decides quality.
+
+## Current Implementation Snapshot
+
+Already implemented in the current repo:
+
+- generic domain adapter contract in `autorefine/references.md`
+- adapter state fields and checkpoint restore wiring in `autorefine/SKILL.md`
+- adapter-aware Gulf 2 and Gulf 3 routing in `autorefine/references/gulf2-specification.md` and `autorefine/references/gulf3-generalization.md`
+- run-scoped `experiment-contract.json` semantics
+- search adapter contract vocabulary, including `search_retrieval_v1`, `doc_id`, `grade`, and `NDCG@5`
+
+Still remaining:
+
+- execute a real search adapter dogfood run with labeled golden data
+- add or wire the first metric runner path that proves the adapter contract end-to-end
+- update user-facing docs only after dogfood validates the shape
 
 ## Problem Statement
 
@@ -170,33 +190,33 @@ Adapter contract + workspace schema
 
 ### Phase 1: Platform Contract
 
-- [ ] Task 1: Define the adapter specification in `references.md`
-- [ ] Task 2: Add adapter-related state and workspace paths to `state.json` schema
-- [ ] Task 3: Define fallback behavior for skills without adapters
+- [x] Task 1: Define the adapter specification in `references.md`
+- [x] Task 2: Add adapter-related state and workspace paths to `state.json` schema
+- [x] Task 3: Define fallback behavior for skills without adapters
 
 ### Checkpoint: Platform Contract
 
-- [ ] Adapter interface is explicit and minimal
-- [ ] No task-specific logic is hardcoded into the shared harness
-- [ ] Existing LLM-judge-only workflows still have a valid path
+- [x] Adapter interface is explicit and minimal
+- [x] No task-specific logic is hardcoded into the shared harness
+- [x] Existing LLM-judge-only workflows still have a valid path
 
 ### Phase 2: Pipeline Integration
 
-- [ ] Task 4: Route Phase 0.5 / Phase 4 / Phase 5 / Phase 7 to read adapter configuration when present
-- [ ] Task 5: Separate primary-metric scoring from secondary judge scoring in Phase 7
-- [ ] Task 6: Update Session Close and trust reporting to surface adapter metrics distinctly from LLM-judge scores
-- [ ] Task 6b: Add explicit experiment-contract artifacts so mutation/evaluation loops agree on "done" before scoring
+- [x] Task 4: Route Phase 0.5 / Phase 4 / Phase 5 / Phase 7 to read adapter configuration when present
+- [x] Task 5: Separate primary-metric scoring from secondary judge scoring in Phase 7
+- [x] Task 6: Update Session Close and trust reporting to surface adapter metrics distinctly from LLM-judge scores
+- [x] Task 6b: Add explicit experiment-contract artifacts so mutation/evaluation loops agree on "done" before scoring
 
 ### Checkpoint: Pipeline Integration
 
-- [ ] The scoring breakdown can represent both adapter and judge components
-- [ ] Holdout remains evaluation-only
-- [ ] Promotion logic uses adapter-aware trust rules
-- [ ] Mutation and evaluation stages read the same explicit contract for the current run
+- [x] The scoring breakdown can represent both adapter and judge components
+- [x] Holdout remains evaluation-only
+- [x] Promotion logic uses adapter-aware trust rules
+- [x] Mutation and evaluation stages read the same explicit contract for the current run
 
 ### Phase 3: Search Adapter Reference Implementation
 
-- [ ] Task 7: Define a canonical search output contract with stable result identifiers
+- [x] Task 7: Define a canonical search output contract with stable result identifiers
 - [ ] Task 8: Add a search metric runner using labeled ranked-result data
 - [ ] Task 9: Add search-specific failure taxonomy and reporting
 
@@ -362,10 +382,10 @@ Adapter contract + workspace schema
 
 ## Recommended Execution Order
 
-1. Finish the effectiveness-criteria work already planned.
-2. Define the adapter contract.
-3. Wire adapter state and scoring into the shared platform.
-4. Build `search` as the reference adapter.
+1. Keep the stale prompt-consistency tests aligned with the current `autorefine/references/gulf*.md` layout.
+2. Build the first real `search_retrieval_v1` dogfood fixture set with stable `query`, `doc_id`, and `grade` labels.
+3. Add the smallest metric runner path needed to compute `NDCG@5` and `recall@5` from the golden set.
+4. Run one end-to-end adapter-aware Phase 7 / Session Close dry run and inspect whether primary metrics remain separate from secondary judges.
 5. Generalize only after `search` proves the abstraction.
 
 ## Success Criteria
