@@ -325,6 +325,14 @@ def main():
     args = parser.parse_args()
 
     input_files = collect_input_files(args.input)
+    out_path = Path(args.output)
+    out_resolved = out_path.resolve()
+    if any(input_file.resolve() == out_resolved for input_file in input_files):
+        print(
+            f"ERROR: --output must not match an input file: {out_path}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # Counters for the final summary line.
     total_turns = 0
@@ -336,7 +344,6 @@ def main():
     idx = {"success": 0, "failure": 0, "do-not-trigger": 0, "unclassified": 0}
 
     # Open the output file for writing (overwrite if exists — intentional).
-    out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     with out_path.open("w", encoding="utf-8") as out_fh:

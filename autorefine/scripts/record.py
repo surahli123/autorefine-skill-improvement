@@ -476,7 +476,13 @@ class ProxyHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(status)
         for k, v in headers.items():
             # Don't forward hop-by-hop headers
-            if k.lower() not in {"transfer-encoding", "connection", "keep-alive"}:
+            if k.lower() not in {
+                "transfer-encoding",
+                "connection",
+                "keep-alive",
+                "content-length",
+                "content-encoding",
+            }:
                 self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)

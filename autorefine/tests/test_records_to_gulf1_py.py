@@ -504,3 +504,25 @@ def test_mixed_layout_discovers_both_flat_and_nested(tmp_path):
 
     found_session_ids = {row["source_trace"]["session_id"] for row in rows}
     assert found_session_ids == {"session-flat", "session-nested"}
+
+
+def test_converter_refuses_to_overwrite_input_file(tmp_path, capsys):
+    input_file = tmp_path / "session.jsonl"
+    original = json.dumps(make_turn()) + "\n"
+    input_file.write_text(original, encoding="utf-8")
+
+    old_argv = sys.argv[:]
+    sys.argv = [
+        "records-to-gulf1.py",
+        "--input", str(input_file),
+        "--output", str(input_file),
+    ]
+    try:
+        with pytest.raises(SystemExit) as exc:
+            _mod.main()
+    finally:
+        sys.argv = old_argv
+
+    assert exc.value.code == 1
+    assert "must not match an input file" in capsys.readouterr().err
+    assert input_file.read_text(encoding="utf-8") == original

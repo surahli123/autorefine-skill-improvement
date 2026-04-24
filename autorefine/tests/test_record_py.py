@@ -998,6 +998,29 @@ class TestProxySecurity:
         assert "sk-abc123def456789" not in error_field
         assert "sk-abc123def456789" not in response_body
 
+    def test_send_response_drops_stale_body_metadata_headers(self) -> None:
+        handler = rec.ProxyHandler.__new__(rec.ProxyHandler)
+        sent_headers: dict[str, str] = {}
+        handler.send_response = lambda code: None
+        handler.send_header = lambda name, value: sent_headers.setdefault(name, value)
+        handler.end_headers = lambda: None
+        handler.wfile = io.BytesIO()
+
+        handler._send_response_to_client(
+            200,
+            {
+                "Content-Type": "application/json",
+                "Content-Length": "999",
+                "Content-Encoding": "gzip",
+                "Transfer-Encoding": "chunked",
+                "Connection": "keep-alive",
+            },
+            b'{"ok":true}',
+        )
+
+        assert sent_headers == {"Content-Type": "application/json"}
+        assert handler.wfile.getvalue() == b'{"ok":true}'
+
     def test_recorded_post_exception_scrubs_bearer_in_record_and_response(self) -> None:
         _reset_globals()
         buf = _make_string_records_file()
