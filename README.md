@@ -57,9 +57,13 @@ The installable runtime lives under [`autorefine/`](autorefine/). That bundle co
 - `references/gulf3-generalization.md`
 - `references.md`
 - `dashboard.html`
+- `scripts/record.py`
+- `scripts/records-to-gulf1.py`
 - `validate-host.sh`
 
 Repo-maintenance tests and internal design material are intentionally kept outside the shipped bundle.
+
+The optional Phase 0.5 live-trace recorder path uses `scripts/record.py`, which requires Python with `httpx` available in the runtime environment. The converter script is stdlib-only.
 
 ## Public vs internal repo surface
 

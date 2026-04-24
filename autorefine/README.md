@@ -26,6 +26,8 @@ The shipped shell also includes the Phase 1 design-audit dimensions, including a
 - `references/gulf3-generalization.md` — Gulf 3: mutation loop and session close support flow
 - `references.md` — templates, schemas, rubrics, and detail contracts
 - `dashboard.html` — local run dashboard
+- `scripts/record.py` — optional local HTTP proxy for Phase 0.5 live trace capture
+- `scripts/records-to-gulf1.py` — converter from recorder JSONL to Gulf 1 Option D examples
 - `validate-host.sh` — host capability check
 - `lib/` — runtime helper code used by the bundle
 - `meta-learnings.md` — curated cross-campaign learning input
@@ -45,5 +47,6 @@ If you installed this bundle outside the repo, the broader user-facing docs live
 
 - Keep this directory installable as a self-contained skill bundle.
 - `SKILL.md` is the only entrypoint; files under `references/` are support docs loaded on demand by the router.
+- The optional live-trace recorder requires Python with `httpx` installed; all other bundle entrypoints remain copy-only/stdlib shell surfaces.
 - Public plugin manifests should point to `./autorefine`.
 - Internal engineering artifacts should live in the `dev` submodule, not here.
