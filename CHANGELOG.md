@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- harden the Gulf 1 trace recorder and converter after code-review, TDD, security, and architecture review: HTTP/1.1 streaming, `/v1`-safe upstream joins, auth-header passthrough routing, official HTTPS upstream allowlist, default credential-like scrubbing, basename skill hints, stricter converter validation, and fail-closed output writes with explicit `--force`
+- open PR #37 (`fix/autorefine-broken-tests`) for the live-trace capture path, mark it ready for review, resolve the `main` merge conflict, and confirm GitHub reports the PR as mergeable and clean with CI passing
+- add `autorefine/scripts/build-search-silver.py` — deterministic synthetic silver-set builder for `search_retrieval_v1` that turns a frozen corpus into `query`/`doc_id`/`grade` rows with query-family split metadata and human-review status
+- add `autorefine/scripts/eval-search-metric.py` — dependency-free `NDCG@k` / `recall@k` metric runner for ranked `doc_id` predictions, with per-query evidence and false-pass / false-fail diagnostics
+- add Python regression coverage for the search silver-set builder and metric runner, including a live generator-to-scorer integration path and report-count guard for grade-0 hard negatives
+- add `autorefine/scripts/run-campaign.py` — Phase 7-only campaign manifest validator, dependency/cluster scheduler, report-only skill adjacency/DRY audit, human-gated Gulf work packets, and plan-only top-level `execution_plan` reporting for prepared AutoRefine workspaces
+- add `autorefine/scripts/prepare-gulf-gate-pack.py` — explicit advanced utility for adapter-backed deterministic Gulf 1 / Gulf 2 preauthorization without changing the default plan-only campaign workflow
+- document the campaign orchestrator language tradeoff in `plan.md`: Python for V1 contract stabilization, with Rust or TypeScript deferred until the workflow proves useful
 - add `autorefine/scripts/record.py` — local proxy recorder that captures Claude Code sessions to JSONL so Phase 0.5 comprehension can ingest real traces
 - add `autorefine/scripts/records-to-gulf1.py` — JSONL-to-Gulf1 converter with heuristic classification (success/failure/do-not-trigger) preserving `source_trace` cross-reference
 - document the canonical Gulf 1 Trace Record Schema under `autorefine/references.md` with `records/<skill_slug>/<session_id>.jsonl` layout
