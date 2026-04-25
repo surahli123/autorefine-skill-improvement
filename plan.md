@@ -122,6 +122,7 @@ The shared pipeline should persist only the selected adapter identity and config
 - **Second adapter after search:** `code` is the second implementation. It uses a materially different primary oracle than search and is the best test that the abstraction is real.
 - **Minimal search gold-set row:** each row should include `query`, `doc_id`, `grade`, and any stable ranking key needed for replay. Keep the first version minimal and ranking-oriented.
 - **Long-running runs must be restart-safe:** adapter workflows should assume that compaction alone may be insufficient and must preserve state through explicit artifacts.
+- **Campaign orchestrator implementation language:** implement V1 in Python because the current shipped AutoRefine helper surface is Python/pytest-first and this phase is still stabilizing manifest, graph, lock, and DRY-audit semantics. Rust remains attractive later for a polished standalone binary with stronger compile-time guarantees and safer concurrency primitives, but adopting it now would add a new build/test surface before the orchestration contract is proven. TypeScript/Node remains useful if the orchestrator later needs to live closer to skill-package or resolver tooling, but it would add another runtime style to the current Python-centered bundle.
 
 ## Initial Adapter Families
 
@@ -226,14 +227,35 @@ Adapter contract + workspace schema
 ### Phase 3: Search Adapter Reference Implementation
 
 - [x] Task 7: Define a canonical search output contract with stable result identifiers
-- [ ] Task 8: Add a search metric runner using labeled ranked-result data
+- [x] Task 8: Add a search metric runner using labeled ranked-result data
+- [x] Task 8a: Add a deterministic synthetic silver-set builder for early search dogfood when no human golden set exists
 - [ ] Task 9: Add search-specific failure taxonomy and reporting
+  - [x] Emit per-query metric evidence, missing relevant `doc_id`s, and judge-vs-metric false-pass / false-fail diagnostics
+  - [ ] Add explicit search failure-bucket classification (`missed_relevant_results`, `poor_ranking`, `irrelevant_top_results`, `over_filtering`, `explanation_mismatch`) to the metric report after the first reviewed dogfood dataset
 
 ### Checkpoint: Search Adapter
 
-- [ ] Search quality can improve on a real ranking metric instead of LLM preference alone
-- [ ] LLM judges remain secondary diagnostics, not the primary gate
+- [x] Search quality can be scored on a real ranking metric instead of LLM preference alone
+- [x] LLM judges remain secondary diagnostics, not the primary gate
 - [ ] Holdout evaluation reports both metric gain and behavioral regressions
+  - [ ] Promote a reviewed subset of synthetic silver rows to `gold_reviewed` before treating it as holdout-grade data
+
+### Phase 3b: Campaign Orchestrator V1
+
+- [x] Task 9b: Add a Phase 7-only campaign manifest and planning runner for multiple prepared skill workspaces
+  - [x] Manifest records `skill_id`, `skill_path`, `workspace_path`, `depends_on`, `cluster_id`, `phase7_command`, and `result_refs`
+  - [x] Preflight rejects shared mutable paths, including duplicate skill paths, workspace paths, `state.json`, holdout refs, and result artifacts
+  - [x] Scheduler runs independent skills in parallel, dependency-linked skills in topological order, and shared-cluster skills sequentially under one group lock
+  - [x] DRY/adjacency audit classifies overlapping skills as report-only `merge_candidate` or `parametric_parent_candidate` instead of rewriting them automatically
+  - [x] Gulf 1 / Gulf 2 / Gulf 3 analysis packets read skill content and produce report-only recommendations to combine skills, extract a parametric parent, improve separate skills, or keep skills separate
+  - [x] Add `prepare-gulf-gate-pack.py` as an explicit advanced utility for adapter-backed deterministic Gulf 1 / Gulf 2 preauthorization; keep it outside the default campaign workflow until real workspace runs prove the flow
+
+### Checkpoint: Campaign Orchestrator
+
+- [x] V1 is report/planning-first and does not execute Phase 7 commands by default
+- [x] Coupled skills are not treated as parallel-safe until shared mutable surfaces are removed
+- [x] Language choice is documented: Python for V1 contract stabilization, Rust or TypeScript only after the workflow proves useful
+- [x] Campaign output includes human-gated Gulf work orders instead of claiming automatic Gulf completion
 
 ### Phase 4: Generalize to Other Families
 
