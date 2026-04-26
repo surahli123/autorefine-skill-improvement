@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- add `autorefine/lib/search_family_regression.py` and `autorefine/scripts/eval-search-family-regression.py` — pure-function library + thin CLI wrapper for per-query-family regression detection on `search_retrieval_v1` paired predictions, reusing the existing `score_predictions` scorer; emits `search_family_regression_v1` JSON with `pass`/`block`/`invalid` status, blocking-family detail, and stable exit codes 0/1/2
+- extend the Phase 7 step 2c regression-check contract in `autorefine/references/gulf3-generalization.md` with a search-adapter family-regression sub-step that calls the new gate when `selected_adapter_id = "search_retrieval_v1"`, preserving the existing experiment-0/1 skip rule
 - harden the Gulf 1 trace recorder and converter after code-review, TDD, security, and architecture review: HTTP/1.1 streaming, `/v1`-safe upstream joins, auth-header passthrough routing, official HTTPS upstream allowlist, default credential-like scrubbing, basename skill hints, stricter converter validation, and fail-closed output writes with explicit `--force`
 - open PR #37 (`fix/autorefine-broken-tests`) for the live-trace capture path, mark it ready for review, resolve the `main` merge conflict, and confirm GitHub reports the PR as mergeable and clean with CI passing
 - add `autorefine/scripts/build-search-silver.py` — deterministic synthetic silver-set builder for `search_retrieval_v1` that turns a frozen corpus into `query`/`doc_id`/`grade` rows with query-family split metadata and human-review status
