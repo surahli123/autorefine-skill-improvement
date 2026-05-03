@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- add `autorefine/scripts/render-phase7-status.py` — manual debugging tool that renders a Phase 7 status snapshot from `state.json` + run-dir artifacts to `[workspace]/phase7-status.md`. Pure stdlib; user invokes manually when they get lost mid-run.
 - add `autorefine/lib/search_family_regression.py` and `autorefine/scripts/eval-search-family-regression.py` — pure-function library + thin CLI wrapper for per-query-family regression detection on `search_retrieval_v1` paired predictions, reusing the existing `score_predictions` scorer; emits `search_family_regression_v1` JSON with `pass`/`block`/`invalid` status, blocking-family detail, and stable exit codes 0/1/2
 - extend the Phase 7 step 2c regression-check contract in `autorefine/references/gulf3-generalization.md` with a search-adapter family-regression sub-step that calls the new gate when `selected_adapter_id = "search_retrieval_v1"`, preserving the existing experiment-0/1 skip rule
 - harden the Gulf 1 trace recorder and converter after code-review, TDD, security, and architecture review: HTTP/1.1 streaming, `/v1`-safe upstream joins, auth-header passthrough routing, official HTTPS upstream allowlist, default credential-like scrubbing, basename skill hints, stricter converter validation, and fail-closed output writes with explicit `--force`
