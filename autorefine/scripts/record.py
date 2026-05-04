@@ -38,12 +38,31 @@ import socketserver
 import sys
 import threading
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+
+LIB_DIR = Path(__file__).resolve().parents[1] / "lib"
+if str(LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(LIB_DIR))
+
+from gulf_trace_record import (  # noqa: E402
+    MAX_CARRY_BYTES,
+    _CREDENTIAL_PATTERN,
+    _URL_CRED_PATTERN,
+    accumulate_anthropic_stream,
+    accumulate_openai_stream,
+    append_chunk_lines,
+    build_trace_record,
+    now_iso,
+    parse_anthropic_response,
+    parse_openai_response,
+    record_skill_hint,
+    scrub,
+    scrub_json,
+)
 
 # ---------------------------------------------------------------------------
 # Global state shared across all request handler threads.
@@ -60,23 +79,15 @@ _records_path: Path | None = None            # for the shutdown banner
 _skill_hint: str | None = None               # path from --skill flag, sanitized by default
 _raw_records: bool = False                   # opt-in: preserve raw payloads and absolute paths
 _server_port: int = 8765                     # resolved from --port
-MAX_CARRY_BYTES: int = 1 * 1024 * 1024
 PASSTHROUGH_ALLOWED_PREFIXES: tuple[str, ...] = ("/v1/",)
 ALLOWED_UPSTREAM_HOSTS: dict[str, set[str]] = {
     "anthropic": {"api.anthropic.com"},
     "openai": {"api.openai.com"},
 }
-_CREDENTIAL_PATTERN = re.compile(
-    r"(sk-[A-Za-z0-9\-_]{10,}|sk-ant-[A-Za-z0-9\-_]{10,}|Bearer\s+\S+)",
-    re.IGNORECASE,
-)
-_URL_CRED_PATTERN = re.compile(r"(?i)([?&])(api_key|token|key|secret)=([^\s&]+)")
 
 
 def _scrub(text: str) -> str:
-    text = _CREDENTIAL_PATTERN.sub("[REDACTED]", text)
-    text = _URL_CRED_PATTERN.sub(r"\1\2=[REDACTED]", text)
-    return text
+    return scrub(text)
 
 
 def _next_turn() -> int:
@@ -91,9 +102,7 @@ def _now_iso() -> str:
     """UTC ISO 8601 with millisecond precision + Z suffix, e.g. '2026-04-21T18:34:56.123Z'.
     Gulf 1 schema uses Z not +00:00; datetime.isoformat() emits the latter, so we format manually.
     """
-    now = datetime.now(timezone.utc)
-    # Format: YYYY-MM-DDTHH:MM:SS.mmmZ
-    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
+    return now_iso()
 
 
 def _derive_skill_slug(skill_arg: str | None) -> str:
@@ -142,17 +151,11 @@ def _join_upstream_url(base: str, path: str) -> str:
 
 
 def _scrub_json(value: Any) -> Any:
-    if isinstance(value, str):
-        return _scrub(value)
-    if isinstance(value, list):
-        return [_scrub_json(item) for item in value]
-    if isinstance(value, dict):
-        return {key: _scrub_json(item) for key, item in value.items()}
-    return value
+    return scrub_json(value)
 
 
 def _record_skill_hint(value: str) -> str:
-    return value if _raw_records else Path(value).name
+    return record_skill_hint(value, raw_records=_raw_records)
 
 
 # ---------------------------------------------------------------------------
@@ -176,25 +179,18 @@ def write_record(
     error) are OMITTED entirely when None — not set to null. Consumer contract
     says "treat as absent, not error," so we don't even emit the key.
     """
-    record: dict[str, Any] = {
-        "session_id": SESSION_ID,
-        "turn": turn,
-        "timestamp": _now_iso(),
-        "messages": messages if _raw_records else _scrub_json(messages),
-        "response_text": response_text if _raw_records else _scrub(response_text),
-        "tool_calls": tool_calls if _raw_records else _scrub_json(tool_calls),
-    }
-
-    # Optional fields: only add the key when the value is meaningful.
-    # Rationale: the consumer contract says "treat as absent, not error" for
-    # missing optional fields — so emitting null would be technically valid
-    # but misleading. Omitting is cleaner and matches the schema docs.
-    if _skill_hint is not None:
-        record["skill_hint"] = _record_skill_hint(_skill_hint)
-    if upstream_model is not None:
-        record["upstream_model"] = upstream_model
-    if error is not None:
-        record["error"] = error
+    record = build_trace_record(
+        session_id=SESSION_ID,
+        turn=turn,
+        timestamp=_now_iso(),
+        messages=messages,
+        response_text=response_text,
+        tool_calls=tool_calls,
+        skill_hint=_skill_hint,
+        upstream_model=upstream_model,
+        error=error,
+        raw_records=_raw_records,
+    )
 
     line = json.dumps(record, ensure_ascii=False)
 
@@ -216,29 +212,7 @@ def _parse_openai_response(body: dict) -> tuple[str, list[dict]]:
         choices[0].message.content  → text
         choices[0].message.tool_calls → [{id, type, function: {name, arguments}}]
     """
-    text = ""
-    tool_calls: list[dict] = []
-
-    choices = body.get("choices", [])
-    if choices:
-        message = choices[0].get("message", {})
-        text = message.get("content") or ""
-        raw_tcs = message.get("tool_calls") or []
-        for tc in raw_tcs:
-            fn = tc.get("function", {})
-            raw_args = fn.get("arguments", "{}")
-            # arguments is a JSON string in OpenAI format; parse to object.
-            try:
-                args = json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-            except json.JSONDecodeError:
-                args = {"_raw": raw_args}
-            tool_calls.append({
-                "id": tc.get("id", ""),
-                "name": fn.get("name", ""),
-                "arguments": args,
-            })
-
-    return text, tool_calls
+    return parse_openai_response(body)
 
 
 def _parse_anthropic_response(body: dict) -> tuple[str, list[dict]]:
@@ -247,21 +221,7 @@ def _parse_anthropic_response(body: dict) -> tuple[str, list[dict]]:
     Anthropic format:
         content: [{type: "text", text: "..."}, {type: "tool_use", id, name, input}]
     """
-    text_parts: list[str] = []
-    tool_calls: list[dict] = []
-
-    for block in body.get("content", []):
-        btype = block.get("type", "")
-        if btype == "text":
-            text_parts.append(block.get("text", ""))
-        elif btype == "tool_use":
-            tool_calls.append({
-                "id": block.get("id", ""),
-                "name": block.get("name", ""),
-                "arguments": block.get("input", {}),
-            })
-
-    return "".join(text_parts), tool_calls
+    return parse_anthropic_response(body)
 
 
 def _accumulate_openai_stream(lines: list[str]) -> tuple[str, list[dict]]:
@@ -275,59 +235,7 @@ def _accumulate_openai_stream(lines: list[str]) -> tuple[str, list[dict]]:
     (streamed incrementally with index/function.name/function.arguments chunks)
     — we accumulate them by index, then parse the final combined arguments.
     """
-    text_parts: list[str] = []
-    # tool_call_map: index → {id, name, arguments_str}
-    tc_map: dict[int, dict] = {}
-
-    for line in lines:
-        line = line.strip()
-        if not line.startswith("data:"):
-            continue
-        data_str = line[5:].strip()
-        if data_str == "[DONE]":
-            break
-        try:
-            chunk = json.loads(data_str)
-        except json.JSONDecodeError:
-            continue
-
-        choices = chunk.get("choices", [])
-        if not choices:
-            continue
-        delta = choices[0].get("delta", {})
-
-        # Text delta
-        content = delta.get("content")
-        if content:
-            text_parts.append(content)
-
-        # Tool call deltas — indexed, streamed incrementally
-        for tc_delta in delta.get("tool_calls", []):
-            idx = tc_delta.get("index", 0)
-            if idx not in tc_map:
-                tc_map[idx] = {"id": "", "name": "", "arguments_str": ""}
-            entry = tc_map[idx]
-            entry["id"] = entry["id"] or tc_delta.get("id", "")
-            fn = tc_delta.get("function", {})
-            entry["name"] = entry["name"] or fn.get("name", "")
-            entry["arguments_str"] += fn.get("arguments", "")
-
-    # Reconstruct tool_calls in index order
-    tool_calls: list[dict] = []
-    for idx in sorted(tc_map.keys()):
-        entry = tc_map[idx]
-        raw_args = entry["arguments_str"]
-        try:
-            args = json.loads(raw_args) if raw_args else {}
-        except json.JSONDecodeError:
-            args = {"_raw": raw_args}
-        tool_calls.append({
-            "id": entry["id"],
-            "name": entry["name"],
-            "arguments": args,
-        })
-
-    return "".join(text_parts), tool_calls
+    return accumulate_openai_stream(lines)
 
 
 def _accumulate_anthropic_stream(lines: list[str]) -> tuple[str, list[dict]]:
@@ -340,84 +248,7 @@ def _accumulate_anthropic_stream(lines: list[str]) -> tuple[str, list[dict]]:
 
     We track open blocks by index and merge deltas into them.
     """
-    text_parts: list[str] = []
-    # block_map: index → {type, text_parts, id, name, input_str}
-    block_map: dict[int, dict] = {}
-    current_index: int = 0
-
-    i = 0
-    while i < len(lines):
-        line = lines[i].strip()
-
-        if line.startswith("event:"):
-            event_type = line[6:].strip()
-            # Next non-empty line should be the data line
-            i += 1
-            data_line = ""
-            while i < len(lines) and not lines[i].strip().startswith("data:"):
-                i += 1
-            if i < len(lines):
-                data_line = lines[i].strip()
-
-            if not data_line.startswith("data:"):
-                i += 1
-                continue
-            data_str = data_line[5:].strip()
-
-            try:
-                data = json.loads(data_str)
-            except json.JSONDecodeError:
-                i += 1
-                continue
-
-            if event_type == "content_block_start":
-                idx = data.get("index", 0)
-                current_index = idx
-                block = data.get("content_block", {})
-                btype = block.get("type", "text")
-                block_map[idx] = {
-                    "type": btype,
-                    "text_parts": [],
-                    "id": block.get("id", ""),
-                    "name": block.get("name", ""),
-                    "input_str": "",
-                }
-
-            elif event_type == "content_block_delta":
-                idx = data.get("index", current_index)
-                delta = data.get("delta", {})
-                dtype = delta.get("type", "")
-                entry = block_map.get(idx)
-                if entry is None:
-                    i += 1
-                    continue
-                if dtype == "text_delta":
-                    entry["text_parts"].append(delta.get("text", ""))
-                elif dtype == "input_json_delta":
-                    # Tool input arrives as partial JSON strings
-                    entry["input_str"] += delta.get("partial_json", "")
-
-        i += 1
-
-    # Reconstruct from block_map
-    tool_calls: list[dict] = []
-    for idx in sorted(block_map.keys()):
-        entry = block_map[idx]
-        if entry["type"] == "text":
-            text_parts.extend(entry["text_parts"])
-        elif entry["type"] == "tool_use":
-            raw_input = entry["input_str"]
-            try:
-                args = json.loads(raw_input) if raw_input else {}
-            except json.JSONDecodeError:
-                args = {"_raw": raw_input}
-            tool_calls.append({
-                "id": entry["id"],
-                "name": entry["name"],
-                "arguments": args,
-            })
-
-    return "".join(text_parts), tool_calls
+    return accumulate_anthropic_stream(lines)
 
 
 def _append_chunk_lines(
@@ -431,23 +262,14 @@ def _append_chunk_lines(
     SSE lines can span TCP chunk boundaries, so we keep trailing partial bytes in
     `carry` until a later chunk completes the line.
     """
-    text = carry + chunk.decode(errors="replace")
-    parts = text.split("\n")
-    for full_line in parts[:-1]:
-        accumulated_lines.append(full_line.rstrip("\r"))
-    new_carry = parts[-1]
-    carry_size = len(new_carry.encode("utf-8", errors="replace"))
-    if carry_size > MAX_CARRY_BYTES:
-        # DoS guard: malicious or broken upstreams can stream arbitrarily long
-        # lines without newlines, so cap carry growth and flush as pseudo-line.
-        accumulated_lines.append(new_carry.rstrip("\r"))
-        turn_str = "?" if turn is None else str(turn)
-        print(
-            f"[turn {turn_str}] carry-buffer overflow: flushing {carry_size} bytes without newline",
-            file=sys.stderr,
-        )
-        return ""
-    return new_carry
+    return append_chunk_lines(
+        accumulated_lines,
+        carry,
+        chunk,
+        turn=turn,
+        max_carry_bytes=MAX_CARRY_BYTES,
+        stderr=sys.stderr,
+    )
 
 
 # ---------------------------------------------------------------------------
