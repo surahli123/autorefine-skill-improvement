@@ -230,19 +230,19 @@ When Phase 7 emits a structured `phase7_mutation_to_test_launch` payload (per Se
 
 ---
 
-## Open questions for review
+## Resolutions (2026-05-04 — merged into locked v4 design)
 
-These should be resolved before this section is merged into the locked v4 design:
+All 5 open questions resolved by user on 2026-05-04. Section 1g merged into `dev/docs/design-autorefine-v4-skill-eval-platform.md` between Sections 1f and 2. This file is preserved as the historical RFC; the locked design is the authoritative version going forward.
 
-1. **Should Mini mode score this dimension at all, or skip it cleanly?** Current draft: skip cleanly with a noted reason. Alternative: score Present unconditionally (charity default for tiny libraries) and only require real scoring at Standard+. The current draft treats "Mini mode = no library context" as a real gating signal; the alternative would let Mini campaigns still surface "this skill name has a PR number" as a soft note. **Recommended:** keep current draft (clean skip).
+| # | Question | Decision | Notes |
+|---|---|---|---|
+| 1 | Mini mode behavior | **(A) Skip cleanly** | Audit payload emits `skipped (Mini mode — insufficient library context)`. Mini's contract is "library hygiene out of scope" — keep it clean. |
+| 2 | Phase 7 ranking for Partial cases | **(B) Interleave scope + content mutations** | Eval scores arbitrate. Falls back to pattern-conditional ordering only if Phase 7 cost balloons in real campaigns. |
+| 3 | Multiple umbrella candidates | **(B) Allow multiple, ranked** | Each candidate carries `confidence_rank`. Emit top-level `consolidation_ambiguity_flag: true` when top two candidates' priors are within 20% of each other. |
+| 4 | Library-of-one subtlety | **(A) Score Present + first-in-library note** | Add `library_size_at_audit: <int>` field. Force re-audit when library grows from <3 peers to ≥3 peers (numeric trigger, reuses the Q5 invalidation hook). |
+| 5 | Manifest persistence | **(C) Persist with mutation-driven invalidation** | Persist by default. Invalidate on any Phase 7 emit whose `mutation_type` is in the scope-changing enum. Stamp manifest with `built_after_mutation_id: <id>` as a stale-read safety net. |
 
-2. **How should mutation-loop scope-changing mutations be ranked vs content-changing mutations when both are valid?** Current draft says scope-changing should be prioritized when score is Missing. But what about Partial cases? The candidate umbrella exists; the skill could legitimately stand alone OR fit under it. Two reasonable framings: (a) always run content-mutations first, only scope-mutate after content-mutations exhaust the loop; (b) interleave both types and let the eval scores arbitrate. **Recommended:** start with (b) and revisit if Phase 7 cost balloons.
-
-3. **Should the `consolidation_candidates[]` array support multiple umbrella candidates?** Real example from Curator's prompt: a skill might cleanly fit under either `gateway-*` or `mcp-*` umbrellas. Current draft allows multiple entries in the array. The mutation loop would then need to pick — same problem the Curator umbrella-vs-narrow prompt has. **Recommended:** allow multiple, mutation loop picks the highest-prior candidate (most members in the umbrella's existing cluster), with fallback to creating a new umbrella if neither fits.
-
-4. **Is there a "library-of-one consolidation pressure" subtlety we're missing?** A skill could legitimately be the first member of what will become an umbrella. Scoring Present in that case might mask a future-Partial situation. Conversely, scoring Partial when no candidate exists yet is wrong. The current draft chooses Present for library-of-one with a note. **Recommended:** Keep current draft; rely on the next mutation pass to re-audit when the library has more peers.
-
-5. **Should the library context manifest be persisted across Phase 1 audits within the same campaign, or rebuilt every audit?** Persisting saves ~30s per audit but risks staleness if the library mutated between audits. Rebuilding adds cost but guarantees fresh context. **Recommended:** rebuild on Phase 1 entry, cache within a single audit pass, invalidate on any consolidation mutation in Phase 7.
+**Cross-cutting note:** Q4 and Q5 share infrastructure. The manifest invalidation hook from Q5 is the same mechanism that triggers Q4's re-audit when library size crosses 3 peers. Build once, pay for both.
 
 ---
 
@@ -250,7 +250,7 @@ These should be resolved before this section is merged into the locked v4 design
 
 Before this section can be merged into the locked v4 design:
 
-- [ ] Resolve open questions 1-5 above
+- [x] Resolve open questions 1-5 above (2026-05-04 — see "Resolutions" section above)
 - [ ] Add the calibration fixture set `phase1-consolidation-pressure-v1` with the 12 sketch fixtures
 - [ ] Update Section 1f's dimension order table to include order=7 for `consolidation_pressure`
 - [ ] Update Section 2c (Cross-Validation for Evals) to define the cross-validation strategy for this dimension
