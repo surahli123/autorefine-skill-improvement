@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from .adapter_state import (
+    AdapterState,
     DEFAULT_CONFIG_PATH,
     DEFAULT_GOLDEN_SET_PATH,
     validate_adapter_state,
@@ -24,6 +26,64 @@ CANDIDATE_COMPATIBILITY_FIELDS = (
     "threshold_concern",
     "weight_multiplier",
 )
+
+
+@dataclass(frozen=True)
+class AdapterEvidence:
+    adapter_id: str
+    config_path: str
+    domain_eval_version: str | None
+    eval_script_path: str | None
+    golden_set_path: str
+    golden_set_count: int
+    metric_name: str
+    threshold_pass: Any
+    threshold_concern: Any
+    weight_multiplier: Any
+
+    @classmethod
+    def from_adapter_state(cls, adapter_state: AdapterState) -> "AdapterEvidence":
+        return cls(
+            adapter_id=adapter_state.selected_adapter_id or "domain_metric_v1",
+            config_path=adapter_state.effective_config_path,
+            domain_eval_version=adapter_state.domain_eval_version,
+            eval_script_path=adapter_state.eval_script_path,
+            golden_set_path=adapter_state.golden_set_path,
+            golden_set_count=adapter_state.golden_set_count,
+            metric_name=adapter_state.metric_name,
+            threshold_pass=adapter_state.threshold_pass,
+            threshold_concern=adapter_state.threshold_concern,
+            weight_multiplier=adapter_state.weight_multiplier,
+        )
+
+    @classmethod
+    def from_summary(cls, summary: dict[str, Any]) -> "AdapterEvidence":
+        return cls(
+            adapter_id=summary["adapter_id"],
+            config_path=summary["config_path"],
+            domain_eval_version=summary.get("domain_eval_version"),
+            eval_script_path=summary.get("eval_script_path"),
+            golden_set_path=summary["golden_set_path"],
+            golden_set_count=summary["golden_set_count"],
+            metric_name=summary["metric_name"],
+            threshold_pass=summary.get("threshold_pass"),
+            threshold_concern=summary.get("threshold_concern"),
+            weight_multiplier=summary.get("weight_multiplier"),
+        )
+
+    def to_summary(self) -> dict[str, Any]:
+        return {
+            "adapter_id": self.adapter_id,
+            "config_path": self.config_path,
+            "domain_eval_version": self.domain_eval_version,
+            "eval_script_path": self.eval_script_path,
+            "golden_set_path": self.golden_set_path,
+            "golden_set_count": self.golden_set_count,
+            "metric_name": self.metric_name,
+            "threshold_pass": self.threshold_pass,
+            "threshold_concern": self.threshold_concern,
+            "weight_multiplier": self.weight_multiplier,
+        }
 
 
 def load_json(path: Path) -> dict:
@@ -77,10 +137,12 @@ def prepare_candidate_gate_pack(target: dict, skills: dict[str, dict]) -> dict:
                 "status": "blocked",
                 "reason": f"{skill_id}: {evidence['reason']}",
             }
-        source_evidence.append((skill_id, workspace_path, evidence["evidence"]))
+        source_evidence.append(
+            (skill_id, workspace_path, AdapterEvidence.from_summary(evidence["evidence"]))
+        )
 
-    adapter_ids = {evidence["adapter_id"] for _skill_id, _workspace, evidence in source_evidence}
-    metric_names = {evidence["metric_name"] for _skill_id, _workspace, evidence in source_evidence}
+    adapter_ids = {evidence.adapter_id for _skill_id, _workspace, evidence in source_evidence}
+    metric_names = {evidence.metric_name for _skill_id, _workspace, evidence in source_evidence}
     if len(adapter_ids) != 1 or len(metric_names) != 1:
         return {
             "skill_id": target["target_id"],
@@ -104,15 +166,16 @@ def prepare_candidate_gate_pack(target: dict, skills: dict[str, dict]) -> dict:
 
 def prepare_workspace_gate_pack(workspace_path: Path | str, skill_id: str) -> dict:
     workspace_path = Path(workspace_path)
-    evidence = read_adapter_evidence(workspace_path)
-    if evidence["status"] != "ready":
+    evidence_result = read_adapter_evidence(workspace_path)
+    if evidence_result["status"] != "ready":
         return {
             "skill_id": skill_id,
             "workspace_path": str(workspace_path),
             "status": "blocked",
-            "reason": evidence["reason"],
+            "reason": evidence_result["reason"],
         }
 
+    evidence = AdapterEvidence.from_summary(evidence_result["evidence"])
     workspace_path.mkdir(parents=True, exist_ok=True)
     write_gate_pack_artifacts(workspace_path, skill_id, evidence)
     update_state(workspace_path, skill_id, evidence)
@@ -121,23 +184,23 @@ def prepare_workspace_gate_pack(workspace_path: Path | str, skill_id: str) -> di
         "workspace_path": str(workspace_path),
         "status": "approved",
         "approval_source": APPROVAL_SOURCE,
-        "evidence": evidence["evidence"],
+        "evidence": evidence.to_summary(),
     }
 
 
 def materialize_candidate_adapter_evidence(
     workspace_path: Path,
-    source_evidence: list[tuple[str, Path, dict]],
+    source_evidence: list[tuple[str, Path, AdapterEvidence]],
 ) -> None:
     _first_skill_id, first_workspace, first_evidence = source_evidence[0]
     first_config = load_json(
-        resolve_workspace_path(first_workspace, first_evidence["config_path"])
+        resolve_workspace_path(first_workspace, first_evidence.config_path)
     )
     config = dict(first_config)
     config.update(
         {
-            "adapter_id": first_evidence["adapter_id"],
-            "metric_name": first_evidence["metric_name"],
+            "adapter_id": first_evidence.adapter_id,
+            "metric_name": first_evidence.metric_name,
             "eval_script_path": DEFAULT_EVAL_SCRIPT_PATH,
             "golden_set_path": DEFAULT_GOLDEN_SET_PATH,
             "author_confirmed": True,
@@ -147,7 +210,7 @@ def materialize_candidate_adapter_evidence(
 
     rows = []
     for skill_id, source_workspace, evidence in source_evidence:
-        source_path = resolve_workspace_path(source_workspace, evidence["golden_set_path"])
+        source_path = resolve_workspace_path(source_workspace, evidence.golden_set_path)
         for row in load_jsonl_rows(source_path):
             metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
             row["metadata"] = {**metadata, "source_skill_id": skill_id}
@@ -157,7 +220,7 @@ def materialize_candidate_adapter_evidence(
     clear_candidate_adapter_state_refs(workspace_path)
     source_eval_script_path = resolve_workspace_path(
         first_workspace,
-        first_evidence["eval_script_path"],
+        first_evidence.eval_script_path,
     )
     (workspace_path / DEFAULT_EVAL_SCRIPT_PATH).parent.mkdir(parents=True, exist_ok=True)
     (workspace_path / DEFAULT_EVAL_SCRIPT_PATH).write_bytes(
@@ -172,22 +235,11 @@ def read_adapter_evidence(workspace_path: Path) -> dict:
     if not validation.ok or validation.normalized is None:
         return blocked("; ".join(validation.errors or validation.warnings))
 
-    adapter_state = validation.normalized
+    evidence = AdapterEvidence.from_adapter_state(validation.normalized)
     return {
         "status": "ready",
         "reason": None,
-        "evidence": {
-            "adapter_id": adapter_state.selected_adapter_id or "domain_metric_v1",
-            "config_path": adapter_state.effective_config_path,
-            "domain_eval_version": adapter_state.domain_eval_version,
-            "eval_script_path": adapter_state.eval_script_path,
-            "golden_set_path": adapter_state.golden_set_path,
-            "golden_set_count": adapter_state.golden_set_count,
-            "metric_name": adapter_state.metric_name,
-            "threshold_pass": adapter_state.threshold_pass,
-            "threshold_concern": adapter_state.threshold_concern,
-            "weight_multiplier": adapter_state.weight_multiplier,
-        },
+        "evidence": evidence.to_summary(),
     }
 
 
@@ -246,12 +298,14 @@ def resolve_workspace_path(workspace_path: Path, value: object) -> Path:
     return workspace_path / path
 
 
-def candidate_compatibility_error(source_evidence: list[tuple[str, Path, dict]]) -> str | None:
+def candidate_compatibility_error(
+    source_evidence: list[tuple[str, Path, AdapterEvidence]],
+) -> str | None:
     signatures = []
     for skill_id, workspace_path, evidence in source_evidence:
         source_eval_script_path = resolve_workspace_path(
             workspace_path,
-            evidence["eval_script_path"],
+            evidence.eval_script_path,
         )
         try:
             eval_script_digest = hashlib.sha256(
@@ -259,8 +313,9 @@ def candidate_compatibility_error(source_evidence: list[tuple[str, Path, dict]])
             ).hexdigest()
         except OSError as exc:
             return f"{skill_id}: unable to read eval script for candidate compatibility: {exc}"
+        evidence_summary = evidence.to_summary()
         scoring_signature = {
-            field: evidence.get(field)
+            field: evidence_summary.get(field)
             for field in CANDIDATE_COMPATIBILITY_FIELDS
         }
         signatures.append(
@@ -295,14 +350,15 @@ def clear_candidate_adapter_state_refs(workspace_path: Path) -> None:
     write_json(state_path, state)
 
 
-def write_gate_pack_artifacts(workspace_path: Path, skill_id: str, evidence: dict) -> None:
+def write_gate_pack_artifacts(workspace_path: Path, skill_id: str, evidence: AdapterEvidence) -> None:
+    evidence_summary = evidence.to_summary()
     gate_pack = {
         "schema_version": 1,
         "skill_id": skill_id,
         "status": "approved",
         "approval_source": APPROVAL_SOURCE,
         "gates": {"gulf_1": "approved", "gulf_2": "approved"},
-        "evidence": evidence["evidence"],
+        "evidence": evidence_summary,
         "limits": [
             "Preauthorization is accepted only for adapter-backed deterministic evidence.",
             "This gate pack does not create human-reviewed contract examples.",
@@ -311,19 +367,19 @@ def write_gate_pack_artifacts(workspace_path: Path, skill_id: str, evidence: dic
     }
     write_json(workspace_path / "gulf-gate-pack.json", gate_pack)
     (workspace_path / "gate-report-gulf-1.md").write_text(
-        render_gulf1_report(skill_id, evidence["evidence"]),
+        render_gulf1_report(skill_id, evidence_summary),
         encoding="utf-8",
     )
     (workspace_path / "gate-report-gulf-2.md").write_text(
-        render_gulf2_report(skill_id, evidence["evidence"]),
+        render_gulf2_report(skill_id, evidence_summary),
         encoding="utf-8",
     )
     (workspace_path / "eval-suite.md").write_text(
-        render_eval_suite(evidence["evidence"]),
+        render_eval_suite(evidence_summary),
         encoding="utf-8",
     )
     (workspace_path / "fixtures-manifest.md").write_text(
-        render_fixtures_manifest(evidence["evidence"]),
+        render_fixtures_manifest(evidence_summary),
         encoding="utf-8",
     )
 
@@ -403,20 +459,21 @@ adapter-backed eval surface without re-running Gulf 1 or Gulf 2 interactively.
 """
 
 
-def update_state(workspace_path: Path, skill_id: str, evidence: dict) -> None:
+def update_state(workspace_path: Path, skill_id: str, evidence: AdapterEvidence) -> None:
     state_path = workspace_path / "state.json"
     state = load_json(state_path) if state_path.exists() else {}
     gates = state.get("gates") if isinstance(state.get("gates"), dict) else {}
     gates.update({"gulf_1": "approved", "gulf_2": "approved"})
+    evidence_summary = evidence.to_summary()
     state.update(
         {
             "schema_version": state.get("schema_version", 4),
             "skill_name": state.get("skill_name", skill_id),
             "workspace_path": state.get("workspace_path", str(workspace_path)),
             "gates": gates,
-            "selected_adapter_id": evidence["evidence"]["adapter_id"],
-            "adapter_config_path": evidence["evidence"]["config_path"],
-            "domain_eval_config_path": evidence["evidence"]["config_path"],
+            "selected_adapter_id": evidence_summary["adapter_id"],
+            "adapter_config_path": evidence_summary["config_path"],
+            "domain_eval_config_path": evidence_summary["config_path"],
             "gulf_gate_pack": {
                 "status": "approved",
                 "approval_source": APPROVAL_SOURCE,

@@ -4259,15 +4259,9 @@ To resume, paste this prompt into a new autorefine session.
 
 ### Resume Detection (Initialize Workspace)
 
-When reading state.json on startup:
-1. If `checkpoint` is not null and `checkpoint.next_action` exists → resume mode
-2. Read all files listed in `checkpoint.files_to_read_on_resume`. If any file is missing, skip it and note: "Missing file: {filename} — may have been deleted between sessions."
-3. Deserialize `state.json.phase1_context` and `state.json.mutation_stage_split_access_policy` into the loaded run context before routing or resuming later phases.
-3. Deserialize `state.json.phase1_context`, `state.json.mutation_stage_split_access_policy`, and `state.json.iteration_state` into the loaded run context before routing or resuming later phases. If `phase1_context.selected_skill_pattern` and/or `phase1_context.selected_eval_strategy_id` exist, restore them unchanged so later phases can read the chosen pattern + resolved strategy from the loaded context. If `phase1_context.selected_skill_pattern` exists, restore it unchanged so later phases can read the chosen pattern from the loaded context. If the restored pattern and `state.json.skill_pattern` differ, treat it as state corruption and rerun Phase 1 Step 0 instead of continuing. If the restored strategy is missing or no longer maps back to the restored pattern through `Skill Pattern Eval Strategy > Pattern-to-Evaluation-Strategy Selector`, treat it as state corruption and rerun strategy selection before continuing. If split-scoped Phase 7 work is active and `mutation_stage_split_access_policy` is missing, read the same policy from `fixtures-manifest.md` or a stored Phase 4 `evaluation_metadata.config.mutation_stage_split_access_policy` snapshot, restore it into the loaded run context, and stop if the sources disagree. If `iteration_state` is present, resume from its persisted `next_action` and continue automatic eval->mutate->test->session_close progression until terminal success (`phase_status = "completed"`) or terminal failure (`phase_status = "blocked"`), without manual handoff.
-4. Print resume context: "Resuming from checkpoint: {next_action}"
-5. Set `checkpoint` to null (clear the checkpoint — it's been consumed). Preserve all non-checkpoint state, including `phase1_context`, when writing the updated `state.json`.
-5. Set `checkpoint` to null (clear the checkpoint — it's been consumed). Preserve all non-checkpoint state, including `phase1_context` and `mutation_stage_split_access_policy`, when writing the updated `state.json`.
-6. Proceed from `checkpoint.next_action`
+Use `SKILL.md > Run Context Recovery` as the canonical startup/resume contract. This schema section only defines the checkpoint payload and the resume-prompt artifact; it must not duplicate workspace hydration rules.
+
+When `state.json.checkpoint` is present with `next_action`, Run Context Recovery reads the listed files, restores the run context, runs integrity checks, prints `Resuming from checkpoint: {next_action}`, clears `checkpoint` to null while preserving all non-checkpoint state, and proceeds from `checkpoint.next_action`.
 
 ### Checkpoint Writing (Phase Boundaries + Pause)
 

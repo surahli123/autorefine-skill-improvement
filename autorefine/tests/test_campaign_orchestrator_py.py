@@ -6,6 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from autorefine.lib import campaign_planning as planning
+from autorefine.lib import campaign_readiness as readiness
+
 
 SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 _spec = importlib.util.spec_from_file_location(
@@ -49,7 +52,7 @@ def _write_skill(path, content):
 
 
 def _validated_campaign(tmp_path, skills):
-    return _mod.validate_campaign_manifest(
+    return planning.validate_campaign_manifest(
         {
             "campaign_id": "campaign_a",
             "skills": skills,
@@ -59,7 +62,7 @@ def _validated_campaign(tmp_path, skills):
 
 def _write_json(path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_mod.json.dumps(payload), encoding="utf-8")
+    path.write_text(json.dumps(payload), encoding="utf-8")
 
 
 def _target(plan, target_id):
@@ -88,7 +91,7 @@ def test_validate_manifest_rejects_shared_mutable_paths(tmp_path):
     }
 
     with pytest.raises(ValueError, match="shared mutable path"):
-        _mod.validate_campaign_manifest(manifest)
+        planning.validate_campaign_manifest(manifest)
 
 
 def test_schedule_campaign_parallelizes_independent_nodes_and_orders_dependencies(tmp_path):
@@ -103,8 +106,8 @@ def test_schedule_campaign_parallelizes_independent_nodes_and_orders_dependencie
         ],
     }
 
-    validated = _mod.validate_campaign_manifest(manifest)
-    schedule = _mod.schedule_campaign(validated)
+    validated = planning.validate_campaign_manifest(manifest)
+    schedule = planning.schedule_campaign(validated)
 
     search_step = next(step for step in schedule if "search" in step["skill_ids"])
     ranker_step = next(step for step in schedule if "ranker" in step["skill_ids"])
@@ -148,8 +151,8 @@ def test_dry_audit_classifies_adjacent_and_parametric_parent_candidates(tmp_path
         ],
     }
 
-    validated = _mod.validate_campaign_manifest(manifest)
-    audit = _mod.audit_skill_adjacency(validated)
+    validated = planning.validate_campaign_manifest(manifest)
+    audit = planning.audit_skill_adjacency(validated)
 
     assert audit["summary"]["pair_count"] == 3
     adjacent = [
@@ -228,8 +231,8 @@ Summarize shipped changes for users.
 """,
     )
 
-    report = _mod.campaign_report(
-        _mod.validate_campaign_manifest(
+    report = planning.campaign_report(
+        planning.validate_campaign_manifest(
             {
                 "campaign_id": "campaign_a",
                 "skills": [python_testing, tdd, changelog],
@@ -269,7 +272,7 @@ def test_write_html_report_renders_schedule_and_adjacency(tmp_path):
     }
     html_path = tmp_path / "campaign-report.html"
 
-    report = _mod.campaign_report(_mod.validate_campaign_manifest(manifest))
+    report = planning.campaign_report(planning.validate_campaign_manifest(manifest))
     _mod.write_html_report(report, html_path)
 
     html = html_path.read_text(encoding="utf-8")
@@ -281,6 +284,26 @@ def test_write_html_report_renders_schedule_and_adjacency(tmp_path):
     assert "Gulf 1" in html
     assert "Gulf 2" in html
     assert "Gulf 3" in html
+
+
+def test_html_report_escapes_report_values(tmp_path):
+    skill = _skill(
+        "search_<b>tag</b>",
+        tmp_path,
+        triggers=["search", "<script>alert(1)</script>"],
+    )
+    manifest = {
+        "campaign_id": "campaign_<script>alert(1)</script>",
+        "skills": [skill],
+    }
+
+    report = planning.campaign_report(planning.validate_campaign_manifest(manifest))
+    html = planning.render_html_report(report)
+
+    assert "campaign_&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "search_&lt;b&gt;tag&lt;/b&gt;" in html
+    assert "search_<b>tag</b>" not in html
+    assert "campaign_<script>alert(1)</script>" not in html
 
 
 def test_direct_script_entrypoint_writes_campaign_report(tmp_path):
@@ -327,7 +350,65 @@ description: Search skill.
     assert report["execution_plan"]["targets"][0]["target_id"] == "search"
 
 
-def test_run_campaign_preserves_readiness_helper_facade(tmp_path):
+def test_direct_script_entrypoint_resolves_relative_manifest_paths_from_manifest_dir(tmp_path):
+    manifest_dir = tmp_path / "campaign"
+    skill_path = manifest_dir / "skills" / "search" / "SKILL.md"
+    workspace_path = manifest_dir / "workspaces" / "search"
+    _write_skill(
+        skill_path,
+        """---
+name: search
+description: Search skill.
+---
+
+# Search
+""",
+    )
+    manifest_path = manifest_dir / "manifest.json"
+    output_path = tmp_path / "report.json"
+    _write_json(
+        manifest_path,
+        {
+            "campaign_id": "campaign_a",
+            "skills": [
+                {
+                    "skill_id": "search",
+                    "skill_path": "skills/search/SKILL.md",
+                    "workspace_path": "workspaces/search",
+                    "phase7_command": ["python3", "-m", "autorefine.phase7", "search"],
+                    "result_refs": ["workspaces/search/results.json"],
+                }
+            ],
+        },
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPTS_DIR / "run-campaign.py"),
+            "--manifest",
+            str(manifest_path),
+            "--output",
+            str(output_path),
+        ],
+        cwd=SCRIPTS_DIR.parents[1],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(output_path.read_text(encoding="utf-8"))
+    skill = report["skills"][0]
+    target = report["execution_plan"]["targets"][0]
+    assert skill["skill_path"] == str(skill_path)
+    assert skill["workspace_path"] == str(workspace_path)
+    assert skill["result_refs"] == [str(workspace_path / "results.json")]
+    assert target["workspace_path"] == str(workspace_path)
+
+
+def test_campaign_readiness_helpers_are_imported_from_library(tmp_path):
     workspace = tmp_path / "workspace"
     _write_json(
         workspace / "state.json",
@@ -336,26 +417,26 @@ def test_run_campaign_preserves_readiness_helper_facade(tmp_path):
         },
     )
     target = {"target_id": "search", "workspace_path": str(workspace)}
-    state = _mod.read_workspace_state(workspace)
+    state = readiness.read_workspace_state(workspace)
 
     assert state["exists"] is True
-    assert _mod.gate_status(workspace, "gulf_1") == "approved"
-    assert _mod.gate_status_from_state(state, "gulf_2") == "pending"
-    assert _mod.artifact_exists(workspace, "state.json") is True
-    assert _mod.read_trust_gate(workspace) == {
+    assert readiness.gate_status(workspace, "gulf_1") == "approved"
+    assert readiness.gate_status_from_state(state, "gulf_2") == "pending"
+    assert readiness.artifact_exists(workspace, "state.json") is True
+    assert readiness.read_trust_gate(workspace) == {
         "status": "missing",
         "trust_gate": None,
         "error": None,
     }
-    assert _mod.blocked_stage("gulf1_comprehension", "bad state", [])["status"] == "blocked"
-    assert _mod.build_gulf1_stage(target, state)["status"] == "complete"
-    assert _mod.build_gulf2_stage(target, state)["status"] == "ready"
-    assert _mod.build_gulf3_stage(target, state)["status"] == "blocked"
+    assert readiness.blocked_stage("gulf1_comprehension", "bad state", [])["status"] == "blocked"
+    assert readiness.build_gulf1_stage(target, state)["status"] == "complete"
+    assert readiness.build_gulf2_stage(target, state)["status"] == "ready"
+    assert readiness.build_gulf3_stage(target, state)["status"] == "blocked"
 
 
 def test_execution_plan_blocks_gulf2_until_gulf1_gate(tmp_path):
     manifest = _validated_campaign(tmp_path, [_skill("search", tmp_path)])
-    plan = _mod.build_execution_plan(manifest, _mod.analyze_gulf_work(manifest))
+    plan = planning.build_execution_plan(manifest, planning.analyze_gulf_work(manifest))
 
     search = _target(plan, "search")
     gulf2 = _stage(search, "gulf2_specification")
@@ -372,7 +453,7 @@ def test_execution_plan_blocks_gulf3_until_gulf2_gate(tmp_path):
         {"gates": {"gulf_1": "approved", "gulf_2": "pending"}},
     )
     manifest = _validated_campaign(tmp_path, [skill])
-    plan = _mod.build_execution_plan(manifest, _mod.analyze_gulf_work(manifest))
+    plan = planning.build_execution_plan(manifest, planning.analyze_gulf_work(manifest))
 
     search = _target(plan, "search")
     gulf3 = _stage(search, "gulf3_generalization")
@@ -392,7 +473,7 @@ def test_execution_plan_allows_mini_mode_when_quick_start_completed(tmp_path):
         },
     )
     manifest = _validated_campaign(tmp_path, [skill])
-    plan = _mod.build_execution_plan(manifest, _mod.analyze_gulf_work(manifest))
+    plan = planning.build_execution_plan(manifest, planning.analyze_gulf_work(manifest))
 
     search = _target(plan, "search")
     gulf3 = _stage(search, "gulf3_generalization")
@@ -407,7 +488,7 @@ def test_execution_plan_computes_combination_target_workspace_path(tmp_path):
     alpha = _skill("alpha", tmp_path, triggers=["python", "pytest"])
     beta = _skill("beta", tmp_path, triggers=["python", "pytest"])
     manifest = _validated_campaign(tmp_path, [alpha, beta])
-    plan = _mod.build_execution_plan(manifest, _mod.analyze_gulf_work(manifest))
+    plan = planning.build_execution_plan(manifest, planning.analyze_gulf_work(manifest))
 
     target = _target(plan, "alpha__beta")
 
@@ -421,7 +502,7 @@ def test_execution_plan_marks_overlapping_pair_targets(tmp_path):
     bridge = _skill("bridge", tmp_path, triggers=["alpha", "beta"])
     beta = _skill("beta", tmp_path, triggers=["beta"])
     manifest = _validated_campaign(tmp_path, [alpha, bridge, beta])
-    plan = _mod.build_execution_plan(manifest, _mod.analyze_gulf_work(manifest))
+    plan = planning.build_execution_plan(manifest, planning.analyze_gulf_work(manifest))
 
     pair_targets = [
         target for target in plan["targets"]
@@ -450,7 +531,7 @@ def test_execution_plan_trusts_only_session_close_trust_gate_for_gulf3_completio
         },
     )
     manifest = _validated_campaign(tmp_path, [skill])
-    plan = _mod.build_execution_plan(manifest, _mod.analyze_gulf_work(manifest))
+    plan = planning.build_execution_plan(manifest, planning.analyze_gulf_work(manifest))
 
     search = _target(plan, "search")
     gulf3 = _stage(search, "gulf3_generalization")
@@ -462,7 +543,7 @@ def test_execution_plan_trusts_only_session_close_trust_gate_for_gulf3_completio
         workspace / "session_close_holdout" / "variant_results.json",
         {"trust_gate": {"outcome": "review_required"}},
     )
-    plan = _mod.build_execution_plan(manifest, _mod.analyze_gulf_work(manifest))
+    plan = planning.build_execution_plan(manifest, planning.analyze_gulf_work(manifest))
     search = _target(plan, "search")
     gulf3 = _stage(search, "gulf3_generalization")
 
@@ -475,7 +556,7 @@ def test_html_report_renders_execution_plan_stage_status(tmp_path):
     manifest = _validated_campaign(tmp_path, [_skill("search", tmp_path)])
     html_path = tmp_path / "campaign-report.html"
 
-    report = _mod.campaign_report(manifest)
+    report = planning.campaign_report(manifest)
     _mod.write_html_report(report, html_path)
 
     html = html_path.read_text(encoding="utf-8")

@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from autorefine.lib import campaign_planning
+
 
 SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 _spec = importlib.util.spec_from_file_location(
@@ -13,14 +15,6 @@ _spec = importlib.util.spec_from_file_location(
 _mod = importlib.util.module_from_spec(_spec)
 sys.modules["prepare_gulf_gate_pack"] = _mod
 _spec.loader.exec_module(_mod)
-
-_campaign_spec = importlib.util.spec_from_file_location(
-    "run_campaign_for_gate_pack_test",
-    SCRIPTS_DIR / "run-campaign.py",
-)
-_campaign_mod = importlib.util.module_from_spec(_campaign_spec)
-sys.modules["run_campaign_for_gate_pack_test"] = _campaign_mod
-_campaign_spec.loader.exec_module(_campaign_mod)
 
 
 def _write_json(path, payload):
@@ -165,14 +159,81 @@ def test_prepare_workspace_uses_normalized_custom_adapter_config_path(tmp_path):
     assert gate_pack["evidence"]["config_path"] == "custom/domain-config.json"
 
 
+def test_read_adapter_evidence_returns_legacy_summary_shape(tmp_path):
+    workspace_path = tmp_path / "workspace"
+    _write_adapter_evidence(
+        workspace_path,
+        config_path="custom/domain-config.json",
+        eval_script_path="custom/eval-metric.py",
+        golden_set_path="custom/golden-set.jsonl",
+    )
+    _write_json(
+        workspace_path / "state.json",
+        {
+            "selected_adapter_id": "search_retrieval_v1",
+            "adapter_config_path": "custom/domain-config.json",
+        },
+    )
+
+    evidence = _mod.read_adapter_evidence(workspace_path)
+
+    assert evidence == {
+        "status": "ready",
+        "reason": None,
+        "evidence": {
+            "adapter_id": "search_retrieval_v1",
+            "config_path": "custom/domain-config.json",
+            "domain_eval_version": "1.0",
+            "eval_script_path": "custom/eval-metric.py",
+            "golden_set_path": "custom/golden-set.jsonl",
+            "golden_set_count": 1,
+            "metric_name": "ndcg_at_5",
+            "threshold_pass": 0.65,
+            "threshold_concern": 0.50,
+            "weight_multiplier": 2.0,
+        },
+    }
+
+
+def test_prepare_workspace_preserves_existing_state_and_updates_evidence_refs(tmp_path):
+    workspace_path = tmp_path / "workspace"
+    _write_json(
+        workspace_path / "state.json",
+        {
+            "schema_version": 4,
+            "skill_name": "existing-name",
+            "workspace_path": "existing-workspace-ref",
+            "adapter_config_path": "custom/domain-config.json",
+            "unrelated_key": {"keep": True},
+        },
+    )
+    _write_adapter_evidence(
+        workspace_path,
+        config_path="custom/domain-config.json",
+        eval_script_path="custom/eval-metric.py",
+        golden_set_path="custom/golden-set.jsonl",
+    )
+
+    result = _mod.prepare_workspace_gate_pack(workspace_path, "search")
+
+    state = json.loads((workspace_path / "state.json").read_text(encoding="utf-8"))
+    assert result["status"] == "approved"
+    assert state["skill_name"] == "existing-name"
+    assert state["workspace_path"] == "existing-workspace-ref"
+    assert state["unrelated_key"] == {"keep": True}
+    assert state["selected_adapter_id"] == "search_retrieval_v1"
+    assert state["adapter_config_path"] == "custom/domain-config.json"
+    assert state["domain_eval_config_path"] == "custom/domain-config.json"
+
+
 def test_gate_pack_makes_campaign_orchestrator_ready_for_full_phase7(tmp_path):
     skill = _skill("search", tmp_path)
     workspace_path = Path(skill["workspace_path"])
     _write_adapter_evidence(workspace_path)
     _mod.prepare_workspace_gate_pack(workspace_path, "search")
 
-    manifest = _campaign_mod.validate_campaign_manifest(_manifest(tmp_path, [skill]))
-    report = _campaign_mod.campaign_report(manifest)
+    manifest = campaign_planning.validate_campaign_manifest(_manifest(tmp_path, [skill]))
+    report = campaign_planning.campaign_report(manifest)
     target = report["execution_plan"]["targets"][0]
     gulf3 = next(stage for stage in target["stages"] if stage["stage"] == "gulf3_generalization")
 
@@ -255,7 +316,7 @@ def test_campaign_gate_pack_default_prepares_pairwise_candidate_targets(tmp_path
     eval_script_body = "# shared metric\n"
     _write_adapter_evidence(Path(alpha["workspace_path"]), eval_script_body=eval_script_body)
     _write_adapter_evidence(Path(beta["workspace_path"]), eval_script_body=eval_script_body)
-    manifest = _campaign_mod.validate_campaign_manifest(_manifest(tmp_path, [alpha, beta]))
+    manifest = campaign_planning.validate_campaign_manifest(_manifest(tmp_path, [alpha, beta]))
 
     summary = _mod.prepare_campaign_gate_pack(manifest)
 
@@ -275,10 +336,10 @@ def test_campaign_gate_pack_prepares_pairwise_candidate_targets(tmp_path):
     eval_script_body = "# shared metric\n"
     _write_adapter_evidence(Path(alpha["workspace_path"]), eval_script_body=eval_script_body)
     _write_adapter_evidence(Path(beta["workspace_path"]), eval_script_body=eval_script_body)
-    manifest = _campaign_mod.validate_campaign_manifest(_manifest(tmp_path, [alpha, beta]))
+    manifest = campaign_planning.validate_campaign_manifest(_manifest(tmp_path, [alpha, beta]))
 
-    summary = _mod.prepare_campaign_gate_pack(manifest, _campaign_mod)
-    report = _campaign_mod.campaign_report(manifest)
+    summary = _mod.prepare_campaign_gate_pack(manifest, campaign_planning)
+    report = campaign_planning.campaign_report(manifest)
     candidate = next(
         target for target in report["execution_plan"]["targets"]
         if target["target_id"] == "alpha__beta"
@@ -305,8 +366,8 @@ def test_candidate_gate_pack_ignores_stale_candidate_state_config_refs(tmp_path)
     eval_script_body = "# shared metric\n"
     _write_adapter_evidence(Path(alpha["workspace_path"]), eval_script_body=eval_script_body)
     _write_adapter_evidence(Path(beta["workspace_path"]), eval_script_body=eval_script_body)
-    manifest = _campaign_mod.validate_campaign_manifest(_manifest(tmp_path, [alpha, beta]))
-    report = _campaign_mod.campaign_report(manifest)
+    manifest = campaign_planning.validate_campaign_manifest(_manifest(tmp_path, [alpha, beta]))
+    report = campaign_planning.campaign_report(manifest)
     candidate = next(
         target for target in report["execution_plan"]["targets"]
         if target["target_id"] == "alpha__beta"
@@ -322,7 +383,7 @@ def test_candidate_gate_pack_ignores_stale_candidate_state_config_refs(tmp_path)
         },
     )
 
-    summary = _mod.prepare_campaign_gate_pack(manifest, _campaign_mod)
+    summary = _mod.prepare_campaign_gate_pack(manifest, campaign_planning)
 
     candidate_result = next(
         result for result in summary["results"]
@@ -372,9 +433,9 @@ def test_candidate_gate_pack_resolves_expanded_source_config_path(tmp_path, monk
             encoding="utf-8",
         )
         _write_jsonl(workspace_path / "domain-eval" / "golden-set.jsonl", DEFAULT_GOLDEN_ROWS)
-    manifest = _campaign_mod.validate_campaign_manifest(_manifest(tmp_path, [alpha, beta]))
+    manifest = campaign_planning.validate_campaign_manifest(_manifest(tmp_path, [alpha, beta]))
 
-    summary = _mod.prepare_campaign_gate_pack(manifest, _campaign_mod)
+    summary = _mod.prepare_campaign_gate_pack(manifest, campaign_planning)
 
     candidate = next(
         result for result in summary["results"]
@@ -391,9 +452,9 @@ def test_candidate_gate_pack_blocks_mismatched_eval_script_content(tmp_path):
     beta["triggers"] = ["search", "rank"]
     _write_adapter_evidence(Path(alpha["workspace_path"]), eval_script_body="# alpha metric\n")
     _write_adapter_evidence(Path(beta["workspace_path"]), eval_script_body="# beta metric\n")
-    manifest = _campaign_mod.validate_campaign_manifest(_manifest(tmp_path, [alpha, beta]))
+    manifest = campaign_planning.validate_campaign_manifest(_manifest(tmp_path, [alpha, beta]))
 
-    summary = _mod.prepare_campaign_gate_pack(manifest, _campaign_mod)
+    summary = _mod.prepare_campaign_gate_pack(manifest, campaign_planning)
     candidate = next(
         result for result in summary["results"]
         if result["skill_id"] == "alpha__beta"
@@ -410,9 +471,9 @@ def test_candidate_gate_pack_blocks_mismatched_scoring_config(tmp_path):
     beta["triggers"] = ["search", "rank"]
     _write_adapter_evidence(Path(alpha["workspace_path"]), threshold_pass=0.65)
     _write_adapter_evidence(Path(beta["workspace_path"]), threshold_pass=0.75)
-    manifest = _campaign_mod.validate_campaign_manifest(_manifest(tmp_path, [alpha, beta]))
+    manifest = campaign_planning.validate_campaign_manifest(_manifest(tmp_path, [alpha, beta]))
 
-    summary = _mod.prepare_campaign_gate_pack(manifest, _campaign_mod)
+    summary = _mod.prepare_campaign_gate_pack(manifest, campaign_planning)
     candidate = next(
         result for result in summary["results"]
         if result["skill_id"] == "alpha__beta"

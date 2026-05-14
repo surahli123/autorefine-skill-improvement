@@ -11,7 +11,9 @@ from .campaign_readiness import (
     assess_campaign_readiness,
 )
 from .campaign_planning import (
+    build_campaign_report_from_manifest,
     campaign_report,
+    render_html_report,
     validate_campaign_manifest,
 )
 from .gate_pack import (
@@ -248,6 +250,7 @@ __all__ = [
     "accumulate_openai_stream",
     "append_chunk_lines",
     "assess_campaign_readiness",
+    "build_campaign_report_from_manifest",
     "campaign_report",
     "build_research_corpus_view_from_storage",
     "build_mutation_candidate_relevance_rubric",
@@ -291,6 +294,7 @@ __all__ = [
     "persist_style_preferences_detection_to_run_state",
     "prepare_campaign_gate_pack",
     "prepare_workspace_gate_pack",
+    "render_html_report",
     "query_persisted_patterns",
     "resolve_exemplar_selection_config",
     "resolve_exemplar_source_configs",
