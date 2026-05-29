@@ -1,4 +1,6 @@
 import importlib.util
+import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -279,6 +281,76 @@ def test_write_html_report_renders_schedule_and_adjacency(tmp_path):
     assert "Gulf 1" in html
     assert "Gulf 2" in html
     assert "Gulf 3" in html
+
+
+def test_direct_script_entrypoint_writes_campaign_report(tmp_path):
+    skill = _skill("search", tmp_path)
+    _write_skill(
+        Path(skill["skill_path"]),
+        """---
+name: search
+description: Search skill.
+---
+
+# Search
+""",
+    )
+    manifest_path = tmp_path / "manifest.json"
+    output_path = tmp_path / "report.json"
+    _write_json(
+        manifest_path,
+        {
+            "campaign_id": "campaign_a",
+            "skills": [skill],
+        },
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPTS_DIR / "run-campaign.py"),
+            "--manifest",
+            str(manifest_path),
+            "--output",
+            str(output_path),
+        ],
+        cwd=SCRIPTS_DIR.parents[1],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(output_path.read_text(encoding="utf-8"))
+    assert report["campaign_id"] == "campaign_a"
+    assert report["execution_plan"]["targets"][0]["target_id"] == "search"
+
+
+def test_run_campaign_preserves_readiness_helper_facade(tmp_path):
+    workspace = tmp_path / "workspace"
+    _write_json(
+        workspace / "state.json",
+        {
+            "gates": {"gulf_1": "approved", "gulf_2": "pending"},
+        },
+    )
+    target = {"target_id": "search", "workspace_path": str(workspace)}
+    state = _mod.read_workspace_state(workspace)
+
+    assert state["exists"] is True
+    assert _mod.gate_status(workspace, "gulf_1") == "approved"
+    assert _mod.gate_status_from_state(state, "gulf_2") == "pending"
+    assert _mod.artifact_exists(workspace, "state.json") is True
+    assert _mod.read_trust_gate(workspace) == {
+        "status": "missing",
+        "trust_gate": None,
+        "error": None,
+    }
+    assert _mod.blocked_stage("gulf1_comprehension", "bad state", [])["status"] == "blocked"
+    assert _mod.build_gulf1_stage(target, state)["status"] == "complete"
+    assert _mod.build_gulf2_stage(target, state)["status"] == "ready"
+    assert _mod.build_gulf3_stage(target, state)["status"] == "blocked"
 
 
 def test_execution_plan_blocks_gulf2_until_gulf1_gate(tmp_path):

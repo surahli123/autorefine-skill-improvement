@@ -1,5 +1,34 @@
 """Runtime helpers for AutoRefine bootstrap and orchestration surfaces."""
 
+from .adapter_state import (
+    AdapterState,
+    AdapterStateValidation,
+    validate_adapter_state,
+)
+from .campaign_readiness import (
+    CampaignReadiness,
+    CampaignReadinessStage,
+    assess_campaign_readiness,
+)
+from .campaign_planning import (
+    campaign_report,
+    validate_campaign_manifest,
+)
+from .gate_pack import (
+    prepare_campaign_gate_pack,
+    prepare_workspace_gate_pack,
+)
+from .gulf_trace_record import (
+    MAX_CARRY_BYTES as GULF_TRACE_MAX_CARRY_BYTES,
+    accumulate_anthropic_stream,
+    accumulate_openai_stream,
+    append_chunk_lines,
+    build_trace_record,
+    parse_anthropic_response,
+    parse_openai_response,
+    scrub,
+    scrub_json,
+)
 from .exemplar_source_loader import (
     CANONICAL_SELECTION_DEDUPE_STRATEGIES as EXEMPLAR_SELECTION_DEDUPE_STRATEGIES,
     CANONICAL_SELECTION_TYPE as EXEMPLAR_SELECTION_TYPE,
@@ -61,6 +90,7 @@ from .research_corpus import (
     build_research_corpus_view_from_storage,
     build_preference_signal_payload_from_override_scan,
     derive_preference_signal_candidates_from_override_scan,
+    normalize_preference_signal_payload,
     ingest_pattern_extraction_inputs,
     load_research_corpus_storage,
     lookup_persisted_pattern,
@@ -167,6 +197,8 @@ __all__ = [
     "CANONICAL_STRUCTURE_TRANSFER_TYPES",
     "CANONICAL_VERSION_SNAPSHOT_BUNDLE_TYPE",
     "ACTIVE_STYLE_PREFERENCE_STATUSES",
+    "AdapterState",
+    "AdapterStateValidation",
     "CANONICAL_PRECEDENCE_VALUES",
     "CANONICAL_REVIEW_STATUS_VALUES",
     "CANONICAL_SOURCE_KIND_VALUES",
@@ -208,11 +240,20 @@ __all__ = [
     "SourceParserAdapterError",
     "StructureExtractionError",
     "TacticExtractionError",
+    "CampaignReadiness",
+    "CampaignReadinessStage",
+    "GULF_TRACE_MAX_CARRY_BYTES",
     "assemble_normalized_research_corpus",
+    "accumulate_anthropic_stream",
+    "accumulate_openai_stream",
+    "append_chunk_lines",
+    "assess_campaign_readiness",
+    "campaign_report",
     "build_research_corpus_view_from_storage",
     "build_mutation_candidate_relevance_rubric",
     "build_mutation_candidate_relevance_rubrics",
     "build_preference_signal_payload_from_override_scan",
+    "build_trace_record",
     "build_target_skill_scoring_context",
     "build_style_preferences_payload_from_state",
     "build_skill_version_snapshot_bundle",
@@ -246,7 +287,10 @@ __all__ = [
     "load_style_preferences_payload_from_state",
     "load_research_corpus_storage",
     "lookup_persisted_pattern",
+    "normalize_preference_signal_payload",
     "persist_style_preferences_detection_to_run_state",
+    "prepare_campaign_gate_pack",
+    "prepare_workspace_gate_pack",
     "query_persisted_patterns",
     "resolve_exemplar_selection_config",
     "resolve_exemplar_source_configs",
@@ -256,6 +300,12 @@ __all__ = [
     "resolve_pattern_evidence_reference",
     "list_source_parser_adapter_contracts",
     "parse_source_document",
+    "parse_anthropic_response",
+    "parse_openai_response",
+    "scrub",
+    "scrub_json",
     "select_exemplar_skill_records",
+    "validate_adapter_state",
+    "validate_campaign_manifest",
     "DEFAULT_MUTATION_CANDIDATE_RELEVANCE_WEIGHTS",
 ]

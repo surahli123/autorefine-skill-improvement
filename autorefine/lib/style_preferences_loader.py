@@ -5,7 +5,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from .research_corpus import _clean_text, _normalize_preference_signal_payload
+from ._shared_text import clean_text as _clean_text
+from .preference_signals import normalize_preference_signal_payload
 
 
 STYLE_PREFERENCES_PAYLOAD_SCHEMA_VERSION = 1
@@ -66,7 +67,7 @@ def _normalize_signal_rows(
     normalized_signals: list[dict[str, Any]] = []
     for index, raw_signal in enumerate(value):
         try:
-            normalized_signals.append(_normalize_preference_signal_payload(raw_signal))
+            normalized_signals.append(normalize_preference_signal_payload(raw_signal))
         except (TypeError, ValueError) as exc:
             if strict:
                 raise ValueError(

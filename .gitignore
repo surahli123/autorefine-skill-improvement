@@ -1,0 +1,9 @@
+# Python build/cache
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Generated debugging artifacts
+# phase7-status.md is regenerated from state.json + run artifacts every time
+# autorefine/scripts/render-phase7-status.py runs. Workspace-local, never committed.
+phase7-status.md
