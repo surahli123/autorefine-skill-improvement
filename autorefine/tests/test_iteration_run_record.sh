@@ -57,7 +57,7 @@ assert "results.json iteration run record stores a unique run_id" \
 echo ""
 
 echo "--- Test Group 4: Run Record Fields ---"
-RUN_RECORD_SECTION="$(sed -n '/^## Iteration Run Record Schema/,/^---$/p' "$REF_MD")"
+RUN_RECORD_SECTION="$(sed -n '/CONTRACT-ANCHOR:iter_run_record:start/,/CONTRACT-ANCHOR:iter_run_record_full:end/p' "$REF_MD")"
 assert "Iteration Run Record Schema includes trigger field" \
   "$(echo "$RUN_RECORD_SECTION" | grep -q '"trigger"'; echo $?)"
 assert "Iteration Run Record Schema includes run_path field" \

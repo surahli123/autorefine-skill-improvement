@@ -33,8 +33,8 @@ if [ ! -f "$SKILL_GULF3_MD" ] || [ ! -f "$REF_MD" ] || [ ! -f "$PUBLIC_DOC" ] ||
   exit 2
 fi
 
-STATE_SECTION="$(sed -n '/^### state.json/,/^### results.json/p' "$REF_MD")"
-RUN_RECORD_SECTION="$(sed -n '/^## Iteration Run Record Schema/,/^### Directory Structure/p' "$REF_MD")"
+STATE_SECTION="$(sed -n '/CONTRACT-ANCHOR:state_json:start/,/CONTRACT-ANCHOR:state_json:end/p' "$REF_MD")"
+RUN_RECORD_SECTION="$(sed -n '/CONTRACT-ANCHOR:iter_run_record:start/,/CONTRACT-ANCHOR:iter_run_record_initstate:end/p' "$REF_MD")"
 PUBLIC_STATE_SECTION="$(sed -n '/^### state.json extensions/,/^### fixtures-manifest.md extension/p' "$PUBLIC_DOC")"
 DEV_STATE_SECTION="$(sed -n '/^### state.json extensions/,/^### fixtures-manifest.md extension/p' "$DEV_DOC")"
 

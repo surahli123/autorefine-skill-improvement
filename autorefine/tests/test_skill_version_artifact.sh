@@ -62,7 +62,7 @@ assert "references.md version artifact schema includes version.json" \
 echo ""
 
 echo "--- Test Group 3: Mutation Wiring ---"
-MUTATION_ARTIFACT_SECTION="$(sed -n '/^### Mutation Candidate Revision Artifact/,/^---$/p' "$REF_MD")"
+MUTATION_ARTIFACT_SECTION="$(sed -n '/CONTRACT-ANCHOR:mutation_candidate_revision:start/,/CONTRACT-ANCHOR:mutation_candidate_revision:end/p' "$REF_MD")"
 assert "Mutation Candidate Revision Artifact includes version_artifact field" \
   "$(echo "$MUTATION_ARTIFACT_SECTION" | grep -q '`version_artifact`'; echo $?)"
 assert "Gulf 3 carries version_artifact into mutation.md" \
@@ -74,7 +74,7 @@ assert "Gulf 3 carries baseline version_artifact into results.json.experiments[0
 echo ""
 
 echo "--- Test Group 4: Derived Registry + Diff ---"
-VERSION_REGISTRY_SECTION="$(sed -n '/^## Version Registry Schema/,/^## /p' "$REF_MD")"
+VERSION_REGISTRY_SECTION="$(sed -n '/CONTRACT-ANCHOR:version_registry:start/,/CONTRACT-ANCHOR:version_registry:end/p' "$REF_MD")"
 assert "Version Registry Schema exposes version_id" \
   "$(echo "$VERSION_REGISTRY_SECTION" | grep -q '"version_id"'; echo $?)"
 assert "Version Registry Schema carries version_artifact through unchanged" \

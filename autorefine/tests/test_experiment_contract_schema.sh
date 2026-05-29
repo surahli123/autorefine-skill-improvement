@@ -31,7 +31,7 @@ if [ ! -f "$REF_MD" ] || [ ! -f "$MAIN_SKILL" ]; then
   exit 2
 fi
 
-EXPERIMENT_SECTION="$(sed -n '/^## Experiment Contract Schema/,/^## Adapter Resolution Rules/p' "$REF_MD")"
+EXPERIMENT_SECTION="$(sed -n '/CONTRACT-ANCHOR:experiment_contract:start/,/CONTRACT-ANCHOR:experiment_contract:end/p' "$REF_MD")"
 
 echo "--- Test Group 1: contract fields ---"
 for field in run_id adapter_id objective fixture_refs primary_metric secondary_metrics thresholds hard_fail_dimensions holdout_policy mutation_scope evaluator_inputs; do
