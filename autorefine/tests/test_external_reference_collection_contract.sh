@@ -32,9 +32,9 @@ PUBLIC_DOC_CONTENT="$(cat "$PUBLIC_DOC")"
 DEV_DOC_CONTENT="$(cat "$DEV_DOC")"
 SEED_CONTENT="$(cat "$SEED_FILE")"
 
-REFS_RESEARCH_SECTION="$(sed -n '/CONTRACT-ANCHOR:research_intake_stage:start/,/CONTRACT-ANCHOR:research_intake_stage:end/p' "$REFS_MD")"
-REFS_INTAKE_SECTION="$(sed -n '/CONTRACT-ANCHOR:research_intake_sections:start/,/CONTRACT-ANCHOR:research_intake_sections:end/p' "$REFS_MD")"
-REFS_PROVENANCE_SECTION="$(sed -n '/CONTRACT-ANCHOR:corpus_provenance:start/,/CONTRACT-ANCHOR:corpus_provenance:end/p' "$REFS_MD")"
+REFS_RESEARCH_SECTION="$(sed -n '/^<!-- CONTRACT-ANCHOR:research_intake_stage:start -->$/,/^<!-- CONTRACT-ANCHOR:research_intake_stage:end -->$/p' "$REFS_MD")"
+REFS_INTAKE_SECTION="$(sed -n '/^<!-- CONTRACT-ANCHOR:research_intake_sections:start -->$/,/^<!-- CONTRACT-ANCHOR:research_intake_sections:end -->$/p' "$REFS_MD")"
+REFS_PROVENANCE_SECTION="$(sed -n '/^<!-- CONTRACT-ANCHOR:corpus_provenance:start -->$/,/^<!-- CONTRACT-ANCHOR:corpus_provenance:end -->$/p' "$REFS_MD")"
 
 echo "--- autorefine/references.md ---"
 assert_contains "$REFS_RESEARCH_SECTION" "### External Source Retrieval and Snapshot Requirements" "references define external retrieval and snapshot requirements"

@@ -31,7 +31,7 @@ if [ ! -f "$REF_MD" ] || [ ! -f "$MAIN_SKILL" ]; then
   exit 2
 fi
 
-STATE_SECTION="$(sed -n '/CONTRACT-ANCHOR:state_json:start/,/CONTRACT-ANCHOR:state_json:end/p' "$REF_MD")"
+STATE_SECTION="$(sed -n '/^<!-- CONTRACT-ANCHOR:state_json:start -->$/,/^<!-- CONTRACT-ANCHOR:state_json:end -->$/p' "$REF_MD")"
 
 echo "--- Test Group 1: references.md Sections ---"
 assert "references.md defines Domain Adapter Contract Schema section" \
