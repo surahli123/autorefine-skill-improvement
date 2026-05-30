@@ -30,7 +30,7 @@ if [ ! -f "$REF_MD" ]; then
   exit 2
 fi
 
-SEARCH_SECTION="$(sed -n '/^### Search adapter reference/,/^## Inferred Contract Template/p' "$REF_MD")"
+SEARCH_SECTION="$(sed -n '/^<!-- CONTRACT-ANCHOR:search_adapter:start -->$/,/^<!-- CONTRACT-ANCHOR:search_adapter:end -->$/p' "$REF_MD")"
 
 echo "--- Test Group 1: minimum viable search row ---"
 assert "search contract section exists" \

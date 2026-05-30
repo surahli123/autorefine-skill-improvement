@@ -10,6 +10,7 @@ Read when: Initialize Workspace or resuming a session.
 
 Workspace directories for new runs are `traces/`, `judges/`, `runs/`, `skill-versions/`, `contract/`, and `domain-eval/`. `skill-versions/` stores immutable per-version `SKILL.md` snapshots for rollback, comparison, and external replay. `domain-eval/` is the shared on-disk surface for adapter-aware evaluation assets and remains the canonical location even when runtime state uses generic adapter field names.
 
+<!-- CONTRACT-ANCHOR:state_json:start -->
 ### state.json
 ```json
 {"schema_version":4,"skill_name":"<name>","skill_path":"<path>","original_skill_path":"<path>","workspace_path":"<path>","started":"<today>","current_phase":1,"current_gulf":1,"phases":{},"gates":{"gulf_1":"pending","gulf_2":"pending"},"hamel_available":false,"loop_iteration":0,"locked_judges":[],"memory_path":null,"checkpoint":null,"consecutive_discards":0,"circuit_breaker":null,"current_run_id":null,"current_run_path":null,"current_experiment":null,"iteration_state":null,"completion_cadence":null,"pending_user_override_scan":null,"mid_session_preference_signals":null,"mid_session_preference_signals_path":null,"skill_pattern":null,"phase1_context":null,"mutation_stage_split_access_policy":null,"meta_learnings_path":null,"research_intake":null,"research_intake_path":null,"final_only_evaluation":null,"quick_start":null,"contract_status":null,"contract_path":null,"effectiveness_floor":null,"edit_budget":null,"adapter_config_path":null,"selected_adapter_id":null,"active_experiment_contract_path":null,"domain_eval_config_path":null}
@@ -89,6 +90,7 @@ Workspace directories for new runs are `traces/`, `judges/`, `runs/`, `skill-ver
 - `domain_eval_config_path`: null, or `[workspace]/domain-eval/config.json`. Set when author provides domain eval assets in Phase 0.5 Step 7. See `Domain Eval Config Schema`.
 - `domain_eval_config_path` is a legacy alias for `adapter_config_path`. New writes should keep both fields aligned when the config lives at `[workspace]/domain-eval/config.json`, but downstream logic should prefer `adapter_config_path` when both are present.
 
+<!-- CONTRACT-ANCHOR:state_json:end -->
 ### results.json
 ```json
 {"skill_name":"<name>","status":"running","current_experiment":0,"iteration_state":null,"baseline_score":null,"noise_floor":null,"best_score":null,"completion_cadence":null,"pending_user_override_scan":null,"mid_session_preference_signals":null,"mid_session_preference_signals_path":null,"iteration_runs":[],"meta_learning_outcomes":[],"meta_learning_audit_records":[],"experiments":[],"eval_breakdown":[]}
@@ -2137,6 +2139,7 @@ Use this default rubric whenever `mutation_candidate_evaluation` compares a dono
 - The three weights must sum to `1.0`. Do not add hidden bonus factors or opaque post-hoc multipliers on the recommendation path.
 - Score each dimension on a normalized `0.0-1.0` scale and keep the written `criterion_description` visible to human reviewers. If a later phase wants to tune thresholds, tune the downstream recommendation policy, not the rubric dimensions or their meaning.
 
+<!-- CONTRACT-ANCHOR:mutation_candidate_revision:start -->
 ### Mutation Candidate Revision Artifact
 
 Once mutate selects the highest-priority target row, convert that structured eval-to-mutate handoff into exactly one candidate `SKILL.md` revision artifact. This is the stable machine-readable record of the candidate the mutation engine produced before scoring or user presentation.
@@ -2318,6 +2321,7 @@ Persist the payload in `mutation.md` under `## Test Launch Payload`. Resume-time
 - Do not rebuild `input_ids[]`, `input_set_ref`, or the candidate snapshot path from split manifests, filesystem scans, or free-form mutation notes once this payload has been written.
 - Do not emit `## Test Launch Payload` when `mutation_outcome.status = skipped`; skip/no-op outcomes stay in the mutate lane and do not bootstrap test.
 
+<!-- CONTRACT-ANCHOR:mutation_candidate_revision:end -->
 ---
 
 ## Skill Version Artifact Schema
@@ -2729,6 +2733,7 @@ Field rules:
 - `gold_source`: the evidence substrate the primary oracle depends on.
 - `trust_rule`: the adapter-specific trust policy layered on top of AutoRefine's shared holdout and human-review model.
 
+<!-- CONTRACT-ANCHOR:experiment_contract:start -->
 ## Experiment Contract Schema
 
 Read when: starting a bounded mutation/evaluation run or resuming one.
@@ -2786,6 +2791,7 @@ Field rules:
 - `mutation_scope`: what the mutation actor may change.
 - `evaluator_inputs`: artifact refs the evaluator needs to score the current run consistently.
 
+<!-- CONTRACT-ANCHOR:experiment_contract:end -->
 ## Adapter Resolution Rules
 
 Read when: pattern classification suggests an adapter or resume logic restores one from state.
@@ -2796,6 +2802,7 @@ Read when: pattern classification suggests an adapter or resume logic restores o
 - If required adapter assets are missing, stop and ask the user to either provide the missing assets or explicitly downgrade to the LLM-judge-only path.
 - Do not silently downgrade from an active adapter-aware path.
 
+<!-- CONTRACT-ANCHOR:search_adapter:start -->
 ### Search adapter reference
 
 Use this as the first concrete adapter implementation.
@@ -2855,6 +2862,7 @@ Required fields:
 Optional fields:
 - `metadata`: any extra adapter-specific information needed for replay or diagnostics
 
+<!-- CONTRACT-ANCHOR:search_adapter:end -->
 ## Inferred Contract Template
 
 Read when: Phase 0.5 generates inferred-contract.md from author examples.
@@ -3086,6 +3094,7 @@ Whenever mid-session preference detection runs, refresh `state.json.mid_session_
 
 ---
 
+<!-- CONTRACT-ANCHOR:research_intake_stage:start -->
 ## Research Intake Stage Contract
 
 Read when: Gulf 2 gate is approved and before Phase 7 starts, or when resuming a run whose `state.json.research_intake.status` is `in_progress`, `completed`, or `partial`.
@@ -3223,6 +3232,7 @@ AutoRefine v4.2 preserves the existing filesystem-as-memory foundation. The rese
 
 Comparison guardrail: `case_study` entries may cite version-to-version improvement only when the stored evidence proves same-corpus comparison for that skill lineage. Cross-skill transfer happens through promoted patterns and rules, not by pretending two different skills were directly comparable.
 
+<!-- CONTRACT-ANCHOR:corpus_provenance:start -->
 ### Corpus Provenance and Attribution Requirements
 
 Every normalized research record must carry enough provenance to answer four human questions without reopening the source:
@@ -3308,6 +3318,7 @@ Downstream phases should consume one normalized bundle rather than reopening raw
 - `exemplar_index[]` groups entries derived from exemplar records and declares whether the exemplar was reduced to `pattern_observation`, promoted to `case_study`, or mixed across both.
 - Downstream consumers should read `entries[]`, `entry_index`, `reference_index[]`, and `exemplar_index[]` from the same normalized view. Do not branch on raw `research-intake.md` tables or the exemplar loader payload once this bundle exists.
 
+<!-- CONTRACT-ANCHOR:corpus_provenance:end -->
 ### Shared Research Corpus Entry Schema
 
 Every normalized research record must share the following required fields before any type-specific payload is read:
@@ -3851,6 +3862,7 @@ Required `type_payload` fields:
 
 Guardrail: every mutation hypothesis must point back to at least one non-hypothesis corpus entry through `source_entry_ids`.
 
+<!-- CONTRACT-ANCHOR:research_intake_sections:start -->
 ### research-intake.md required sections
 
 The artifact stays markdown-first for weak agents, but every persisted row below must normalize into the shared research corpus schema on read. At minimum, each extracted pattern becomes one `pattern_observation` entry and each mutation lead becomes one `mutation_hypothesis` entry.
@@ -3917,6 +3929,7 @@ The artifact stays markdown-first for weak agents, but every persisted row below
 - `Accepted Sources` is the minimum attribution surface for normalizing `source_ref`, `retrieval_context`, and `source_timestamps`.
 - Each `Extracted Patterns` row must point back to one accepted source through both `source_id` and `trace_ref`, and must include enough evidence detail to populate both `type_payload.evidence_reference` and `traceability.evidence_refs[]`.
 
+<!-- CONTRACT-ANCHOR:research_intake_sections:end -->
 ### Validation rules
 
 - `target_skill_path` is required and must resolve to a readable `SKILL.md`.
@@ -3950,6 +3963,7 @@ The artifact stays markdown-first for weak agents, but every persisted row below
 
 ---
 
+<!-- CONTRACT-ANCHOR:research_intake_stage:end -->
 ## Judge Validation Report Format
 
 Read when: Phase 6 Step 5.
@@ -4336,6 +4350,7 @@ The iteration directory provides filesystem-as-memory for Phase 7. Each experime
 
 Read `references.md > Iteration Run Record Schema` first when Phase 7 starts. The run record is the single-run metadata envelope created before any `iteration_000/` baseline artifacts exist; the iteration directory then stores per-experiment artifacts underneath that run.
 
+<!-- CONTRACT-ANCHOR:iter_run_record:start -->
 ## Iteration Run Record Schema
 
 Read when: Phase 7 start, loop-back re-entry, or resume-time reopening of the active mutation run.
@@ -4429,6 +4444,7 @@ Read when: Phase 7 start, baseline finalization, later mutation/test transitions
 - At Session Close completion, write a terminal state on the same object: success sets `active_phase = "session_close"`, `phase_status = "completed"`, `next_action = null`; unrecoverable failure sets `active_phase = "session_close"`, `phase_status = "blocked"`, `next_action = null`.
 - Resume/load must continue from the persisted `next_action` while `phase_status` is `running|ready`, and stop handoff progression only when `phase_status` is terminal (`completed|blocked`).
 
+<!-- CONTRACT-ANCHOR:iter_run_record_initstate:end -->
 ### Directory Structure
 
 ```
@@ -4777,6 +4793,7 @@ combined_score: [Z]%  |  threshold: [T]%
 
 The iteration directory is the **forensic record** — it has everything. The other artifacts remain the **operational interfaces** for the dashboard, session resume, and undo.
 
+<!-- CONTRACT-ANCHOR:iter_run_record_full:end -->
 ---
 
 ## Challenger Mode Configuration Schema
@@ -5710,6 +5727,7 @@ for category in ["structural", "task-completion", "quality"]:
 
 ---
 
+<!-- CONTRACT-ANCHOR:version_registry:start -->
 ## Version Registry Schema
 
 Read when: Phase 7 (after kept mutation) or Session Close (version summary).
@@ -5785,6 +5803,7 @@ Version History
 
 ---
 
+<!-- CONTRACT-ANCHOR:version_registry:end -->
 ## Final Holdout Variant Runner
 
 Read when: Session Close step 0c.
