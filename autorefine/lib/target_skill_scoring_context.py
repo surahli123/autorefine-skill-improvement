@@ -10,6 +10,7 @@ if __package__:
     from ._shared_text import (
         clean_identifier as _clean_identifier,
         clean_text as _clean_text,
+        _first_present,
     )
 else:
     _CURRENT_DIR = Path(__file__).resolve().parent
@@ -18,19 +19,13 @@ else:
     from _shared_text import (
         clean_identifier as _clean_identifier,
         clean_text as _clean_text,
+        _first_present,
     )
 
 TARGET_SKILL_SCORING_CONTEXT_SCHEMA_VERSION = 1
 CANONICAL_TARGET_SKILL_SCORING_CONTEXT_TYPE = "target_skill_scoring_context"
 
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
-
-
-def _first_present(mapping: Mapping[str, Any], *keys: str) -> Any:
-    for key in keys:
-        if key in mapping and mapping[key] is not None:
-            return mapping[key]
-    return None
 
 
 def _normalize_string_list(value: Any) -> list[str]:

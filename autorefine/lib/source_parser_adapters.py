@@ -12,6 +12,7 @@ from ._shared_text import (
     clean_identifier as _clean_identifier,
     clean_text as _clean_text,
     now_utc_timestamp as _now_utc_timestamp,
+    _sha256_text,
 )
 
 
@@ -80,10 +81,6 @@ def _normalize_newlines(text: str) -> str:
     if not normalized:
         return ""
     return normalized.rstrip("\n") + "\n"
-
-
-def _sha256_text(value: str) -> str:
-    return f"sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
 
 
 def _line_start_offsets(text: str) -> list[int]:

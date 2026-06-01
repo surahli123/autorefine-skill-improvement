@@ -14,6 +14,7 @@ if __package__:
     from ._shared_text import (
         clean_text as _clean_text,
         now_utc_timestamp as _now_utc_timestamp,
+        _first_present,
     )
     from .target_skill_scoring_context import build_target_skill_scoring_context
 else:
@@ -23,6 +24,7 @@ else:
     from _shared_text import (
         clean_text as _clean_text,
         now_utc_timestamp as _now_utc_timestamp,
+        _first_present,
     )
     from target_skill_scoring_context import build_target_skill_scoring_context
 
@@ -80,13 +82,6 @@ class MetaLearningsValidationError(ValueError):
     def __init__(self, errors: list[str]):
         self.errors = errors
         super().__init__("; ".join(errors))
-
-
-def _first_present(mapping: Mapping[str, Any], *keys: str) -> Any:
-    for key in keys:
-        if key in mapping and mapping[key] is not None:
-            return mapping[key]
-    return None
 
 
 def _strip_wrapping_delimiters(value: str) -> str:
