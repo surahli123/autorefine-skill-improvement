@@ -15,6 +15,7 @@ if __package__:
         clean_text as _clean_text,
         now_utc_timestamp as _now_utc_timestamp,
         _first_present,
+        _sha256_text,
     )
     from .target_skill_scoring_context import build_target_skill_scoring_context
 else:
@@ -25,6 +26,7 @@ else:
         clean_text as _clean_text,
         now_utc_timestamp as _now_utc_timestamp,
         _first_present,
+        _sha256_text,
     )
     from target_skill_scoring_context import build_target_skill_scoring_context
 
@@ -183,10 +185,6 @@ def _normalize_search_text(value: Any) -> str:
 
 def _stable_json_dumps(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-
-
-def _stable_sha256(value: str) -> str:
-    return f"sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
 
 
 def _normalize_skill_metadata(raw_metadata: Any) -> dict[str, Any]:
@@ -450,7 +448,7 @@ def _build_transfer_traceability(
 ) -> dict[str, Any]:
     resolved_path = str(meta_learnings_path.resolve())
     normalized_transfer_parameters = deepcopy(dict(transfer_parameters))
-    transfer_signature = _stable_sha256(_stable_json_dumps(normalized_transfer_parameters))
+    transfer_signature = _sha256_text(_stable_json_dumps(normalized_transfer_parameters))
     trace_material = {
         "curator_source": resolved_path,
         "curator_version": curator_version,
@@ -1030,7 +1028,7 @@ def load_meta_learnings_bundle(
             target_context=normalized_target_context,
             curator_version=None,
         )
-    curator_version = _stable_sha256(markdown_text)
+    curator_version = _sha256_text(markdown_text)
 
     try:
         entries = _parse_meta_learnings_entries(
