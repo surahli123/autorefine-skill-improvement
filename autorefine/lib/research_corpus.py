@@ -13,6 +13,9 @@ from ._shared_text import (
     clean_identifier as _clean_identifier,
     clean_text as _clean_text,
     now_utc_timestamp as _now_utc_timestamp,
+    _sha256_text,
+    _first_present,
+    _coerce_numeric,
 )
 from .exemplar_source_loader import (
     CANONICAL_EXEMPLAR_PAYLOAD_TYPE,
@@ -240,13 +243,6 @@ class ResearchCorpusValidationError(ValueError):
         super().__init__("; ".join(errors))
 
 
-def _first_present(mapping: Mapping[str, Any], *keys: str) -> Any:
-    for key in keys:
-        if key in mapping and mapping[key] is not None:
-            return mapping[key]
-    return None
-
-
 def _clone_json_value(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {str(key): _clone_json_value(item) for key, item in value.items()}
@@ -286,22 +282,6 @@ def _coerce_bool(value: Any, *, default: bool = False) -> bool:
     raise ValueError(f"expected boolean-compatible value, received {value!r}")
 
 
-def _coerce_numeric(value: Any) -> float | None:
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-
-    normalized = _clean_text(value)
-    if not normalized:
-        return None
-
-    try:
-        return float(normalized)
-    except ValueError:
-        return None
-
-
 def _coerce_optional_int(value: Any, *, field_name: str) -> int | None:
     if value is None:
         return None
@@ -321,10 +301,6 @@ def _coerce_optional_int(value: Any, *, field_name: str) -> int | None:
         return int(normalized)
     except ValueError as exc:
         raise ValueError(f"{field_name} must be an integer when provided") from exc
-
-
-def _sha256_text(value: str) -> str:
-    return f"sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
 
 
 def _normalize_string_list(value: Any, *, default: list[str] | None = None) -> list[str]:

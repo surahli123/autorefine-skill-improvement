@@ -7,6 +7,7 @@ from typing import Any
 from ._shared_text import (
     clean_identifier as _clean_identifier,
     clean_text as _clean_text,
+    _mapping_or_empty,
 )
 from .target_skill_scoring_context import (
     CANONICAL_TARGET_SKILL_SCORING_CONTEXT_TYPE,
@@ -93,10 +94,6 @@ def _clone_json_value(value: Any) -> Any:
     if isinstance(value, set):
         return sorted(_clone_json_value(item) for item in value)
     return value
-
-
-def _mapping_or_empty(value: Any) -> Mapping[str, Any]:
-    return value if isinstance(value, Mapping) else {}
 
 
 def _normalize_string_list(value: Any) -> list[str]:

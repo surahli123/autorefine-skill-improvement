@@ -9,6 +9,8 @@ from typing import Any
 from ._shared_text import (
     clean_identifier as _clean_identifier,
     clean_text as _clean_text,
+    _coerce_numeric,
+    _mapping_or_empty,
 )
 
 
@@ -80,21 +82,6 @@ def _coerce_bool(value: Any, *, default: bool = False) -> bool:
     return default
 
 
-def _coerce_numeric(value: Any) -> float | None:
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-
-    normalized = _clean_text(value)
-    if not normalized:
-        return None
-    try:
-        return float(normalized)
-    except ValueError:
-        return None
-
-
 def _normalize_string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -128,10 +115,6 @@ def _extract_numeric_delta(observed_delta: Any) -> float | None:
                     return nested_numeric
 
     return _coerce_numeric(observed_delta)
-
-
-def _mapping_or_empty(value: Any) -> Mapping[str, Any]:
-    return value if isinstance(value, Mapping) else {}
 
 
 def _primary_evidence_item(normalized_corpus_item: Mapping[str, Any]) -> dict[str, Any] | None:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from bisect import bisect_right
@@ -12,6 +11,9 @@ from ._shared_text import (
     clean_identifier as _clean_identifier,
     clean_text as _clean_text,
     now_utc_timestamp as _now_utc_timestamp,
+    _sha256_text,
+    _first_present,
+    _coerce_numeric,
 )
 
 
@@ -83,21 +85,6 @@ def _coerce_positive_int(value: Any, *, field_name: str, default: int) -> int:
     return normalized
 
 
-def _coerce_numeric(value: Any) -> float | None:
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-
-    normalized = _clean_text(value)
-    if not normalized:
-        return None
-    try:
-        return float(normalized)
-    except ValueError:
-        return None
-
-
 def _normalize_percentage_metric(value: Any) -> float | None:
     numeric = _coerce_numeric(value)
     if numeric is None or numeric < 0:
@@ -133,13 +120,6 @@ def _read_json(path: Path) -> dict[str, Any]:
     return data
 
 
-def _first_present(mapping: Mapping[str, Any], *keys: str) -> Any:
-    for key in keys:
-        if key in mapping and mapping[key] is not None:
-            return mapping[key]
-    return None
-
-
 def _clone_json_value(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {str(key): _clone_json_value(item) for key, item in value.items()}
@@ -148,10 +128,6 @@ def _clone_json_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return [_clone_json_value(item) for item in value]
     return value
-
-
-def _sha256_text(value: str) -> str:
-    return f"sha256:{hashlib.sha256(value.encode('utf-8')).hexdigest()}"
 
 
 def _extract_title(skill_text: str, *, default: str) -> str:
