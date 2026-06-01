@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import re
 from bisect import bisect_right
 from collections.abc import Callable, Mapping
