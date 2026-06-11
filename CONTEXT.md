@@ -92,6 +92,18 @@ _Avoid_: style note, preference row
 A mid-session scan of human overrides across experiment rows used to derive Preference Signals.
 _Avoid_: feedback list, user edits summary
 
+**Decision Contract**:
+The machine-readable AutoRefine routing output used by validation and resume checks. It must be a single JSON object with `schema_version`, `scenario_family`, `required_action`, `phase`, `gulf_stage`, `allowed_reads`, `allowed_writes`, `prohibited_actions`, `evidence_required`, and `stop_reason`.
+_Avoid_: routing blob, status JSON
+
+**Decision Contract Quick Reference**:
+The table in `autorefine/SKILL.md` that maps common validation/routing situations to exact Decision Contract fields.
+_Avoid_: prompt patch, candidate cheat sheet
+
+**Mutation Split Policy**:
+The Phase 7 rule that blocks mutation-time access to `adversarial_holdout` and reserves holdout access for Session Close.
+_Avoid_: holdout preference, eval split hint
+
 ## Relationships
 
 - **AutoRefine** uses **Gulf Review** to prepare a workspace for **Phase 7**.
@@ -129,8 +141,30 @@ _Avoid_: feedback list, user edits summary
 - **Preference Signal** constants, normalization, Override Scan payload building, and candidate derivation live in `autorefine/lib/preference_signals.py`.
 - `research_corpus.py` remains the facade for normalized corpus assembly and re-exports the **Preference Signal** API.
 - `style_preferences_loader.py` uses **Preference Signal** normalization directly instead of importing private `research_corpus.py` internals.
+- **Decision Contract** output is guided by the **Decision Contract Quick Reference** in `autorefine/SKILL.md`.
+- **Decision Contract Quick Reference** lives inside `## Preflight`, after Step 0 and before Step 1, so line-sensitive preflight placeholder sentinels continue to pass.
+- **Decision Contract** checkpoint resume uses `gulf_stage: none` when a valid checkpoint has non-empty `next_action` and integrity checks pass; do not derive Gulf stage from the resumed experiment before making that decision.
+- **Mutation Split Policy** takes precedence over apply-back scope when one request both asks for holdout access and mentions copying a candidate back to the original skill.
 
 ## Recent Session Fixes
+
+- Reframed the Darwin 2.0 + SkillOpt lane as direct evaluation/improvement of the shipped `autorefine/` bundle, not a design-borrowing exercise; `dev/` remains internal experiment/governance material.
+- Proved provider connectivity early with a tiny OpenRouter/Qwen smoke (`qwen/qwen3.6-flash`, HTTP `200`, `total_tokens=140`) while preserving the no-secret-printing boundary.
+- Ran the first isolated `/tmp` SkillOpt/Darwin experiment; it produced only a narrow copied-`SKILL.md` `High-Risk Action Blacklist` candidate, so apply-back was rejected as too weak.
+- Hardened R2 around a structured **Decision Contract** target with split `scenario_prompts.jsonl` and scorer-only `scenario_oracles.jsonl`, deterministic cost preflight, secret scan, and a new decision-contract runner instead of the older prose scorer.
+- Ran R2 V4/V5/V5b in `/tmp`: V4 reached `target_validated_ready_for_v5`, while V5/V5b improved broad operational means but produced zero exact primary-oracle improvements, ending at `paused_rethink`.
+- Added the supervised decision-contract successor spec after the R2 V4/V5/V5b SkillOpt route produced broad semantic gains but no exact-primary hard-field improvement.
+- Established strict split boundaries for supervised decision-contract learning: train-only labels, scorer-only validation/test/adversarial labels, answer-free non-train provider prompts, and fail-closed split-contract checks.
+- Ran interface calibration where `interface_enum_table_plus_json_skeleton` stopped at `blocked_weak_target` (`0/4` exact primary), then `few_shot_train_format` reached `target_validated_ready_for_candidate` (`1/4` exact primary, `0.425` family-weighted mean).
+- Recovered the subsequent candidate-generation outcome as `candidate_generated_no_test_improvement`: exact-primary stayed `0 -> 0` while family-weighted mean improved `0.0 -> 0.21`, so the lane pivoted away from repeating direct `SKILL.md` candidate generation.
+- Created the target-redesign handover and launch contract to focus future work on exact hard fields: `scenario_family`, `required_action`, `phase`, `gulf_stage`, and `stop_reason`.
+- Completed the private `/tmp` target-redesign/final-candidate run at `/tmp/autorefine-darwin-skillopt-fresh-candidate-20260609-205445`, ultimately validating a Decision Contract Quick Reference approach under Codex-only gates.
+- Added replicated robustness/final-gate validation after overfit concerns: frozen Codex split `16/16`, dev robustness `18/18` x3, regression final gate `24/24` x3, and final gate v2 `16/16` x3.
+- Added `autorefine/SKILL.md > Preflight > Decision Contract Quick Reference` as a table, not as the literal `/tmp` candidate bullet block, after review-gated integration.
+- Preserved exact Decision Contract values for preflight, workspace initialization, checkpoint resume, contract integrity, adapter integrity, Gulf sequencing, phase routing, mutation split policy, mutation scope guard, Session Close, and ambient learning.
+- Moved the Decision Contract Quick Reference inside `## Preflight` after Step 0 because putting it above Preflight broke the line-sensitive `[chosen-workspace]` placeholder sentinel in `autorefine/tests/test_preflight.sh`.
+- Verified the integrated repo `autorefine/SKILL.md` with `bash autorefine/tests/test_preflight.sh` (`59/59`), `bash autorefine/tests/test_contract_anchor_integrity.sh` (`29/29`), and Codex repo-integration eval (`frozen 16/16` twice, `final_gate_v2 16/16` twice).
+- Preserved the OpenRouter/Qwen boundary: user approval was recorded, but runtime policy denied exporting private workspace-derived skill content and benchmark prompts; current validation is Codex-only plus robustness/final gates.
 
 - Added a read-only **Adapter State** validation module with typed normalized return objects.
 - Routed **Gate Pack** preparation through normalized **Adapter Evidence** instead of duplicating config parsing.
