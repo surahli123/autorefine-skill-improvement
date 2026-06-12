@@ -14,3 +14,7 @@ runs/*
 !runs/seed-data/
 runs/seed-data/*
 !runs/seed-data/seed_manifest.json
+# v2 eval data (docs/plans/2026-06-11-001, Step W1): same pattern as v1
+!runs/seed-data-v2/
+runs/seed-data-v2/*
+!runs/seed-data-v2/seed_manifest.json
