@@ -1,0 +1,123 @@
+{
+  "authored_for": "Round 2 de-saturation (docs/plans/2026-06-11-001, T2; amendment A variants per docs/plans/2026-06-12-001)",
+  "external_receipts_informational": {
+    "answerability_panel": "runs/20260612T040619Z-t3-panel-r2/answerability_receipt.json",
+    "calibration_exact_primary_terminal": "runs/20260612T042741Z-calibration-r2-iter3/calibration_receipt.json",
+    "calibration_robust_terminal": "runs/20260612T074541Z-robust-calibration-r2-iter1/calibration_terminal_receipt.json",
+    "variant_freeze": "runs/20260612T073732Z-t4b5-freeze-r2/freeze_receipt.json"
+  },
+  "file_count": 23,
+  "files": {
+    "provenance-archive/provider_visible/adversarial_holdout_prompts.jsonl": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "provenance-archive/provider_visible/test_prompts.jsonl": {
+      "bytes": 3590,
+      "sha256": "d6b7da9dd1c75586211c72bc0f1fc766b375ae4b90b533a4025e6561ce0fc959"
+    },
+    "provenance-archive/provider_visible/test_prompts_variants.jsonl": {
+      "bytes": 17908,
+      "sha256": "250c291b2eae2dca992261a95a6a0111c1ed2caa892f5f895413f56ca2ac30e0"
+    },
+    "provenance-archive/provider_visible/train_supervised.jsonl": {
+      "bytes": 4637,
+      "sha256": "b35dd352d9b97bf3746584755459c5f6fab5ac97843e8f3c830f46951dab4d08"
+    },
+    "provenance-archive/provider_visible/val_prompts.jsonl": {
+      "bytes": 4261,
+      "sha256": "18265733080ecbf6391440ac5a53a01c3ebe709ba8327c1d8d1a77ddae0c9299"
+    },
+    "provenance-archive/provider_visible/val_prompts_variants.jsonl": {
+      "bytes": 20519,
+      "sha256": "ac17f7082a6428364809490c7fa2b77a9816c222990b73ba47063e0a261bd719"
+    },
+    "provenance-archive/scorer_only/scorer_oracles.jsonl": {
+      "bytes": 15940,
+      "sha256": "c8eb5786b0d7f8ab110179231ca3f2c277ea54918ecf9d9e4c1b7238a3afd51d"
+    },
+    "provenance-archive/split_manifest.json": {
+      "bytes": 577,
+      "sha256": "eb840320a99b004728f20b244f65cc300fb6690ef99f1a52a1dced97119f707b"
+    },
+    "provider_visible/adversarial_holdout_prompts.jsonl": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "provider_visible/test_prompts.jsonl": {
+      "bytes": 3590,
+      "sha256": "d6b7da9dd1c75586211c72bc0f1fc766b375ae4b90b533a4025e6561ce0fc959"
+    },
+    "provider_visible/test_prompts_variants.jsonl": {
+      "bytes": 17908,
+      "sha256": "250c291b2eae2dca992261a95a6a0111c1ed2caa892f5f895413f56ca2ac30e0"
+    },
+    "provider_visible/train_supervised.jsonl": {
+      "bytes": 4637,
+      "sha256": "b35dd352d9b97bf3746584755459c5f6fab5ac97843e8f3c830f46951dab4d08"
+    },
+    "provider_visible/val_prompts.jsonl": {
+      "bytes": 4261,
+      "sha256": "18265733080ecbf6391440ac5a53a01c3ebe709ba8327c1d8d1a77ddae0c9299"
+    },
+    "provider_visible/val_prompts_variants.jsonl": {
+      "bytes": 20519,
+      "sha256": "ac17f7082a6428364809490c7fa2b77a9816c222990b73ba47063e0a261bd719"
+    },
+    "scorer_only/authoring_notes.md": {
+      "bytes": 23696,
+      "sha256": "96e13c0d47114a8d40d3df4832e7ba413fbf30b08e7173785c4503054e08fe41"
+    },
+    "scorer_only/build_v2_seed.py": {
+      "bytes": 71303,
+      "sha256": "c91c59600f18c1904fa7ceb660e28f6a98d38b8d9a4a7dd90ccc670bcb6dbe28"
+    },
+    "scorer_only/diversity_receipt.json": {
+      "bytes": 4801,
+      "sha256": "ee800706d43c43c5f8b5358e12129793436d771fb2b6291a9ab71939545321f7"
+    },
+    "scorer_only/scorer_oracles.jsonl": {
+      "bytes": 15940,
+      "sha256": "c8eb5786b0d7f8ab110179231ca3f2c277ea54918ecf9d9e4c1b7238a3afd51d"
+    },
+    "split_manifest.json": {
+      "bytes": 577,
+      "sha256": "eb840320a99b004728f20b244f65cc300fb6690ef99f1a52a1dced97119f707b"
+    },
+    "tools/aggregate_robust.py": {
+      "bytes": 5086,
+      "sha256": "ae8a2a19b125661b4342b022ec9b26b8743e1d43250cf7847798a1cd958d9424"
+    },
+    "tools/prelaunch_data_gate.py": {
+      "bytes": 3290,
+      "sha256": "dcbb0f52e113d313c26d12ebc0c85cd8b7e614eeb5ca3e72b9ab1fc24c161f76"
+    },
+    "tools/score_decisions.py": {
+      "bytes": 5357,
+      "sha256": "3074795bc30de5a6b0a0d3e4204facbe2a45dfa085403739a49503b28964181e"
+    },
+    "tools/validate_seed_splits.py": {
+      "bytes": 16888,
+      "sha256": "25d0a000cd9544c2a9d2f129e20f75f1dabe973973e11c5ba4c6f529cc72f23f"
+    }
+  },
+  "layout": {
+    "canonical": [
+      "split_manifest.json",
+      "provider_visible/",
+      "scorer_only/"
+    ],
+    "provenance_archive": "provenance-archive/ (as-authored byte snapshot)"
+  },
+  "schema_version": "autorefine.seed_manifest.v1",
+  "scorer_only_boundary": "scorer_only/ and provenance-archive/ must NEVER be target-visible (Mutation Split Policy)",
+  "split_line_counts": {
+    "provider_visible/adversarial_holdout_prompts.jsonl": 0,
+    "provider_visible/test_prompts.jsonl": 12,
+    "provider_visible/test_prompts_variants.jsonl": 48,
+    "provider_visible/train_supervised.jsonl": 6,
+    "provider_visible/val_prompts.jsonl": 12,
+    "provider_visible/val_prompts_variants.jsonl": 48,
+    "scorer_only/scorer_oracles.jsonl": 30
+  }
+}
