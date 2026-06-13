@@ -15,17 +15,29 @@
   candidate enters apply-back review.
 - **Depends on / blocked by:** First successful candidate reaching the apply-back gate.
 - **Added:** 2026-06-10 by /plan-eng-review (D10).
+- **Status (2026-06-12, R3-T5):** FIRED for the Round 3 targeted bundle-repair apply-back.
+  One Codex (non-Claude) blind exec answered the two target items' 10 surfaces against
+  the candidate bundle; output attached to the R3 apply-back PR as informational evidence
+  (disagreement is recorded, not an automatic block — eng-review D1①). Gate remains armed
+  for future apply-backs.
 
-## v2-era adversarial holdout before apply-back
+## Fresh adversarial holdout — only for genuine OPTIMIZATION candidates (RESCOPED 2026-06-12)
 
-- **What:** When apply-back review starts, author a fresh adversarial holdout batch using the
+- **What:** When a genuine *optimization* candidate (mutation-search / new-capability change to
+  `autorefine/`) enters apply-back review, author a fresh adversarial holdout batch using the
   Round 2 v2 authoring protocol (panel + derivability + contested marking). Existing v1
   holdout is 6 items from the saturated era.
-- **Why:** D4 of the R2 plan correctly deferred holdout authoring (no consumer yet), but an
-  apply-back gate scored against stale saturated-era holdout proves nothing about the candidate.
-- **Pros:** apply-back final exam matches candidate-era difficulty.
-- **Cons:** authoring cost at trigger time; stacks with the portability spot-check below.
-- **Context:** docs/plans/2026-06-11-001 Decision 4 + eng-review TODO step, 2026-06-11.
-- **Depends on / blocked by:** first candidate entering apply-back review (same trigger as
-  the portability item above).
-- **Added:** 2026-06-11 by /plan-eng-review.
+- **Rescoped (2026-06-12, R3-T5, eng-review D1②):** This does NOT trigger for *targeted
+  bundle-repair* apply-backs (e.g. Round 3, which clarifies measured ambiguities and is gated
+  by the v1+v2 robust regression suites). The original premise — "a fresh holdout makes the
+  apply-back final exam match candidate-era difficulty" — is **voided by the dual-metric
+  saturation finding**: the Sonnet+bundle channel is saturated on knowledge/stability, so a
+  freshly authored holdout would saturate identically and prove nothing more than the existing
+  suites already do. Re-arm only when the candidate changes the task surface (multi-step
+  execution, tool-use fidelity, cross-file synthesis) such that a non-saturated holdout is
+  actually constructible.
+- **Why (original):** D4 of the R2 plan correctly deferred holdout authoring (no consumer yet).
+- **Context:** docs/plans/2026-06-11-001 Decision 4; rescoped by R3 eng-review D1② + the R2
+  dual-metric saturation result.
+- **Depends on / blocked by:** first genuine OPTIMIZATION candidate (not a bundle repair).
+- **Added:** 2026-06-11 by /plan-eng-review. **Rescoped:** 2026-06-12 (R3-T5).
