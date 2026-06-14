@@ -63,6 +63,15 @@ jobs:
       - name: Run shipped unit tests
         run: python -m pytest autorefine/tests -q
 
+      - name: Run shipped shell contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r t; do
+            echo "RUN ${t}"
+            bash "${t}"
+          done < <(find autorefine/tests -maxdepth 1 -type f -name 'test_*.sh' | sort)
+
   verify-private-submodule:
     needs:
       - detect-private-submodule-access

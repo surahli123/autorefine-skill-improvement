@@ -6,6 +6,7 @@
 PASS=0
 FAIL=0
 TOTAL=0
+PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 assert() {
   TOTAL=$((TOTAL + 1))
@@ -148,7 +149,7 @@ echo ""
 # --- Test Group 5: No autoresearch-<skill> patterns remain ---
 echo "--- Test Group 5: Naming Convention Audit ---"
 
-SKILL_MD="/Users/surahli/Documents/projects/skill-improvement/autorefine/SKILL.md"
+SKILL_MD="$PROJECT_ROOT/autorefine/SKILL.md"
 if [ -f "$SKILL_MD" ]; then
   LEGACY_COUNT=$(grep -c 'autoresearch-<skill>' "$SKILL_MD" 2>/dev/null; true)
   LEGACY_COUNT=${LEGACY_COUNT:-0}
@@ -361,8 +362,8 @@ echo ""
 # --- Test Group 11: Placeholder Consistency Audit ---
 echo "--- Test Group 11: Placeholder Audit ---"
 
-SKILL_MD="/Users/surahli/Documents/projects/skill-improvement/autorefine/SKILL.md"
-REF_MD="/Users/surahli/Documents/projects/skill-improvement/autorefine/references.md"
+SKILL_MD="$PROJECT_ROOT/autorefine/SKILL.md"
+REF_MD="$PROJECT_ROOT/autorefine/references.md"
 if [ -f "$SKILL_MD" ] && [ -f "$REF_MD" ]; then
   # No [chosen-workspace] outside Preflight (lines 1-36)
   OUTSIDE_PREFLIGHT=$(sed -n '37,$p' "$SKILL_MD" | grep -c '\[chosen-workspace\]'; true)
@@ -588,7 +589,7 @@ print(bad)
 assert "Registry: sections_explored has count, best_delta, last_tried" "$([ "$SECTION_OK" -eq 0 ]; echo $?)"
 
 # Test: references.md has Derived Mutation Registry section
-REF_MD="/Users/surahli/Documents/projects/skill-improvement/autorefine/references.md"
+REF_MD="$PROJECT_ROOT/autorefine/references.md"
 assert "Registry: references.md has Derived Mutation Registry section" "$(grep -q 'Derived Mutation Registry' "$REF_MD"; echo $?)"
 
 echo ""

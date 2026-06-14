@@ -6,9 +6,17 @@ PASS=0
 FAIL=0
 TOTAL=0
 
-SKILL_GULF3_MD="/Users/surahli/Documents/projects/skill-improvement/autorefine/references/gulf3-generalization.md"
-REF_MD="/Users/surahli/Documents/projects/skill-improvement/autorefine/references.md"
-DEV_DOC="/Users/surahli/Documents/projects/skill-improvement/dev/docs/design-autorefine-v4-skill-eval-platform.md"
+PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+SKILL_GULF3_MD="$PROJECT_ROOT/autorefine/references/gulf3-generalization.md"
+REF_MD="$PROJECT_ROOT/autorefine/references.md"
+DEV_DOC="$PROJECT_ROOT/dev/docs/design-autorefine-v4-skill-eval-platform.md"
+
+# CI guard: dev/ submodule is not checked out in the always-on public CI job.
+# Skip cleanly (exit 0) when its inputs are absent; runs for real in the submodule-gated job.
+if [ ! -f "$DEV_DOC" ]; then
+  echo "SKIP: requires dev/ submodule (not checked out)"
+  exit 0
+fi
 
 assert() {
   TOTAL=$((TOTAL + 1))
