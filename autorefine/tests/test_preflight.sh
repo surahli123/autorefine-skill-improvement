@@ -21,6 +21,25 @@ assert() {
   fi
 }
 
+# Portable content hash for equality checks. CI (Ubuntu) has no BSD `md5`;
+# macOS has no GNU `md5sum` by default. We only compare hashes for equality
+# within a single run, so any consistently-available algorithm works. `shasum`
+# ships on both macOS and Ubuntu, so both platforms take the same first branch.
+file_hash() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v md5sum >/dev/null 2>&1; then
+    md5sum "$1" | awk '{print $1}'
+  elif command -v md5 >/dev/null 2>&1; then
+    md5 -q "$1"
+  else
+    echo "file_hash: no hash tool (shasum/sha256sum/md5sum/md5) found" >&2
+    return 1
+  fi
+}
+
 MOCK_SKILL="/tmp/autorefine-test/mock-skill"
 WORKSPACE="/tmp/autorefine-mock-test-skill"
 
@@ -81,8 +100,8 @@ assert "Step 0.6: state.json has original_skill_path" "$(grep -q 'original_skill
 assert "Step 0.6: state.json has workspace_path" "$(grep -q 'workspace_path' "$CHOSEN_WORKSPACE/state.json"; echo $?)"
 
 # Verify: original skill NOT modified
-ORIGINAL_HASH=$(md5 -q "$MOCK_SKILL/SKILL.md")
-COPY_HASH=$(md5 -q "$CHOSEN_WORKSPACE/skill-under-test/SKILL.md")
+ORIGINAL_HASH=$(file_hash "$MOCK_SKILL/SKILL.md")
+COPY_HASH=$(file_hash "$CHOSEN_WORKSPACE/skill-under-test/SKILL.md")
 assert "Invariant: Original skill unchanged (hashes match)" "$([ "$ORIGINAL_HASH" = "$COPY_HASH" ]; echo $?)"
 
 echo ""
@@ -132,9 +151,9 @@ echo "--- Test Group 4: Apply Back Gate ---"
 echo "# Improved Mock Skill" > "$CHOSEN_WORKSPACE/skill-under-test/SKILL.md"
 
 # Apply back: copy workspace version to original
-ORIGINAL_BEFORE=$(md5 -q "$MOCK_SKILL/SKILL.md")
+ORIGINAL_BEFORE=$(file_hash "$MOCK_SKILL/SKILL.md")
 cp "$CHOSEN_WORKSPACE/skill-under-test/SKILL.md" "$MOCK_SKILL/SKILL.md"
-ORIGINAL_AFTER=$(md5 -q "$MOCK_SKILL/SKILL.md")
+ORIGINAL_AFTER=$(file_hash "$MOCK_SKILL/SKILL.md")
 assert "Apply back changes the original" "$([ "$ORIGINAL_BEFORE" != "$ORIGINAL_AFTER" ]; echo $?)"
 
 # Read original_skill_path from state.json (simulating resume scenario)
