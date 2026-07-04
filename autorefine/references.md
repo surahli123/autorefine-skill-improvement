@@ -1509,6 +1509,19 @@ Critique: 1. Criterion check: [state whether the criterion is met] 2. Evidence: 
 Result: Pass or Fail
 ```
 
+### Empty-correct guard (absence-detecting judges)
+
+For a judge that FAILs work for *omitting* something (e.g. a failed-approaches judge that fails a handover missing its failed approaches): if the work **credibly had no such thing to report** — e.g. it states "no failed approaches — the first attempt worked" — the criterion is **N/A**, and the judge must treat it as **PASS, NOT FAIL**. A perfect handover for failure-free work has no failed approaches to drop; penalizing it as if it dropped them is a rubric error, not a caught defect. Only FAIL when the work HAD the thing and omitted it. This closes the CASE-F rubric gap (a correct "no failures — first try worked" handover wrongly FAILed by a strict failed-approaches rubric).
+
+**Credibility condition (guard against a lying-empty exploit).** Honor a "no failures" claim as N/A ONLY when the handover is internally consistent with it — it shows no mention of retries, iterations, earlier or abandoned attempts, error messages, or debugging anywhere else. If a handover claims "first try worked" yet elsewhere references debugging, a retry, a fix, or a prior attempt, the claim is NOT credible → do NOT grant N/A; evaluate the failed-approaches criterion normally (a dropped-failures handover that keeps such traces is a FAIL, not an N/A). Residual limit: a fully self-consistent handover that silently deleted its failures and left no trace cannot be distinguished from genuine no-failure work by a text-only judge — this check catches the common self-contradicting case, not the perfectly-consistent liar (documented in the adversarial round-2 residual caveats).
+
+**PASS few-shot — no failures (empty-correct):**
+```
+Input: "Goal: add a health-check endpoint. No failed approaches — the first attempt worked; the route and its test passed on the first run. Current state: endpoint live, test green, ready to hand off."
+Critique: 1. Criterion check: the failed-approaches criterion is N/A — the work credibly had no failures to report. 2. Evidence: "No failed approaches — the first attempt worked"; a single clean attempt with a passing test, no abandoned attempts. 3. Verdict link: nothing was tried-and-failed, so there is nothing to omit — the empty-correct guard makes this PASS, not FAIL.
+Result: Pass
+```
+
 ---
 
 ## TPR/TNR Reference
