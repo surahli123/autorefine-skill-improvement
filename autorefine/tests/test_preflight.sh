@@ -6,6 +6,7 @@
 PASS=0
 FAIL=0
 TOTAL=0
+PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 assert() {
   TOTAL=$((TOTAL + 1))
@@ -18,6 +19,32 @@ assert() {
     FAIL=$((FAIL + 1))
     echo "  ✗ FAIL: $desc"
   fi
+}
+
+# Portable content hash for equality checks. CI (Ubuntu) has no BSD `md5`;
+# macOS has no GNU `md5sum` by default. We only compare hashes for equality
+# within a single run, so any consistently-available algorithm works. `shasum`
+# ships on both macOS and Ubuntu, so both platforms take the same first branch.
+# Fails loudly (return 1, empty stdout) if the selected tool errors or the file
+# is missing — callers must treat an empty result as failure, never as a match.
+file_hash() {
+  local out
+  if command -v shasum >/dev/null 2>&1; then
+    out=$(shasum -a 256 "$1") || return 1
+  elif command -v sha256sum >/dev/null 2>&1; then
+    out=$(sha256sum "$1") || return 1
+  elif command -v md5sum >/dev/null 2>&1; then
+    out=$(md5sum "$1") || return 1
+  elif command -v md5 >/dev/null 2>&1; then
+    out=$(md5 -q "$1") || return 1
+  else
+    echo "file_hash: no hash tool (shasum/sha256sum/md5sum/md5) found" >&2
+    return 1
+  fi
+  # Keep only the hash field; *sum tools append "  <filename>", md5 -q does not.
+  out=${out%% *}
+  [ -n "$out" ] || return 1
+  printf '%s\n' "$out"
 }
 
 MOCK_SKILL="/tmp/autorefine-test/mock-skill"
@@ -80,9 +107,16 @@ assert "Step 0.6: state.json has original_skill_path" "$(grep -q 'original_skill
 assert "Step 0.6: state.json has workspace_path" "$(grep -q 'workspace_path' "$CHOSEN_WORKSPACE/state.json"; echo $?)"
 
 # Verify: original skill NOT modified
-ORIGINAL_HASH=$(md5 -q "$MOCK_SKILL/SKILL.md")
-COPY_HASH=$(md5 -q "$CHOSEN_WORKSPACE/skill-under-test/SKILL.md")
-assert "Invariant: Original skill unchanged (hashes match)" "$([ "$ORIGINAL_HASH" = "$COPY_HASH" ]; echo $?)"
+ORIGINAL_HASH=$(file_hash "$MOCK_SKILL/SKILL.md")
+COPY_HASH=$(file_hash "$CHOSEN_WORKSPACE/skill-under-test/SKILL.md")
+# -n guards prevent a vacuous pass: two empty strings would otherwise compare equal.
+assert "Invariant: Original skill unchanged (hashes match)" "$([ -n "$ORIGINAL_HASH" ] && [ -n "$COPY_HASH" ] && [ "$ORIGINAL_HASH" = "$COPY_HASH" ]; echo $?)"
+
+# Negative guard for file_hash itself: a missing file must FAIL (non-zero) and
+# emit nothing, so the equality asserts here can never pass on empty strings.
+MISSING_HASH=$(file_hash "/nonexistent/path/SKILL.md"); MISSING_RC=$?
+assert "file_hash fails (non-zero) on missing file" "$([ "$MISSING_RC" -ne 0 ]; echo $?)"
+assert "file_hash emits no hash on missing file" "$([ -z "$MISSING_HASH" ]; echo $?)"
 
 echo ""
 
@@ -131,10 +165,10 @@ echo "--- Test Group 4: Apply Back Gate ---"
 echo "# Improved Mock Skill" > "$CHOSEN_WORKSPACE/skill-under-test/SKILL.md"
 
 # Apply back: copy workspace version to original
-ORIGINAL_BEFORE=$(md5 -q "$MOCK_SKILL/SKILL.md")
+ORIGINAL_BEFORE=$(file_hash "$MOCK_SKILL/SKILL.md")
 cp "$CHOSEN_WORKSPACE/skill-under-test/SKILL.md" "$MOCK_SKILL/SKILL.md"
-ORIGINAL_AFTER=$(md5 -q "$MOCK_SKILL/SKILL.md")
-assert "Apply back changes the original" "$([ "$ORIGINAL_BEFORE" != "$ORIGINAL_AFTER" ]; echo $?)"
+ORIGINAL_AFTER=$(file_hash "$MOCK_SKILL/SKILL.md")
+assert "Apply back changes the original" "$([ -n "$ORIGINAL_BEFORE" ] && [ -n "$ORIGINAL_AFTER" ] && [ "$ORIGINAL_BEFORE" != "$ORIGINAL_AFTER" ]; echo $?)"
 
 # Read original_skill_path from state.json (simulating resume scenario)
 RESTORED_PATH=$(python3 -c "import json; print(json.load(open('$CHOSEN_WORKSPACE/state.json'))['original_skill_path'])")
@@ -148,7 +182,7 @@ echo ""
 # --- Test Group 5: No autoresearch-<skill> patterns remain ---
 echo "--- Test Group 5: Naming Convention Audit ---"
 
-SKILL_MD="/Users/surahli/Documents/projects/skill-improvement/autorefine/SKILL.md"
+SKILL_MD="$PROJECT_ROOT/autorefine/SKILL.md"
 if [ -f "$SKILL_MD" ]; then
   LEGACY_COUNT=$(grep -c 'autoresearch-<skill>' "$SKILL_MD" 2>/dev/null; true)
   LEGACY_COUNT=${LEGACY_COUNT:-0}
@@ -361,8 +395,8 @@ echo ""
 # --- Test Group 11: Placeholder Consistency Audit ---
 echo "--- Test Group 11: Placeholder Audit ---"
 
-SKILL_MD="/Users/surahli/Documents/projects/skill-improvement/autorefine/SKILL.md"
-REF_MD="/Users/surahli/Documents/projects/skill-improvement/autorefine/references.md"
+SKILL_MD="$PROJECT_ROOT/autorefine/SKILL.md"
+REF_MD="$PROJECT_ROOT/autorefine/references.md"
 if [ -f "$SKILL_MD" ] && [ -f "$REF_MD" ]; then
   # No [chosen-workspace] outside Preflight (lines 1-36)
   OUTSIDE_PREFLIGHT=$(sed -n '37,$p' "$SKILL_MD" | grep -c '\[chosen-workspace\]'; true)
@@ -588,7 +622,7 @@ print(bad)
 assert "Registry: sections_explored has count, best_delta, last_tried" "$([ "$SECTION_OK" -eq 0 ]; echo $?)"
 
 # Test: references.md has Derived Mutation Registry section
-REF_MD="/Users/surahli/Documents/projects/skill-improvement/autorefine/references.md"
+REF_MD="$PROJECT_ROOT/autorefine/references.md"
 assert "Registry: references.md has Derived Mutation Registry section" "$(grep -q 'Derived Mutation Registry' "$REF_MD"; echo $?)"
 
 echo ""

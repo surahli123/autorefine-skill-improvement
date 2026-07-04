@@ -6,11 +6,12 @@ PASS=0
 FAIL=0
 TOTAL=0
 
-SKILL_MD="/Users/surahli/Documents/projects/skill-improvement/autorefine/SKILL.md"
-GULF1_MD="/Users/surahli/Documents/projects/skill-improvement/autorefine/references/gulf1-comprehension.md"
-GULF2_MD="/Users/surahli/Documents/projects/skill-improvement/autorefine/references/gulf2-specification.md"
-GULF3_MD="/Users/surahli/Documents/projects/skill-improvement/autorefine/references/gulf3-generalization.md"
-REF_MD="/Users/surahli/Documents/projects/skill-improvement/autorefine/references.md"
+PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+SKILL_MD="$PROJECT_ROOT/autorefine/SKILL.md"
+GULF1_MD="$PROJECT_ROOT/autorefine/references/gulf1-comprehension.md"
+GULF2_MD="$PROJECT_ROOT/autorefine/references/gulf2-specification.md"
+GULF3_MD="$PROJECT_ROOT/autorefine/references/gulf3-generalization.md"
+REF_MD="$PROJECT_ROOT/autorefine/references.md"
 
 assert() {
   TOTAL=$((TOTAL + 1))

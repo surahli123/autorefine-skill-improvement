@@ -7,7 +7,7 @@ PASS=0
 FAIL=0
 TOTAL=0
 
-ROOT="/Users/surahli/Documents/projects/skill-improvement/autorefine"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)/autorefine"
 MAIN_SKILL="$ROOT/SKILL.md"
 GULF1="$ROOT/references/gulf1-comprehension.md"
 GULF2="$ROOT/references/gulf2-specification.md"
@@ -51,12 +51,13 @@ assert "references.md defines Pattern-to-Evaluation-Strategy Selector section" \
   "$(grep -q '^### Pattern-to-Evaluation-Strategy Selector' "$REF_MD"; echo $?)"
 assert "references.md defines Strategy Definitions section" \
   "$(grep -q '^### Strategy Definitions' "$REF_MD"; echo $?)"
-python3 - <<'PY'
+REF_MD="$REF_MD" python3 - <<'PY'
 from pathlib import Path
+import os
 import re
 import sys
 
-text = Path("/Users/surahli/Documents/projects/skill-improvement/autorefine/references.md").read_text()
+text = Path(os.environ["REF_MD"]).read_text()
 match = re.search(
     r"### Pattern-to-Evaluation-Strategy Selector\n(.*?)\n### Pattern Identification Section",
     text,
@@ -81,11 +82,12 @@ if mapping != expected or len(rows) != len(expected):
 sys.exit(0)
 PY
 assert "selector maps all 5 canonical patterns to exactly one strategy id" "$?"
-python3 - <<'PY'
+REF_MD="$REF_MD" python3 - <<'PY'
 from pathlib import Path
+import os
 import sys
 
-text = Path("/Users/surahli/Documents/projects/skill-improvement/autorefine/references.md").read_text()
+text = Path(os.environ["REF_MD"]).read_text()
 required = [
     "`tool_wrapper_eval_strategy`",
     "`generator_eval_strategy`",
