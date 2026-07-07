@@ -16,8 +16,7 @@ from pathlib import Path
 from unittest import mock
 
 
-# Same loader pattern as test_campaign_orchestrator_py.py: load the script as
-# a module via importlib because the filename has hyphens.
+# Load the script as a module via importlib because the filename has hyphens.
 SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 _spec = importlib.util.spec_from_file_location(
     "render_phase7_status",
