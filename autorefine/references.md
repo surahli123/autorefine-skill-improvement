@@ -1791,6 +1791,8 @@ The aggregation engine emits `decision_breakdown` for baseline and every mutatio
   "combined_score": 0.787,
   "combined_score_pct": 78.7,
   "threshold": 0.8,
+  "noise_floor": 0.021,
+  "margin": -0.034,
   "proposed_decision": "discard"
 }
 ```
@@ -1800,7 +1802,9 @@ The aggregation engine emits `decision_breakdown` for baseline and every mutatio
 - `total_weight`: denominator used to normalize the score.
 - `combined_score`: canonical keep/discard score in 0-1 form.
 - `combined_score_pct`: same score in percent for user presentation.
-- `threshold`: keep/discard threshold used for the recommendation.
+- `threshold`: base keep/discard threshold used for the recommendation before applying the run-level `noise_floor`.
+- `noise_floor`: the run-level scalar noise threshold applied in this decision, recorded at decision time so `margin` is reconstructable from the stored record alone.
+- `margin`: signed keep/discard headroom, computed as `margin = combined_score - (threshold + noise_floor)` using the run-level `noise_floor` derived from Experiment 0 baseline trials — the scalar noise threshold (the same quantity recorded as `combined_score_noise_threshold` in the Session Close trust artifact), not the full baseline-variance summary object. A kept result with `margin < 0.05` (default borderline band — a calibration default, overridable when the measured noise profile justifies a different band) is labeled `borderline` instead of high-confidence.
 - `proposed_decision`: `baseline`, `keep`, or `discard`.
 
 ### decision_explanation fields
@@ -3032,7 +3036,7 @@ Read when: something goes wrong, or starting a session.
 ## When AutoRefine Doesn't Help
 
 1. **Phase 1 passes but skill is bad.** Design audit checks structure, not logic. Skip to Phase 3.
-2. **Phase 3 fail rate <20%.** Fixtures too easy or reviewer too generous. Add harder inputs.
+2. **Phase 3 fail rate <30%.** Treat this as low-headroom evidence: fixtures may be too easy, the reviewer may be too generous, or the target may already be genuinely strong. Add harder inputs before interpreting Phase 7 gains as meaningful.
 3. **AutoResearch plateaus after 3+ experiments.** Evals may not discriminate, or failure needs architectural change.
 4. **Fixtures don't represent real usage.** Include 3-5 "ugly" real-world inputs.
 
@@ -4021,8 +4025,9 @@ Example: 5 evals, 3 code (weight 1.0 each) + 2 agent (weights 0.92, 0.70). Mutat
 
 Every scored experiment must emit:
 - per eval: `weight`, `weight_source`, `weighted_points`, `normalized_contribution`
-- aggregate: `decision_breakdown.weighted_points`, `decision_breakdown.total_weight`, `decision_breakdown.combined_score`, `decision_breakdown.threshold`
+- aggregate: `decision_breakdown.weighted_points`, `decision_breakdown.total_weight`, `decision_breakdown.combined_score`, `decision_breakdown.threshold`, `decision_breakdown.margin`
 - timing: populate `decision_breakdown` immediately when scoring completes, before regression checks, explainer rendering, or user override. The field must contain both the intermediate per-eval math copied into `components[]` and the final aggregate used for the keep/discard recommendation.
+- margin: compute `decision_breakdown.margin` as `combined_score - (threshold + noise_floor)` so the recommendation records the noise-gated keep bar, not only the raw threshold.
 
 Mini mode uses the same structure, but `weight_source` is `mini_mode_code_default` or `mini_mode_agent_discount`.
 
@@ -4055,7 +4060,8 @@ Experiment 3: 78.7% (▲ +11.5pp vs baseline)
   weighted_points: 3.70
   total_weight: 4.70
   combined_score: 78.7%
-  keep/discard threshold: 80.0%
+  keep/discard threshold + noise_floor: 82.1% (80.0% + 2.1pp)
+  decision_breakdown.margin: -3.4pp
   proposed_decision: discard
 ```
 
@@ -4064,6 +4070,7 @@ Rules:
 - Persist the explainer rows as `decision_breakdown.components[]` in the same order they are shown to the user.
 - `normalized_contribution` always uses the shared denominator `total_weight`.
 - `combined_score` is the score used for keep/discard. Do not switch to raw pass count in the presentation.
+- The keep bar is `threshold + noise_floor`, and `decision_breakdown.margin` is `combined_score - (threshold + noise_floor)`.
 - In Mini mode, keep the same layout and swap in the simplified weight sources.
 
 ---

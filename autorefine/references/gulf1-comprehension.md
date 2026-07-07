@@ -554,7 +554,7 @@ Close the Gulf of Comprehension. **Most important phase. CANNOT BE AUTOMATED.**
 **Step 7: Generate eval suite.** Convert top failures into binary evals. Write `eval-suite.md`. Format: `references.md > Eval Suite Template`.
 
 ### Gate: Gulf 1 Exit
-Generate `gate-report-gulf-1.md` with: sample stats, fail rate, categories, consistency flags, proposed evals. Append to session-log.json: `{"phase":"gate_1","type":"gate_decision","detail":"APPROVED"}` (or REJECTED). **Override logging:** if user removes evals or rejects categories, also append: `{"phase":"gate_1","type":"override","detail":"Removed E4","reason":"..."}`
+Generate `gate-report-gulf-1.md` with: sample stats, fail rate, categories, consistency flags, proposed evals, and a `headroom_advisory` block. If Phase 3 fail rate is <30% (default advisory threshold), the advisory must preserve both readings: the result may mean fixtures too easy or the reviewer too generous, and the target may already be a genuinely strong target. Recommend adding harder inputs before treating later gains as meaningful. This advisory is informational and non-blocking; it never auto-aborts the run. When fewer than 10 traces were reviewed, label the advisory `directional_only`; use decision-grade language only when the reviewed sample is large enough to support it. Append to session-log.json: `{"phase":"gate_1","type":"gate_decision","detail":"APPROVED"}` (or REJECTED). **Override logging:** if user removes evals or rejects categories, also append: `{"phase":"gate_1","type":"override","detail":"Removed E4","reason":"..."}`
 
 **STOP. Wait for user approval.**
 
