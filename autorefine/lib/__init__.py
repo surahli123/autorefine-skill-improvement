@@ -5,19 +5,6 @@ from .adapter_state import (
     AdapterStateValidation,
     validate_adapter_state,
 )
-from .campaign_readiness import (
-    CampaignReadiness,
-    CampaignReadinessStage,
-    assess_campaign_readiness,
-)
-from .campaign_planning import (
-    campaign_report,
-    validate_campaign_manifest,
-)
-from .gate_pack import (
-    prepare_campaign_gate_pack,
-    prepare_workspace_gate_pack,
-)
 from .gulf_trace_record import (
     MAX_CARRY_BYTES as GULF_TRACE_MAX_CARRY_BYTES,
     accumulate_anthropic_stream,
@@ -240,15 +227,11 @@ __all__ = [
     "SourceParserAdapterError",
     "StructureExtractionError",
     "TacticExtractionError",
-    "CampaignReadiness",
-    "CampaignReadinessStage",
     "GULF_TRACE_MAX_CARRY_BYTES",
     "assemble_normalized_research_corpus",
     "accumulate_anthropic_stream",
     "accumulate_openai_stream",
     "append_chunk_lines",
-    "assess_campaign_readiness",
-    "campaign_report",
     "build_research_corpus_view_from_storage",
     "build_mutation_candidate_relevance_rubric",
     "build_mutation_candidate_relevance_rubrics",
@@ -289,8 +272,6 @@ __all__ = [
     "lookup_persisted_pattern",
     "normalize_preference_signal_payload",
     "persist_style_preferences_detection_to_run_state",
-    "prepare_campaign_gate_pack",
-    "prepare_workspace_gate_pack",
     "query_persisted_patterns",
     "resolve_exemplar_selection_config",
     "resolve_exemplar_source_configs",
@@ -306,6 +287,5 @@ __all__ = [
     "scrub_json",
     "select_exemplar_skill_records",
     "validate_adapter_state",
-    "validate_campaign_manifest",
     "DEFAULT_MUTATION_CANDIDATE_RELEVANCE_WEIGHTS",
 ]

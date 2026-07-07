@@ -425,3 +425,7 @@ Adapter contract + workspace schema
 - Non-search skills still work without requiring domain adapters.
 - AutoRefine preserves its current trust-first philosophy while becoming more domain-capable.
 - The adapter model is simple enough that adding a second domain feels incremental rather than architectural.
+
+## 2026-07-06 U8 Removal Decision
+
+- Deleted the campaign/gate-pack orchestrator family from the public AutoRefine bundle per owner decision Q2a; recovery remains available through git history.
