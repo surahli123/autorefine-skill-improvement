@@ -193,7 +193,7 @@ if [ -f "$SKILL_MD" ]; then
   WORKSPACE_REFS=${WORKSPACE_REFS:-0}
   assert "Workspace path references exist (>5 expected)" "$([ "$WORKSPACE_REFS" -gt 5 ]; echo $?)"
 else
-  echo "  ⚠ SKILL.md not found at expected path — skipping naming audit"
+  echo "SKIP: autorefine/SKILL.md not found at expected path (naming audit not run)"
 fi
 
 echo ""
