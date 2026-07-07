@@ -261,9 +261,9 @@ Present each mutation to the user with the Aggregation Explainer (diff, score ch
 *Why this step:* "You're seeing your skill get better. But bootstrap evals are rough — a passing mutation might miss subtle regressions. Standard mode builds evals you can trust."
 
 ### QS Step 5: Results + Handoff (2 min)
-Show before/after comparison. All results labeled "directional improvement, not validated."
+Show before/after comparison using `references.md > Quick Start > Directional Results Template`. All results labeled "directional improvement, not validated."
 
-**State update:** In state.json, set `quick_start.completed = true` with metadata (traces, evals, mutations, timestamp). Keep `gates.gulf_1` and `gates.gulf_2` as `"pending"`. Set `current_phase: 0` (integer — 0 means Quick Start complete; phases 1-7 use integers 1-7). Set `phases.design_audit: "complete"` (Phase 1 was run). Keep `schema_version` at 4 (do NOT downgrade).
+**State update:** In state.json, set `quick_start.completed = true` with metadata (traces, evals, mutations, timestamp), using `references.md > Quick Start > State Schema` as the shape check. Keep `gates.gulf_1` and `gates.gulf_2` as `"pending"`. Set `current_phase: 0` (integer — 0 means Quick Start complete; phases 1-7 use integers 1-7). Set `phases.design_audit: "complete"` (Phase 1 was run). Keep `schema_version` at 4 (do NOT downgrade).
 
 **Handoff:** "Your skill is better. Here's what Standard gives you: validated evals with TPR/TNR, a full failure taxonomy, and confidence-weighted optimization. Everything you just built carries forward — Standard extends this workspace."
 
@@ -549,7 +549,7 @@ Close the Gulf of Comprehension. **Most important phase. CANNOT BE AUTOMATED.**
 
 **Mid-phase resume:** Track `traces_reviewed` and `sampled_trace_ids` in state.json.
 
-**Step 6: Build failure taxonomy.** Cluster failure notes into categories — let them EMERGE. If <3 failures in sample, review additional traces. Write `failure-taxonomy.md`.
+**Step 6: Build failure taxonomy.** Cluster failure notes into categories — let them EMERGE. If <3 failures in sample, review additional traces. Write `failure-taxonomy.md` using `references.md > Failure Taxonomy Template`.
 
 **Step 7: Generate eval suite.** Convert top failures into binary evals. Write `eval-suite.md`. Format: `references.md > Eval Suite Template`.
 

@@ -48,7 +48,7 @@ done
 
 GOTCHAS="$(slice_ref '^## Gotchas$' '^## Failure Taxonomy Template$')"
 DECISION_BREAKDOWN="$(slice_ref '^### decision_breakdown fields$' '^### decision_explanation fields$')"
-AGG_EXPLAINER="$(slice_ref '^## Aggregation Explainer Template$' '^## Loop-Back Protocol$')"
+AGG_EXPLAINER="$(slice_ref '^## Aggregation Explainer Template$' '^## Gotcha Taxonomy$')"
 GULF1_EXIT="$(awk '/^### Gate: Gulf 1 Exit/{f=1} f && /^---$/{f=0} f{print}' "$GULF1")"
 GULF3_PHASE7="$(awk '/^## Phase 7: AutoResearch Loop/{f=1} f{print}' "$GULF3")"
 

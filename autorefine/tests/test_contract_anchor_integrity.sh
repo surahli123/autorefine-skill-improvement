@@ -81,6 +81,73 @@ assert "iter_run_record order start < initstate_end < full_end (${S:-?} < ${I:-?
   "$([ -n "$S" ] && [ -n "$I" ] && [ -n "$F" ] && [ "$S" -lt "$I" ] && [ "$I" -lt "$F" ]; echo $?)"
 echo ""
 
+echo "--- Test Group 4: references.md section headings have inbound pointers ---"
+ORPHAN_HEADINGS="$(python3 - "$PROJECT_ROOT" <<'PY'
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+ref_md = root / "autorefine" / "references.md"
+whitelist = {
+    "Gotchas",
+    "When AutoRefine Doesn't Help",
+}
+
+headings = []
+in_fence = False
+fence_marker = ""
+for line_no, line in enumerate(ref_md.read_text(encoding="utf-8").splitlines(), 1):
+    stripped = line.lstrip()
+    if stripped.startswith(chr(96) * 3) or stripped.startswith("~~~"):
+        marker = stripped[:3]
+        if not in_fence:
+            in_fence = True
+            fence_marker = marker
+        elif marker == fence_marker:
+            in_fence = False
+            fence_marker = ""
+        continue
+    if not in_fence and line.startswith("## ") and not line.startswith("###"):
+        headings.append((line_no, line[3:].strip()))
+
+search_files = [root / "autorefine" / "SKILL.md", ref_md]
+for rel in [
+    "autorefine/references",
+    "autorefine/lib",
+    "autorefine/scripts",
+    "autorefine/tests",
+]:
+    directory = root / rel
+    if directory.exists():
+        search_files.extend(path for path in directory.rglob("*") if path.is_file())
+
+orphans = []
+for line_no, heading in headings:
+    if heading in whitelist:
+        continue
+    needle = f"references.md > {heading}"
+    inbound_count = 0
+    for path in search_files:
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        inbound_count += text.count(needle)
+    if inbound_count == 0:
+        orphans.append((line_no, heading))
+
+for line_no, heading in orphans:
+    print(f"{line_no}: {heading}")
+PY
+)"
+if [ -n "$ORPHAN_HEADINGS" ]; then
+  echo "Orphan headings with zero inbound references.md > <heading> pointers:"
+  echo "$ORPHAN_HEADINGS"
+fi
+assert "all non-whitelisted references.md headings have inbound pointers" \
+  "$([ -z "$ORPHAN_HEADINGS" ]; echo $?)"
+echo ""
+
 echo "=== Results: $PASS/$TOTAL passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ] && echo "ALL TESTS PASSED" || echo "SOME TESTS FAILED"
 exit $FAIL
