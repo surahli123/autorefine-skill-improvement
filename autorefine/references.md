@@ -28,7 +28,7 @@ Workspace directories for new runs are `traces/`, `judges/`, `runs/`, `skill-ver
 - `current_run_id`: null, or the unique iteration-run identifier for the active Phase 7 execution (for example `run_2026-04-03T14-30-00`). Set exactly once by the single iteration-start trigger at Phase 7 start. Resume/load should use this ID to reopen the matching run record in `results.json.iteration_runs[]` before reading iteration artifacts.
 - `current_run_path`: null, or relative path to the current Phase 7 run directory (e.g., `runs/run_2026-04-03T14-30-00/`). Set at Phase 7 start, updated on loop-back. Used by resume to identify which run directory to read `decision.md` files from.
 - `current_experiment`: null, or the active Phase 7 experiment slot. Set `current_experiment = 0` for the baseline-in-progress slot when a new iteration run starts, before any `iteration_000/` artifacts exist. Resume/checkpoint flows should use this field together with `current_run_path` to reopen the active baseline or mutation slot instead of guessing from directory scans.
-- `iteration_state`: null, or `{"run_id":"run_...","run_path":"runs/run_.../","experiment_id":0,"active_phase":"eval|mutate|test|session_close","phase_status":"running|ready|completed|blocked","last_eval_status":"completed|invalid|blocked|null","last_eval_results_ref":"runs/.../iteration_000/eval_results.json|null","last_mutation_status":"completed|skipped|invalid|blocked|null","last_mutation_results_ref":"runs/.../iteration_001/mutation.md|null","next_action":"phase7_baseline_eval|phase7_mutation_analysis|phase7_test_phase|phase7_session_close|null"}`. This is the canonical runner handoff record for the active Phase 7 run.
+- `iteration_state`: null, or `{"run_id":"run_...","run_path":"runs/run_.../","experiment_id":0,"active_phase":"eval|mutate|test|session_close","phase_status":"running|ready|completed|blocked","last_eval_status":"completed|invalid|blocked|null","last_eval_results_ref":"runs/.../iteration_000/eval_results.json|null","last_mutation_status":"completed|skipped|invalid|blocked|null","last_mutation_results_ref":"runs/.../iteration_001/mutation.md|null","next_action":"phase7_baseline_eval|phase7_mutation_analysis|phase7_test_phase|phase7_session_close|null"}`. This is the canonical runner handoff record for the active Phase 7 run; use `references.md > Iteration State Schema` for the full transition contract.
 - On the iteration-start write, initialize `iteration_state` with the new `run_id`, `run_path`, `experiment_id = 0`, `active_phase = "eval"`, `phase_status = "running"`, `last_eval_status = null`, `last_eval_results_ref = null`, and `next_action = "phase7_baseline_eval"`.
 - When the baseline eval finishes and `iteration_000/eval_results.json` exists, update the same `iteration_state` object to `active_phase = "mutate"`, `phase_status = "ready"`, `last_eval_status = "completed"`, `last_eval_results_ref = "runs/.../iteration_000/eval_results.json"`, and `next_action = "phase7_mutation_analysis"`. This is the explicit eval-to-mutate handoff for the same run; do not create a new `run_id`, `run_path`, or run record.
 - When later mutation evals finish, overwrite `iteration_state.experiment_id`, `last_eval_status`, and `last_eval_results_ref` for the current `iteration_<NNN>/eval_results.json` while keeping the same run identifiers. Resume/load should reopen the latest eval artifact from this object instead of rescanning directories.
@@ -2355,7 +2355,7 @@ Persist every finalized baseline and every generated mutation candidate as an im
 - `parent_version_id` is null for the Experiment 0 baseline artifact and otherwise points to the active carried-forward baseline artifact that the new candidate mutated from.
 - `root_version_id` is the stable lineage root for this snapshot. Experiment 0 points to itself; descendants inherit the root from the source version they mutated from.
 - `lineage_depth` is the distance from `root_version_id` in parent-child hops (`0` for the baseline root, `1` for its direct child, and so on).
-- `lineage_store_path` is always `skill-versions/lineage.json`. This store records `child_version_ids[]` on parent nodes so lineage history can be queried and traversed without mutating older version directories.
+- `lineage_store_path` is always `skill-versions/lineage.json`. This store records `child_version_ids[]` on parent nodes so lineage history can be queried and traversed without mutating older version directories. Use `references.md > Skill Version Lineage Store Schema` for the store object and traversal rules.
 - `snapshot_sha256` is computed from the exact bytes written to `snapshot_path`.
 - `created_at` is the write timestamp for the version artifact. Once written, do not mutate or overwrite the artifact directory.
 - If `artifact_path` already exists, stop with a collision error instead of rewriting the artifact.
@@ -3051,63 +3051,6 @@ Read when: Phase 3 Step 6.
 1. [Category Name] — [description] — observed in N/M traces
 2. [Category Name] — [description] — observed in N/M traces
 ```
-
----
-
-## Judge Execution Procedure
-
-Read when: Phase 6 (running judges) or Phase 7 (scoring experiments).
-
-To run an agent-as-judge eval:
-1. Read `judges/judge-E{N}-{name}.md` (the judge prompt)
-2. Read the fixture file being evaluated
-3. Output: `Critique: 1. Criterion check: ... 2. Evidence: ... 3. Verdict link: ...` then `Result: Pass or Fail`
-
-Dispatch as a subagent or evaluate in main context. Run judges sequentially (not parallel) to avoid context contamination. Normalize the critique into `reasoning_trace` exactly as written so every stored verdict preserves the same ordered explanation shape, extract `evidence[]` using `Judge Verdict Evidence Schema` so the stored verdict has machine-readable citations instead of free-form notes, and extract `supporting_items[]` using `Judge Decision Support Schema` so each material judgment call is tied to the exact evidence objects that supported it. During verdict assembly, create or update one verdict object per eval and attach the extracted `supporting_items[]` to that same verdict object before reading the next judge result. If a judge emits `Result: Pass` or `Result: Fail` without extractable evidence, log `invalid_verdict_missing_evidence`, do not write that verdict into `eval_results[]`, and re-run or fail the eval instead of silently accepting it. Preserve that assembled verdict unchanged in the final judge output (`eval_results[]`, iteration `eval_results.json`, and any stored verdict artifact).
-
-### Eval-Task File Format (Phase 7 Tier 1 Verification Isolation)
-
-Read when: Phase 7 step 2b, Tier 1 subagent dispatch.
-
-Write to `[workspace]/eval-tasks/exp{N}-E{M}.md`:
-```markdown
-# Eval Task: E{M} — {eval name}
-
-## Judge Prompt
-{contents of judges/judge-E{M}-{name}.md}
-
-## Fixture Input
-{fixture content}
-
-## Skill Output to Evaluate
-{the mutated skill's output for this fixture}
-
-## Instructions
-Evaluate the Skill Output above against the Judge Prompt criteria.
-Output: Critique: 1. Criterion check: ... 2. Evidence: ... 3. Verdict link: ... then Result: Pass or Fail
-```
-
-Do NOT include: baseline output, mutation hypothesis, Phase 1-3 findings, or any reasoning about why changes were made. The subagent receiving this file should have zero context about the mutation intent.
-
-### Preferences File Format (Ambient Learning)
-
-Read when: Ambient learning check on resume, or Phase 7 step 2a when the already-hydrated `style_preferences.resolved_preferences_path` needs human-readable wording/evidence.
-
-`[workspace]/preferences.md`:
-```markdown
-# User Preferences (ambient learning)
-
-## Preference 1 (captured: YYYY-MM-DD)
-RULE: [one-sentence preference]
-EVIDENCE: [removed text] → [added text]
-CONFIDENCE: high | medium
-
-## Preference 2 (captured: YYYY-MM-DD)
-...
-```
-
-Phase 7 should steer mutation hypotheses from the hydrated `style_preferences` envelope first. Reopen this file only through `style_preferences.resolved_preferences_path` when the human-readable wording/evidence must be shown or cited, and do NOT propose changes that contradict learned preferences.
-Whenever mid-session preference detection runs, refresh `state.json.mid_session_preference_signals_path` and `results.json.mid_session_preference_signals_path` to this ledger location so later scan passes, resumes, and exports reopen the same artifact without guessing. When a new rule is confirmed, append it here immediately and keep mirroring the same human-readable artifact path.
 
 ---
 
@@ -3981,36 +3924,6 @@ The artifact stays markdown-first for weak agents, but every persisted row below
 ---
 
 <!-- CONTRACT-ANCHOR:research_intake_stage:end -->
-## Judge Validation Report Format
-
-Read when: Phase 6 Step 5.
-
-```
-| Judge | Dev TPR | Dev TNR | Test TPR | Test TNR | Status |
-|-------|---------|---------|----------|----------|--------|
-| E1: Name | 92% | 88% | 89% | 85% | APPROVED |
-```
-
----
-
-## Per-Phase State Fields
-
-Read when: updating state.json after a phase.
-
-| Phase | Fields to record |
-|-------|-----------------|
-| 1 | `design_audit: "complete"`, `skill_pattern`, `phase1_context.selected_skill_pattern` |
-| 1 | `design_audit: "complete"`, `skill_pattern`, `phase1_context.selected_skill_pattern`, `phase1_context.selected_eval_strategy_id` |
-| 2 | `eval_audit: "complete"` |
-| 3 | `traces_reviewed, sampled_trace_ids, sampling_strategy, taxonomy_summary` |
-| 4 | `fixture_count, pass_count, fail_count, split_sizes, mutation_stage_split_access_policy` |
-| 5 | `code_eval_count, judge_eval_count` |
-| 6 | `validation_results` (TPR/TNR per judge) |
-| 6.5 | `research_intake.status`, `research_intake.target_skill_path`, `research_intake.target_domain`, `research_intake.requested_sources`, `research_intake.accepted_sources`, `research_intake.rejected_sources`, `research_intake_path` |
-| 7 | `current_experiment, best_score, consecutive_discards, circuit_breaker, completion_cadence` |
-
----
-
 ## Confidence-Weighted Scoring
 
 Read when: Phase 7 active.
@@ -4072,49 +3985,6 @@ Rules:
 - `combined_score` is the score used for keep/discard. Do not switch to raw pass count in the presentation.
 - The keep bar is `threshold + noise_floor`, and `decision_breakdown.margin` is `combined_score - (threshold + noise_floor)`.
 - In Mini mode, keep the same layout and swap in the simplified weight sources.
-
----
-
-## Loop-Back Protocol
-
-Read when: Loop-Back Prompt fires (≥2 judge_gap entries).
-
-**When `locked_judges` gets populated:** At Gulf 2 gate approval, record all approved judge IDs in `state.json.locked_judges`.
-
-**Append mode for Phase 5:**
-- Step 1: Skip classification of existing evals. Only classify NEW evals derived from judge gap reasons.
-- Step 2-3: Write only NEW judges. Do NOT modify locked judges.
-- Step 4: Append new judge files to `judges/`. Do not overwrite existing ones.
-
-**Phase 6 on loop-back:** Validate only judges NOT in `locked_judges`. Locked judges keep their prior TPR/TNR.
-
-**Phase 7 on loop-back:** Re-run with the expanded eval suite (old + new judges). Score may drop — this is more accurate measurement, not regression. Explain this to the user.
-
----
-
-## Hamel Integration Details
-
-Read when: `hamel_available` is true in state.json.
-
-### Phase 2: eval-audit
-Invoke for deeper analysis — flags class imbalance, stale analyses, recommends next skills.
-
-### Phase 3: error-analysis
-Adaptations: use 20-25 fixture outputs (not 100 production traces), manual clustering (smaller trace count), fixture diversity instead of random sampling.
-
-### Phase 3/4: generate-synthetic-data
-Dimension-based tuple generation: define 3 dimensions → draft 20 tuples → LLM generates more → convert to test inputs. Target 30-40 for skills (not 100).
-
-### Phase 5: write-judge-prompt
-Use for richer prompt engineering. Adapt: agent-as-judge instead of external API calls.
-
-### Phase 6: validate-evaluator
-Deeper calibration. Skip Rogan-Gladen correction and bootstrap CI (insufficient data for skills). Core protocol applies: dev iteration → test once → report TPR/TNR.
-
-### Phase 7: skill-creator subagents
-- **Grader** — structured pass/fail verdicts with evidence + eval critique
-- **Comparator** — blinded A/B testing between baseline and mutation
-- **Analyzer** — explains WHY winner won + prioritized improvement suggestions
 
 ---
 
@@ -6066,12 +5936,6 @@ Collapse by default — show only on user expansion. Highlight additions, deleti
 1. **Phase 7, after kept mutation:** Compare the just-kept version against the previous kept version (or baseline if this is v1). Append to the Aggregation Explainer output.
 2. **Session Close:** Compare v0 (baseline) against vN (final kept version). Part of the Version Comparison Summary.
 3. **On user request:** "Compare v2 and v4" — compute both versions from the registry and render the template.
-
----
-
-## External Compatibility Notes
-
-SKILL.md frontmatter is forward-compatible with the SkillClaw superset — Claude Code silently ignores `metadata.skillclaw.*`, `metadata.openclaw.*`, and the optional top-level `category` field. Verified 2026-04-21 via smoke test at `_skillclaw-compat-smoke-test`.
 
 ---
 
