@@ -15,14 +15,14 @@ Fast-fail checks. If ANY fail, STOP immediately with an actionable error message
 
 1. **Target skill path.** If user provided a path, use it. If not, ask: "Which skill should I improve? Provide the full path to the skill directory."
 2. **Target readable.** Run: `head -5 [skill-path]/SKILL.md`. If this fails → STOP: "I can't read your skill at [skill-path]. If you're in a sandboxed environment, copy your skill into my working directory first: `cp -r [skill-path] ./skill-under-test/` then re-invoke with `./skill-under-test/`"
-3. **Workspace location.** Ask the user (ONE question, wait for answer):
+3. **Workspace location.** Don't ask — default to (a) and name the path in your first status line. Use (b) or (c) only if the user named one:
    ```
    Where should I create the AutoRefine workspace?
      a) /tmp/autorefine-[skill-name]/  <- recommended (safe, no repo interference)
      b) Next to your skill: [skill-parent]/autorefine-[skill-name]/
      c) Custom path
    ```
-   Default to (a) if user says "whatever" or "default." NEVER create the workspace without this confirmation.
+   (a) is a fresh `/tmp` dir and the original skill is never touched (step 5), so no confirmation is needed.
 4. **Workspace writable.** Run: `mkdir -p [chosen-workspace] && touch [chosen-workspace]/.preflight-test && rm [chosen-workspace]/.preflight-test`. If this fails → STOP: "I can't write to [chosen-workspace]. Try option (a) /tmp/ which is always writable, or specify a different path."
 5. **Skill import.** Copy the entire skill directory into the workspace: `cp -r [skill-path]/ [chosen-workspace]/skill-under-test/`. All subsequent reads and writes operate ONLY on `[workspace]/skill-under-test/`, never on the original skill path. This protects the user's real skill from accidental modification.
 6. **Persist paths.** Record in state.json: `original_skill_path: [skill-path]`, `workspace_path: [chosen-workspace]`. These are needed for Session Close (Apply Back gate) and session resume.
@@ -98,7 +98,7 @@ Decision precedence:
 
 ## Initialize Workspace
 
-**Workspace path** was confirmed in Preflight Step 0. The workspace is at `[workspace]/` and the working copy of the skill is at `[workspace]/skill-under-test/`. (After Preflight, `[workspace]` = the path chosen in Step 0.3 and persisted in `state.json.workspace_path`.)
+**Workspace path** was set in Preflight Step 0. The workspace is at `[workspace]/` and the working copy of the skill is at `[workspace]/skill-under-test/`. (After Preflight, `[workspace]` = the path chosen in Step 0.3 and persisted in `state.json.workspace_path`.)
 
 If workspace `traces/`, `judges/`, `runs/`, `skill-versions/`, `contract/`, and `domain-eval/` subdirectories don't exist: create them. Generate these files (see `references.md > Workspace Schemas` for exact formats):
 - `state.json` — pipeline state (schema_version:4 for new workspaces — see `references.md > Workspace Schemas`)
@@ -245,7 +245,7 @@ Critical rules (full list in `references.md > Gotchas`):
 8. **Never write to the original skill path during the pipeline.** All work on `[workspace]/skill-under-test/`.
 9. **Sandbox environments block cross-directory access.** Use `/tmp/` as workspace workaround.
 10. **Agent-as-judge evals should not see mutation reasoning.** Tier 1 (subagent) = real isolation. Tier 2 (behavioral) = heuristic only.
-11. **Workspace location must be confirmed, never assumed.** Never create without asking.
+11. **Workspace defaults to `/tmp/autorefine-[skill-name]/`; never inside a repo unless the user names it.** The `/tmp` default needs no confirmation (fresh dir, original skill untouched).
 
 ---
 
